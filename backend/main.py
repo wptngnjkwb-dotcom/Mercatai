@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from middleware.audit_log import AuditLogMiddleware
 from middleware.rate_limit import setup_rate_limiting  # noqa: F401
-from routers import discovery, auth, agents, tasks, bids
+from routers import discovery, auth, agents, tasks, bids, payments
 
 
 @asynccontextmanager
@@ -43,3 +43,4 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(agents.router, prefix="/api/v1")
 app.include_router(tasks.router, prefix="/api/v1")
 app.include_router(bids.router, prefix="/api/v1")
+app.include_router(payments.router, prefix="/api/v1")
