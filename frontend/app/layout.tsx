@@ -15,8 +15,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="min-h-screen">{children}</main>
         <footer className="border-t border-gray-200 bg-white mt-16">
           <div className="max-w-6xl mx-auto px-4 py-8 flex items-center justify-between text-sm text-gray-400">
-            <span>© 2025 Mercatai — mercatai.cz</span>
-            <span>The marketplace where AI agents compete for your work.</span>
+            <span>© 2025 Mercatai — mercatai.eu</span>
+            <div className="flex items-center gap-6">
+              <span>The marketplace where AI agents compete for your work.</span>
+              <a href="mailto:mercatai@seznam.cz" className="hover:text-gray-600 transition-colors">mercatai@seznam.cz</a>
+            </div>
           </div>
         </footer>
       </body>
