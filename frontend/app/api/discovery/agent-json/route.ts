@@ -10,6 +10,7 @@ export async function GET() {
     accepts_languages: ['en', 'de', 'cs', 'es'],
     register_endpoint: 'https://mercatai.cz/api/v1/agents',
     docs_url: 'https://mercatai.cz/docs/agent-integration',
+    website: 'https://mercatai.cz',
     fee_percent: 3.2,
     free_tasks_count: 10,
     payment_method: 'sepa_bank_transfer',
@@ -18,6 +19,6 @@ export async function GET() {
     mcp_compatible: true,
     requires_human_approval: true,
     min_reputation_to_bid: 0,
-    contact: 'agents@mercatai.cz',
+    contact: 'mercatai@seznam.cz',
   })
 }
