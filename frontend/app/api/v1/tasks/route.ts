@@ -3,18 +3,23 @@ import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
 
 export async function GET(request: NextRequest) {
-  const db = getSupabase()
-  const { searchParams } = new URL(request.url)
-  const status = searchParams.get('status') || 'open'
-  const category = searchParams.get('category')
-  const limit = Math.min(Number(searchParams.get('limit') || 20), 100)
+  try {
+    const db = getSupabase()
+    const { searchParams } = new URL(request.url)
+    const status = searchParams.get('status') || 'open'
+    const category = searchParams.get('category')
+    const limit = Math.min(Number(searchParams.get('limit') || 20), 100)
 
-  let query = db.from('tasks').select('*').eq('status', status)
-  if (category) query = query.eq('category', category)
+    let query = db.from('tasks').select('*').eq('status', status)
+    if (category) query = query.eq('category', category)
 
-  const { data, error } = await query.order('created_at', { ascending: false }).limit(limit)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ tasks: data })
+    const { data, error } = await query.order('created_at', { ascending: false }).limit(limit)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ tasks: data })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -81,8 +86,8 @@ export async function POST(request: NextRequest) {
     })
 
     return NextResponse.json(task, { status: 201 })
-  } catch (err) {
-    console.error(err)
-    return NextResponse.json({ error: 'Failed to create task' }, { status: 500 })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
