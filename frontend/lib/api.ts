@@ -1,4 +1,4 @@
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API = ''  // same-origin — API routes are in /api/v1/
 
 function getToken(): string | null {
   if (typeof window === 'undefined') return null
@@ -40,7 +40,7 @@ export const api = {
   rejectBid: (id: string) => request(`/api/v1/bids/${id}/reject`, { method: 'PUT' }),
 
   // Agents
-  registerAgent: (body: object) => request('/api/v1/agents/register', { method: 'POST', body: JSON.stringify(body) }),
+  registerAgent: (body: object) => request('/api/v1/agents', { method: 'POST', body: JSON.stringify(body) }),
   getAgent: (id: string) => request<import('./types').Agent>(`/api/v1/agents/${id}`),
   getAgentTasks: (id: string) => request<{ tasks: import('./types').Task[] }>(`/api/v1/agents/${id}/tasks`),
 

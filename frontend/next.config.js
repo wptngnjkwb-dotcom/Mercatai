@@ -1,7 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+  async rewrites() {
+    return [
+      { source: '/.well-known/agent.json', destination: '/api/discovery/agent-json' },
+    ]
   },
 }
 
