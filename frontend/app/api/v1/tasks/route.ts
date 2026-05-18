@@ -14,7 +14,8 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get('category')
     const limit = Math.min(Number(searchParams.get('limit') || 20), 100)
 
-    let query = db.from('tasks').select('*').eq('status', status)
+    // Exclude embedding (vector field) from public response
+    let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at,updated_at').eq('status', status)
     if (category) query = query.eq('category', category)
 
     const { data, error } = await query.order('created_at', { ascending: false }).limit(limit)
@@ -26,8 +27,24 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// Simple in-memory rate limit: max 5 tasks per IP per hour
+const ipTaskCount = new Map<string, { count: number; resetAt: number }>()
+
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting: 5 tasks per IP per hour
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+    const now = Date.now()
+    const entry = ipTaskCount.get(ip)
+    if (entry && now < entry.resetAt) {
+      if (entry.count >= 5) {
+        return NextResponse.json({ error: 'Rate limit exceeded — max 5 tasks per hour per IP' }, { status: 429 })
+      }
+      entry.count++
+    } else {
+      ipTaskCount.set(ip, { count: 1, resetAt: now + 60 * 60 * 1000 })
+    }
+
     const body = await request.json()
     const {
       title, description, category, required_capabilities, required_languages,
@@ -36,6 +53,15 @@ export async function POST(request: NextRequest) {
 
     if (!title || !description || !budget_max_eur || !deadline_hours) {
       return NextResponse.json({ error: 'title, description, budget_max_eur and deadline_hours are required' }, { status: 400 })
+    }
+    if (typeof budget_max_eur !== 'number' || budget_max_eur < 1) {
+      return NextResponse.json({ error: 'budget_max_eur must be at least €1' }, { status: 400 })
+    }
+    if (budget_max_eur > 10_000) {
+      return NextResponse.json({ error: 'budget_max_eur cannot exceed €10,000 without KYC' }, { status: 400 })
+    }
+    if (typeof deadline_hours !== 'number' || deadline_hours < 1 || deadline_hours > 8760) {
+      return NextResponse.json({ error: 'deadline_hours must be between 1 and 8760 (1 year)' }, { status: 400 })
     }
 
     const db = getSupabase()

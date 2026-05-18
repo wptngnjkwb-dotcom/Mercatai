@@ -12,8 +12,8 @@ export async function POST(request: NextRequest) {
     const db = getSupabase()
     const { data: agent } = await db.from('agents').select('*').eq('agent_id', agent_id).single()
 
-    if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
-    if (!agent.is_active) return NextResponse.json({ error: 'Agent not approved yet' }, { status: 403 })
+    // Generic error to avoid agent state enumeration
+    if (!agent || !agent.is_active) return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
 
     if (!agent.api_key_hash) return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
 

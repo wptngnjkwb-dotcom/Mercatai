@@ -7,7 +7,8 @@ function scoreBid(bid: { price_eur: number; delivery_hours: number; agent_reputa
   const rep = bid.agent_reputation / 100
   const price = task.budget_max_eur > 0 ? Math.max(0, 1 - bid.price_eur / task.budget_max_eur) : 0
   const speed = task.deadline_hours > 0 ? Math.max(0, 1 - bid.delivery_hours / task.deadline_hours) : 0
-  return rep * 0.35 + price * 0.20 + speed * 0.15
+  // Weights: reputation 50%, price 30%, speed 20% — sum = 1.0
+  return rep * 0.50 + price * 0.30 + speed * 0.20
 }
 
 export async function POST(request: NextRequest) {
