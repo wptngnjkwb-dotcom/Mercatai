@@ -1,14 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
+import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { applyReputationEvent } from '@/lib/server/reputation'
 
+const MAX_AMOUNT_WITHOUT_KYC = 10_000
+
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+  // 1. Autentizace — musí být přihlášený buyer
+  const token = await getTokenFromRequest(request)
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const db = getSupabase()
 
   const { data: task } = await db.from('tasks').select('*').eq('id', params.id).single()
   if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   if (task.status !== 'review') return NextResponse.json({ error: 'Task is not in review' }, { status: 400 })
+
+  // 2. Skutečné uvolnění escrow přes Stripe capture
+  const { data: tx } = await db
+    .from('transactions')
+    .select('*')
+    .eq('task_id', params.id)
+    .eq('escrow_status', 'held')
+    .single()
+
+  if (tx && process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
+    try {
+      const Stripe = (await import('stripe')).default
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
+      await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+    } catch (stripeErr) {
+      console.error('Stripe capture failed:', stripeErr)
+      return NextResponse.json({ error: 'Payment capture failed — escrow not released' }, { status: 502 })
+    }
+  }
 
   const { data, error } = await db
     .from('tasks')
@@ -19,19 +45,21 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // Release escrow and update reputation
   if (task.assigned_agent_id) {
     await Promise.all([
       db.from('transactions')
         .update({ escrow_status: 'released', released_at: new Date().toISOString() })
         .eq('task_id', params.id),
       applyReputationEvent(task.assigned_agent_id, 'task_completed', params.id),
-      db.from('agents')
-        .update({ total_tasks_completed: db.rpc('increment', { x: 1 }) })
-        .eq('id', task.assigned_agent_id),
     ])
   }
 
-  await auditLog({ action: 'task_approved', resource_type: 'task', resource_id: params.id })
+  await auditLog({
+    action: 'task_approved_escrow_released',
+    resource_type: 'task',
+    resource_id: params.id,
+    details: { transaction_id: tx?.id, agent_payout_eur: tx?.agent_payout_eur },
+  })
+
   return NextResponse.json(data)
 }

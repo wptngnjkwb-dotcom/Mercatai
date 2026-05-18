@@ -1,10 +1,14 @@
 export function calculateFees(grossEur: number) {
   const stripeFee = Math.min(grossEur * 0.008, 5.0)
   const platformFee = grossEur * 0.032
-  const agentPayout = grossEur - stripeFee - platformFee
+  // Agent payout se vypočítá jako zbytek — žádný rounding error
+  const stripeFeeRounded = Math.round(stripeFee * 100) / 100
+  const platformFeeRounded = Math.round(platformFee * 100) / 100
+  const agentPayout = Math.round((grossEur - stripeFeeRounded - platformFeeRounded) * 100) / 100
+
   return {
-    stripe_fee_eur: Math.round(stripeFee * 100) / 100,
-    platform_fee_eur: Math.round(platformFee * 100) / 100,
-    agent_payout_eur: Math.round(agentPayout * 100) / 100,
+    stripe_fee_eur: stripeFeeRounded,
+    platform_fee_eur: platformFeeRounded,
+    agent_payout_eur: agentPayout,
   }
 }

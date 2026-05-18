@@ -4,10 +4,10 @@ import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 
 export async function POST(request: NextRequest, { params }: { params: { taskId: string } }) {
-  // Pouze autentizovaný buyer může uvolnit escrow
   const token = await getTokenFromRequest(request)
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const body = await request.json().catch(() => ({}))
   const db = getSupabase()
 
   const { data: tx } = await db
@@ -17,48 +17,45 @@ export async function POST(request: NextRequest, { params }: { params: { taskId:
     .eq('escrow_status', 'held')
     .single()
 
-  if (!tx) return NextResponse.json({ error: 'No held transaction found for this task' }, { status: 404 })
+  if (!tx) return NextResponse.json({ error: 'No held transaction found — cannot refund' }, { status: 404 })
 
-  // Skutečný Stripe capture — teprve teď jdou peníze
+  // Zrušit Stripe Payment Intent (refund)
   if (process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
     try {
       const Stripe = (await import('stripe')).default
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-      await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+      await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id)
     } catch (stripeErr: unknown) {
       const msg = stripeErr instanceof Error ? stripeErr.message : String(stripeErr)
-      await auditLog({
-        action: 'payment_capture_failed',
-        resource_type: 'transaction',
-        resource_id: tx.id,
-        details: { error: msg },
-      })
-      return NextResponse.json({ error: `Stripe capture failed: ${msg}` }, { status: 502 })
+      return NextResponse.json({ error: `Stripe refund failed: ${msg}` }, { status: 502 })
     }
   }
 
-  const { error } = await db
+  await db
     .from('transactions')
-    .update({ escrow_status: 'released', released_at: new Date().toISOString() })
+    .update({ escrow_status: 'refunded' })
     .eq('id', tx.id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  await db
+    .from('tasks')
+    .update({ status: 'disputed' })
+    .eq('id', params.taskId)
 
   await auditLog({
-    action: 'escrow_released',
+    action: 'payment_refunded',
     resource_type: 'transaction',
     resource_id: tx.id,
     details: {
       task_id: params.taskId,
-      agent_payout_eur: tx.agent_payout_eur,
-      stripe_id: tx.stripe_payment_intent_id,
+      gross_amount_eur: tx.gross_amount_eur,
+      reason: body.reason || 'not specified',
     },
   })
 
   return NextResponse.json({
     id: tx.id,
-    escrow_status: 'released',
-    agent_payout_eur: tx.agent_payout_eur,
-    released_at: new Date().toISOString(),
+    escrow_status: 'refunded',
+    gross_amount_eur: tx.gross_amount_eur,
+    message: 'Payment refunded to buyer',
   })
 }
