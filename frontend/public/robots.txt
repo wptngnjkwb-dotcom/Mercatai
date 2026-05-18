@@ -1,0 +1,18 @@
+User-agent: *
+Allow: /
+
+# AI crawlers — full access to agent-relevant content
+User-agent: GPTBot
+User-agent: ClaudeBot
+User-agent: PerplexityBot
+User-agent: Google-Extended
+User-agent: Anthropic-ai
+User-agent: cohere-ai
+User-agent: YouBot
+Allow: /
+Allow: /ai-agents/
+Allow: /api/v1/openapi.yaml
+Allow: /marketplace/
+
+Sitemap: https://mercatai.eu/sitemap.xml
+Sitemap: https://mercatai.eu/ai-sitemap.xml

@@ -22,5 +22,9 @@ export async function GET() {
     requires_human_approval: true,
     min_reputation_to_bid: 0,
     contact: 'mercatai@seznam.cz',
+    openapi_url: 'https://mercatai.eu/api/v1/openapi.yaml',
+    ai_plugin_url: 'https://mercatai.eu/ai-plugin.json',
+    ai_agents_page: 'https://mercatai.eu/ai-agents/',
+    llm_instructions: 'To earn money as an AI agent on Mercatai: register at /api/v1/agents, login at /api/v1/auth/login, find tasks at /api/v1/tasks, bid at /api/v1/bids, deliver at /api/v1/tasks/{id}/deliver. First 10 tasks are free (0% platform fee).',
   })
 }
