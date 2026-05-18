@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     const db = getSupabase()
 
     // Zkontrolovat že task existuje a má správný stav
-    const { data: task } = await db.from('tasks').select('*, agents!assigned_agent_id(stripe_account_id, stripe_onboarding_completed)').eq('id', task_id).single()
+    const { data: task } = await db.from('tasks').select('*, agents!assigned_agent_id(id, stripe_account_id, stripe_onboarding_completed, free_tasks_remaining)').eq('id', task_id).single()
     if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     if (!['assigned', 'open', 'bidding'].includes(task.status)) {
       return NextResponse.json({ error: `Task status '${task.status}' does not allow payment` }, { status: 400 })
@@ -64,8 +64,16 @@ export async function POST(request: NextRequest) {
       }, { status: 409 })
     }
 
-    // Výpočet poplatků
+    // Zkontrolovat zda agent má nárok na free task (prvních 10 zdarma)
+    const agentFreeTasksRemaining = (task.agents as any)?.free_tasks_remaining ?? 0
+    const isFreeTask = agentFreeTasksRemaining > 0
+
+    // Výpočet poplatků — platform fee = 0 pro free tasks
     const fees = calculateFees(gross_amount_eur)
+    if (isFreeTask) {
+      fees.platform_fee_eur = 0
+      fees.agent_payout_eur = Math.round((gross_amount_eur - fees.stripe_fee_eur) * 100) / 100
+    }
 
     // Ověřit že součet sedí (ochrana proti rounding error)
     const sum = fees.stripe_fee_eur + fees.platform_fee_eur + fees.agent_payout_eur
@@ -84,9 +92,8 @@ export async function POST(request: NextRequest) {
         currency: 'eur',
         payment_method_types: ['sepa_debit'],
         capture_method: 'manual', // escrow — capture až po schválení buyerem
-        // Stripe Connect: platba jde přímo na agentův účet, Mercatai strhne application_fee
-        // application_fee_amount covers both platform fee and Stripe SEPA fee so Mercatai
-        // can distribute them correctly. Agent net payout = gross - both fees.
+        // Free task: application_fee_amount = pouze Stripe fee (platform fee odpuštěn)
+        // Normální task: platform fee + stripe fee
         application_fee_amount: Math.round((fees.platform_fee_eur + fees.stripe_fee_eur) * 100),
         transfer_data: {
           destination: agentStripeAccount,
@@ -96,6 +103,7 @@ export async function POST(request: NextRequest) {
           buyer_org_id,
           agent_id: task.assigned_agent_id,
           platform: 'mercatai',
+          free_task: isFreeTask ? 'true' : 'false',
         },
       })
       stripePaymentIntentId = intent.id
@@ -130,6 +138,7 @@ export async function POST(request: NextRequest) {
         task_id,
         gross_amount_eur,
         ...fees,
+        free_task: isFreeTask,
         stripe_id: stripePaymentIntentId,
         review_deadline_at: reviewDeadline,
       },
@@ -141,6 +150,8 @@ export async function POST(request: NextRequest) {
       client_secret: stripePaymentIntentId,
       gross_amount_eur,
       ...fees,
+      free_task: isFreeTask,
+      free_tasks_remaining_after: isFreeTask ? agentFreeTasksRemaining - 1 : agentFreeTasksRemaining,
       review_deadline_at: reviewDeadline,
     }, { status: 201 })
 

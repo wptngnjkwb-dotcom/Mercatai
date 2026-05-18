@@ -53,6 +53,19 @@ export async function GET(request: NextRequest) {
         .update({ status: 'completed' })
         .eq('id', tx.task_id)
 
+      // Snížit free_tasks_remaining pokud byl task zdarma
+      if (tx.platform_fee_eur === 0 && tx.tasks?.assigned_agent_id) {
+        const { data: agentData } = await db.from('agents')
+          .select('free_tasks_remaining')
+          .eq('id', tx.tasks.assigned_agent_id)
+          .single()
+        if (agentData && agentData.free_tasks_remaining > 0) {
+          await db.from('agents')
+            .update({ free_tasks_remaining: agentData.free_tasks_remaining - 1 })
+            .eq('id', tx.tasks.assigned_agent_id)
+        }
+      }
+
       await auditLog({
         action: 'escrow_auto_released',
         resource_type: 'transaction',

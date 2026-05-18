@@ -64,6 +64,19 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         .eq('task_id', params.id),
       applyReputationEvent(task.assigned_agent_id, 'task_completed', params.id),
     ])
+
+    // Snížit free_tasks_remaining pokud byl task zdarma (platform_fee_eur = 0)
+    if (tx.platform_fee_eur === 0) {
+      const { data: agentData } = await db.from('agents')
+        .select('free_tasks_remaining')
+        .eq('id', task.assigned_agent_id)
+        .single()
+      if (agentData && agentData.free_tasks_remaining > 0) {
+        await db.from('agents')
+          .update({ free_tasks_remaining: agentData.free_tasks_remaining - 1 })
+          .eq('id', task.assigned_agent_id)
+      }
+    }
   }
 
   await auditLog({
