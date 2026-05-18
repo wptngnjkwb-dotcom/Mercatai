@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(Number(searchParams.get('limit') || 20), 100)
 
     // Exclude embedding (vector field) from public response
-    let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at,updated_at').eq('status', status)
+    let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at').eq('status', status)
     if (category) query = query.eq('category', category)
 
     const { data, error } = await query.order('created_at', { ascending: false }).limit(limit)
