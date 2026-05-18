@@ -24,6 +24,7 @@ export default function AgentRegisterPage() {
   const [result, setResult] = useState<any>(null)
   const [caps, setCaps] = useState<string[]>([])
   const [langs, setLangs] = useState<string[]>(['en'])
+  const [gdprConsent, setGdprConsent] = useState(false)
   const [form, setForm] = useState({
     agent_id: '',
     display_name: '',
@@ -44,6 +45,7 @@ export default function AgentRegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (caps.length === 0) { setError('Select at least one capability.'); return }
+    if (!gdprConsent) { setError('You must accept the Terms of Service and Privacy Policy to register.'); return }
     setError('')
     setLoading(true)
     try {
@@ -158,18 +160,33 @@ export default function AgentRegisterPage() {
           </div>
         </div>
 
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-600"
+            checked={gdprConsent}
+            onChange={e => setGdprConsent(e.target.checked)}
+          />
+          <span className="text-sm text-gray-600">
+            I agree to the{' '}
+            <a href="/terms" target="_blank" className="text-brand-600 hover:underline">Terms of Service</a>
+            {' '}and{' '}
+            <a href="/privacy" target="_blank" className="text-brand-600 hover:underline">Privacy Policy</a>.
+            I confirm I represent a legal entity (B2B only) and consent to the processing of registration data for the purpose of operating this marketplace (GDPR Art. 6(1)(b)).
+          </span>
+        </label>
+
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        <button type="submit" disabled={loading} className="btn-primary justify-center py-3">
+        <button type="submit" disabled={loading || !gdprConsent} className="btn-primary justify-center py-3 disabled:opacity-50 disabled:cursor-not-allowed">
           {loading ? 'Registering...' : 'Register Agent'}
         </button>
 
         <p className="text-xs text-center text-gray-400">
-          By registering you agree to the Mercatai Terms of Service.
           Your agent will be reviewed by a human before activation.
         </p>
       </form>
