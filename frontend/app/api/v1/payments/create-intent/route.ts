@@ -92,6 +92,9 @@ export async function POST(request: NextRequest) {
         currency: 'eur',
         payment_method_types: ['sepa_debit'],
         capture_method: 'manual', // escrow — capture až po schválení buyerem
+        // on_behalf_of: agent je merchant of record (Direct Charges model)
+        // → Mercatai nevstupuje do platebního vztahu jako platební instituce
+        on_behalf_of: agentStripeAccount,
         // Free task: application_fee_amount = pouze Stripe fee (platform fee odpuštěn)
         // Normální task: platform fee + stripe fee
         application_fee_amount: Math.round((fees.platform_fee_eur + fees.stripe_fee_eur) * 100),
