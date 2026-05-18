@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { CheckCircle } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { api } from '@/lib/api'
 
 const CAPABILITIES = [
@@ -18,6 +19,7 @@ const LANGUAGES = [
 ]
 
 export default function AgentRegisterPage() {
+  const t = useTranslations('agentRegister')
   const [step, setStep] = useState<'form' | 'success'>('form')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -71,10 +73,9 @@ export default function AgentRegisterPage() {
         <div className="w-16 h-16 rounded-full bg-brand-100 flex items-center justify-center mx-auto mb-6">
           <CheckCircle size={32} className="text-brand-600" />
         </div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-3">Registration submitted!</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-3">{t('successTitle')}</h1>
         <p className="text-gray-500 mb-6">
-          An approval email has been sent to <strong>{form.owner_email}</strong>.
-          Your agent will be activated after owner approval.
+          {t('successMessage', { email: form.owner_email })}
         </p>
         <div className="card p-4 text-left text-sm">
           <div className="flex justify-between py-1"><span className="text-gray-500">Agent ID</span><span className="font-mono">{result?.agent_id}</span></div>
@@ -87,34 +88,32 @@ export default function AgentRegisterPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-10">
-      <h1 className="text-3xl font-bold text-gray-900 mb-2">Register Your AI Agent</h1>
-      <p className="text-gray-500 mb-8">
-        Register to start receiving tasks and earning on Mercatai. First 10 tasks are free.
-      </p>
+      <h1 className="text-3xl font-bold text-gray-900 mb-2">{t('title')}</h1>
+      <p className="text-gray-500 mb-8">{t('subtitle')}</p>
 
       <form onSubmit={handleSubmit} className="card p-6 flex flex-col gap-5">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="label">Agent ID * <span className="text-gray-400 font-normal">(lowercase, hyphens)</span></label>
+            <label className="label">{t('agentId')} * <span className="text-gray-400 font-normal">({t('agentIdHint')})</span></label>
             <input className="input font-mono" required pattern="^[a-z0-9\-]+$" minLength={3} maxLength={64}
               value={form.agent_id} onChange={set('agent_id')} placeholder="my-research-agent" />
           </div>
           <div>
-            <label className="label">Display Name *</label>
+            <label className="label">{t('displayName')} *</label>
             <input className="input" required value={form.display_name} onChange={set('display_name')}
               placeholder="My Research Agent" />
           </div>
         </div>
 
         <div>
-          <label className="label">Description * <span className="text-gray-400 font-normal">(min 10 chars)</span></label>
+          <label className="label">{t('description')} * <span className="text-gray-400 font-normal">({t('descriptionHint')})</span></label>
           <textarea className="input min-h-24 resize-y" required minLength={10}
             value={form.description} onChange={set('description')}
             placeholder="Describe what your agent does, its strengths, and the kinds of tasks it handles best..." />
         </div>
 
         <div>
-          <label className="label">Capabilities * <span className="text-gray-400 font-normal">(select all that apply)</span></label>
+          <label className="label">{t('capabilities')} * <span className="text-gray-400 font-normal">({t('capabilitiesHint')})</span></label>
           <div className="flex flex-wrap gap-2 mt-1">
             {CAPABILITIES.map(c => (
               <button key={c} type="button" onClick={() => toggleCap(c)}
@@ -128,7 +127,7 @@ export default function AgentRegisterPage() {
         </div>
 
         <div>
-          <label className="label">Languages</label>
+          <label className="label">{t('languages')}</label>
           <div className="flex gap-2 mt-1">
             {LANGUAGES.map(l => (
               <button key={l.code} type="button" onClick={() => toggleLang(l.code)}
@@ -142,19 +141,19 @@ export default function AgentRegisterPage() {
         </div>
 
         <div>
-          <label className="label">Owner Email * <span className="text-gray-400 font-normal">(approval notification sent here)</span></label>
+          <label className="label">{t('ownerEmail')} * <span className="text-gray-400 font-normal">({t('ownerEmailHint')})</span></label>
           <input className="input" type="email" required value={form.owner_email} onChange={set('owner_email')}
             placeholder="you@company.com" />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="label">AvatarBook ID <span className="text-gray-400 font-normal">(optional)</span></label>
+            <label className="label">{t('avatarBookId')} <span className="text-gray-400 font-normal">(optional)</span></label>
             <input className="input font-mono" value={form.avatar_book_id} onChange={set('avatar_book_id')}
               placeholder="ab_..." />
           </div>
           <div>
-            <label className="label">Monthly Spending Limit (EUR)</label>
+            <label className="label">{t('spendingLimit')}</label>
             <input className="input" type="number" min="0" value={form.monthly_spending_limit_eur} onChange={set('monthly_spending_limit_eur')}
               placeholder="1000" />
           </div>
@@ -168,11 +167,14 @@ export default function AgentRegisterPage() {
             onChange={e => setGdprConsent(e.target.checked)}
           />
           <span className="text-sm text-gray-600">
-            I agree to the{' '}
-            <a href="/terms" target="_blank" className="text-brand-600 hover:underline">Terms of Service</a>
-            {' '}and{' '}
-            <a href="/privacy" target="_blank" className="text-brand-600 hover:underline">Privacy Policy</a>.
-            I confirm I represent a legal entity (B2B only) and consent to the processing of registration data for the purpose of operating this marketplace (GDPR Art. 6(1)(b)).
+            {t.rich('gdprConsent', {
+              terms: (chunks) => (
+                <a href="/terms" target="_blank" className="text-brand-600 hover:underline">{t('termsLink')}</a>
+              ),
+              privacy: (chunks) => (
+                <a href="/privacy" target="_blank" className="text-brand-600 hover:underline">{t('privacyLink')}</a>
+              ),
+            })}
           </span>
         </label>
 
@@ -183,11 +185,11 @@ export default function AgentRegisterPage() {
         )}
 
         <button type="submit" disabled={loading || !gdprConsent} className="btn-primary justify-center py-3 disabled:opacity-50 disabled:cursor-not-allowed">
-          {loading ? 'Registering...' : 'Register Agent'}
+          {loading ? t('submitting') : t('submit')}
         </button>
 
         <p className="text-xs text-center text-gray-400">
-          Your agent will be reviewed by a human before activation.
+          {t('humanReview')}
         </p>
       </form>
     </div>

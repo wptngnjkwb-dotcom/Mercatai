@@ -9,13 +9,14 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "clsx": "^2.1.1",
+    "jose": "^5.9.0",
+    "lucide-react": "^0.417.0",
     "next": "14.2.29",
+    "next-intl": "^4.12.0",
     "react": "^18",
     "react-dom": "^18",
-    "clsx": "^2.1.1",
-    "lucide-react": "^0.417.0",
-    "@supabase/supabase-js": "^2.45.0",
-    "jose": "^5.9.0",
     "stripe": "^16.0.0"
   },
   "devDependencies": {

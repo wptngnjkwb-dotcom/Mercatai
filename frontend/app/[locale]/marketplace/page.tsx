@@ -2,21 +2,24 @@
 
 import { useEffect, useState } from 'react'
 import { Search, Filter } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import TaskCard from '@/components/TaskCard'
 import { api } from '@/lib/api'
-import type { Task, TaskCategory } from '@/lib/types'
-
-const CATEGORIES: { value: string; label: string }[] = [
-  { value: '', label: 'All categories' },
-  { value: 'research', label: 'Research' },
-  { value: 'content', label: 'Content' },
-  { value: 'code_review', label: 'Code Review' },
-  { value: 'procurement', label: 'Procurement' },
-  { value: 'data_analysis', label: 'Data Analysis' },
-  { value: 'translation', label: 'Translation' },
-]
+import type { Task } from '@/lib/types'
 
 export default function MarketplacePage() {
+  const t = useTranslations('marketplace')
+
+  const CATEGORIES = [
+    { value: '', label: t('categories.all') },
+    { value: 'research', label: t('categories.research') },
+    { value: 'content', label: t('categories.content') },
+    { value: 'code_review', label: t('categories.code_review') },
+    { value: 'procurement', label: t('categories.procurement') },
+    { value: 'data_analysis', label: t('categories.data_analysis') },
+    { value: 'translation', label: t('categories.translation') },
+  ]
+
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -42,8 +45,8 @@ export default function MarketplacePage() {
     <div className="max-w-6xl mx-auto px-4 py-10">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Task Marketplace</h1>
-        <p className="text-gray-500">Open tasks looking for AI agents to bid.</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">{t('title')}</h1>
+        <p className="text-gray-500">{t('subtitle')}</p>
       </div>
 
       {/* Filters */}
@@ -52,7 +55,7 @@ export default function MarketplacePage() {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             className="input pl-9"
-            placeholder="Search tasks..."
+            placeholder={t('searchPlaceholder')}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -80,14 +83,14 @@ export default function MarketplacePage() {
         </div>
       ) : error ? (
         <div className="card p-8 text-center text-red-600">
-          <p className="font-medium">Could not load tasks</p>
+          <p className="font-medium">{t('loadError')}</p>
           <p className="text-sm text-gray-500 mt-1">{error}</p>
           <p className="text-sm text-gray-400 mt-2">Make sure the backend is running on localhost:8000</p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="card p-12 text-center text-gray-500">
-          <p className="font-medium text-lg">No open tasks found</p>
-          <p className="text-sm mt-1">Be the first to post a task!</p>
+          <p className="font-medium text-lg">{t('noTasks')}</p>
+          <p className="text-sm mt-1">{t('noTasksHint')}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -98,7 +101,7 @@ export default function MarketplacePage() {
       )}
 
       <p className="text-xs text-gray-400 text-center mt-8">
-        {filtered.length} task{filtered.length !== 1 ? 's' : ''} shown
+        {filtered.length !== 1 ? t('tasksShownPlural', { count: filtered.length }) : t('tasksShown', { count: filtered.length })}
       </p>
     </div>
   )

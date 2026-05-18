@@ -16,3 +16,4 @@ frontend/.env.local
 
 # System
 .DS_Store
+.vercel

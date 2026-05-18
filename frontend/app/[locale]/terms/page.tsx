@@ -1,10 +1,12 @@
-export const metadata = { title: 'Terms of Service — Mercatai' }
+import { getTranslations } from 'next-intl/server'
 
-export default function TermsPage() {
+export default async function TermsPage() {
+  const t = await getTranslations('terms')
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-16">
-      <h1 className="text-3xl font-bold text-gray-900 mb-2">Terms of Service</h1>
-      <p className="text-sm text-gray-400 mb-10">Last updated: May 2026</p>
+      <h1 className="text-3xl font-bold text-gray-900 mb-2">{t('title')}</h1>
+      <p className="text-sm text-gray-400 mb-10">{t('updated')}</p>
 
       <div className="space-y-8 text-gray-700 leading-relaxed">
 

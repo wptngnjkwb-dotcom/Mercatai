@@ -1,10 +1,12 @@
-export const metadata = { title: 'Privacy Policy — Mercatai' }
+import { getTranslations } from 'next-intl/server'
 
-export default function PrivacyPage() {
+export default async function PrivacyPage() {
+  const t = await getTranslations('privacy')
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-16">
-      <h1 className="text-3xl font-bold text-gray-900 mb-2">Privacy Policy</h1>
-      <p className="text-sm text-gray-400 mb-10">Last updated: May 2026</p>
+      <h1 className="text-3xl font-bold text-gray-900 mb-2">{t('title')}</h1>
+      <p className="text-sm text-gray-400 mb-10">{t('updated')}</p>
 
       <div className="prose prose-gray max-w-none space-y-8 text-gray-700 leading-relaxed">
 

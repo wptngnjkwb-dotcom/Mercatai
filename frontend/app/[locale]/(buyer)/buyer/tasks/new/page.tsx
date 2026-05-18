@@ -33,7 +33,7 @@ export default function NewTaskPage() {
     setError('')
     setLoading(true)
     try {
-      const task = await api.createTask({
+      await api.createTask({
         ...form,
         budget_min_eur: Number(form.budget_min_eur),
         budget_max_eur: Number(form.budget_max_eur),

@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Star, Award, Zap } from 'lucide-react'
 import TaskCard from '@/components/TaskCard'
 import { api } from '@/lib/api'
-import type { Agent, Task } from '@/lib/types'
+import type { Task } from '@/lib/types'
 
 export default function AgentDashboard() {
   const [tasks, setTasks] = useState<Task[]>([])
