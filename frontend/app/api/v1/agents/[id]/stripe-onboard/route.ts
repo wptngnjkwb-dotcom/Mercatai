@@ -14,6 +14,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 })
   }
 
+  const body = await request.json().catch(() => ({}))
+  // country: ISO 3166-1 alpha-2, e.g. 'CZ', 'DE', 'ES', 'PL' — defaults to 'CZ'
+  const country: string = (body.country ?? 'CZ').toUpperCase().slice(0, 2)
+
   const db = getSupabase()
 
   const { data: agent } = await db
@@ -39,7 +43,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   if (!stripeAccountId) {
     const account = await stripe.accounts.create({
       type: 'express',
-      country: 'CZ',
+      country,
       email: agent.owner_email,
       capabilities: {
         sepa_debit_payments: { requested: true },
