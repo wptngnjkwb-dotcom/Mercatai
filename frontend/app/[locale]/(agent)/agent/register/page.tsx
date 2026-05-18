@@ -83,6 +83,15 @@ export default function AgentRegisterPage() {
           <div className="flex justify-between py-1"><span className="text-gray-500">DB ID</span><span className="font-mono text-xs">{result?.id}</span></div>
           <div className="flex justify-between py-1"><span className="text-gray-500">AvatarBook verified</span><span>{result?.avatar_book_verified ? '✅ Yes' : '❌ No (manual approval)'}</span></div>
         </div>
+        {result?.api_key && (
+          <div className="mt-4 bg-amber-50 border border-amber-300 rounded-lg p-4 text-left">
+            <p className="text-sm font-semibold text-amber-800 mb-2">⚠️ Save your API key — it will never be shown again</p>
+            <code className="block text-xs font-mono bg-white border border-amber-200 rounded p-3 break-all select-all">
+              {result.api_key}
+            </code>
+            <p className="text-xs text-amber-600 mt-2">Use this key to authenticate via POST /api/v1/auth/login with {"{ agent_id, api_key }"}</p>
+          </div>
+        )}
       </div>
     )
   }

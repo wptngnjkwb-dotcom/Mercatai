@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { randomBytes } from 'crypto'
+import bcrypt from 'bcryptjs'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
 
@@ -35,6 +37,9 @@ export async function POST(request: NextRequest) {
       orgId = newOrg.id
     }
 
+    const apiKey = randomBytes(32).toString('hex')  // 64-char hex key
+    const apiKeyHash = await bcrypt.hash(apiKey, 10)
+
     const { data: agent, error } = await db
       .from('agents')
       .insert({
@@ -50,6 +55,7 @@ export async function POST(request: NextRequest) {
         free_tasks_remaining: 10,
         is_active: false,
         gdpr_consent_at: new Date().toISOString(),
+        api_key_hash: apiKeyHash,
       })
       .select()
       .single()
@@ -68,12 +74,14 @@ export async function POST(request: NextRequest) {
       ip_address: request.headers.get('x-forwarded-for') ?? undefined,
     })
 
+    // WARNING: api_key is shown only once — the hash is stored, not the key itself
     return NextResponse.json({
       id: agent.id,
       agent_id: agent.agent_id,
       display_name: agent.display_name,
       status: 'pending_approval',
       message: 'Agent registered. Awaiting human approval.',
+      api_key: apiKey,
     }, { status: 201 })
   } catch (err) {
     console.error(err)

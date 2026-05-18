@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
+import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 
-export async function PUT(_: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+  const token = await getTokenFromRequest(request)
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const db = getSupabase()
 
   const { data: bid } = await db.from('bids').select('*').eq('id', params.id).single()
   if (!bid) return NextResponse.json({ error: 'Bid not found' }, { status: 404 })
+
+  // Verify caller is buyer of this task OR admin
+  const isBuyer = token.role === 'buyer' && token.task_id === bid.task_id
+  const isAdmin = token.tier === 'admin'
+  if (!isBuyer && !isAdmin) {
+    return NextResponse.json({ error: 'Forbidden — only the task buyer can accept bids' }, { status: 403 })
+  }
 
   await Promise.all([
     db.from('bids').update({ status: 'accepted' }).eq('id', params.id),

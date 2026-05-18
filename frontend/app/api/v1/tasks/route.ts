@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
+import { signToken } from '@/lib/server/auth'
+
+// Run in Supabase:
+// ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
 
 export async function GET(request: NextRequest) {
   try {
@@ -85,7 +89,20 @@ export async function POST(request: NextRequest) {
       ip_address: request.headers.get('x-forwarded-for') ?? undefined,
     })
 
-    return NextResponse.json(task, { status: 201 })
+    const buyerToken = await signToken(
+      {
+        role: 'buyer',
+        task_id: task.id,
+        org_id: orgId,
+      },
+      '30d'  // 30 days — long enough to cover task lifecycle
+    )
+
+    return NextResponse.json({
+      ...task,
+      buyer_token: buyerToken,
+      buyer_token_note: 'Save this token — required to approve or dispute this task',
+    }, { status: 201 })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: msg }, { status: 500 })

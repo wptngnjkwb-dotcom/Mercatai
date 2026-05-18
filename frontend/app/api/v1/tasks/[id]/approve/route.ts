@@ -7,18 +7,22 @@ import { applyReputationEvent } from '@/lib/server/reputation'
 const MAX_AMOUNT_WITHOUT_KYC = 10_000
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
-  // 1. Autentizace — musí být přihlášený buyer
+  // 1. Autentizace — buyer token for this task, or admin token
   const token = await getTokenFromRequest(request)
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!token) return NextResponse.json({ error: 'Unauthorized — provide buyer_token in Authorization header' }, { status: 401 })
+
+  const isBuyer = token.role === 'buyer' && token.task_id === params.id
+  const isAdmin = token.tier === 'admin'
+
+  if (!isBuyer && !isAdmin) {
+    return NextResponse.json({ error: 'Forbidden — only the task buyer can approve' }, { status: 403 })
+  }
 
   const db = getSupabase()
 
   const { data: task } = await db.from('tasks').select('*').eq('id', params.id).single()
   if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   if (task.status !== 'review') return NextResponse.json({ error: 'Task is not in review' }, { status: 400 })
-
-  // TODO: verify token.sub matches task.posted_by_org_id when buyer tokens are implemented
-  // Current mitigation: task must be in 'review' status (set only by deliver endpoint)
 
   // 2. Skutečné uvolnění escrow přes Stripe capture
   const { data: tx } = await db

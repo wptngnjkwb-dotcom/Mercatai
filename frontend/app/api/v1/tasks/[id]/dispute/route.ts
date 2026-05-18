@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
+import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+  const token = await getTokenFromRequest(request)
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const isBuyer = token.role === 'buyer' && token.task_id === params.id
+  const isAdmin = token.tier === 'admin'
+  if (!isBuyer && !isAdmin) {
+    return NextResponse.json({ error: 'Forbidden — only the task buyer can dispute' }, { status: 403 })
+  }
+
   const body = await request.json().catch(() => ({}))
   const db = getSupabase()
 

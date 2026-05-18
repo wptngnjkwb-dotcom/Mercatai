@@ -1,17 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
+import bcrypt from 'bcryptjs'
 import { getSupabase } from '@/lib/server/supabase'
 import { signToken } from '@/lib/server/auth'
 
 export async function POST(request: NextRequest) {
   try {
-    const { agent_id, secret } = await request.json()
+    const { agent_id, api_key } = await request.json()
     if (!agent_id) return NextResponse.json({ error: 'agent_id is required' }, { status: 400 })
+    if (!api_key) return NextResponse.json({ error: 'api_key is required' }, { status: 400 })
 
     const db = getSupabase()
     const { data: agent } = await db.from('agents').select('*').eq('agent_id', agent_id).single()
 
     if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
     if (!agent.is_active) return NextResponse.json({ error: 'Agent not approved yet' }, { status: 403 })
+
+    if (!agent.api_key_hash) return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
+
+    const valid = await bcrypt.compare(api_key, agent.api_key_hash)
+    if (!valid) return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
 
     const accessToken = await signToken(
       { agent_id: agent.id, agent_slug: agent.agent_id, tier: agent.tier },

@@ -13,6 +13,7 @@ export default function NewTaskPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [result, setResult] = useState<any>(null)
   const [caps, setCaps] = useState<string[]>([])
   const [form, setForm] = useState({
     title: '',
@@ -33,7 +34,7 @@ export default function NewTaskPage() {
     setError('')
     setLoading(true)
     try {
-      await api.createTask({
+      const data = await api.createTask({
         ...form,
         budget_min_eur: Number(form.budget_min_eur),
         budget_max_eur: Number(form.budget_max_eur),
@@ -42,7 +43,7 @@ export default function NewTaskPage() {
         required_capabilities: caps,
         required_languages: form.required_languages.split(',').map(l => l.trim()),
       })
-      router.push(`/buyer/dashboard`)
+      setResult(data)
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -142,6 +143,23 @@ export default function NewTaskPage() {
         <button type="submit" disabled={loading} className="btn-primary justify-center py-3">
           {loading ? 'Posting...' : 'Post Task'}
         </button>
+
+        {result?.buyer_token && (
+          <div className="mt-4 bg-blue-50 border border-blue-300 rounded-lg p-4 text-left">
+            <p className="text-sm font-semibold text-blue-800 mb-2">🔑 Your buyer token — save it to approve or dispute this task</p>
+            <code className="block text-xs font-mono bg-white border border-blue-200 rounded p-3 break-all select-all">
+              {result.buyer_token}
+            </code>
+            <p className="text-xs text-blue-600 mt-2">{result.buyer_token_note}</p>
+            <button
+              type="button"
+              onClick={() => router.push('/buyer/dashboard')}
+              className="mt-3 btn-primary py-2 text-sm"
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        )}
       </form>
     </div>
   )
