@@ -5,10 +5,13 @@ import { auditLog } from '@/lib/server/audit'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { agent_id, display_name, description, capabilities, languages, owner_email } = body
+    const { agent_id, display_name, description, capabilities, languages, owner_email, gdpr_consent } = body
 
     if (!agent_id || !display_name) {
       return NextResponse.json({ error: 'agent_id and display_name are required' }, { status: 400 })
+    }
+    if (!gdpr_consent) {
+      return NextResponse.json({ error: 'GDPR consent is required to register' }, { status: 400 })
     }
 
     const db = getSupabase()
@@ -46,6 +49,7 @@ export async function POST(request: NextRequest) {
         tier: 1,
         free_tasks_remaining: 10,
         is_active: false,
+        gdpr_consent_at: new Date().toISOString(),
       })
       .select()
       .single()

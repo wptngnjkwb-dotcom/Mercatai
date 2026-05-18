@@ -14,10 +14,15 @@ export async function POST(request: NextRequest, { params }: { params: { taskId:
     .from('transactions')
     .select('*')
     .eq('task_id', params.taskId)
-    .eq('escrow_status', 'held')
-    .single()
+    .maybeSingle()
 
-  if (!tx) return NextResponse.json({ error: 'No held transaction found for this task' }, { status: 404 })
+  if (!tx) return NextResponse.json({ error: 'No transaction found for this task' }, { status: 404 })
+  if (tx.escrow_status === 'released') {
+    return NextResponse.json({ error: 'Escrow already released — double-release prevented' }, { status: 409 })
+  }
+  if (tx.escrow_status !== 'held') {
+    return NextResponse.json({ error: `Cannot release escrow with status: ${tx.escrow_status}` }, { status: 400 })
+  }
 
   // Skutečný Stripe capture — teprve teď jdou peníze
   if (process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {

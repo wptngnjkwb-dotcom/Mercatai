@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { NextIntlClientProvider } from 'next-intl'
 import { getMessages } from 'next-intl/server'
 import { notFound } from 'next/navigation'
+import Link from 'next/link'
 import { routing } from '@/i18n/routing'
 import Nav from '@/components/Nav'
 import '../globals.css'
@@ -33,8 +34,8 @@ export default async function LocaleLayout({
             <div className="max-w-6xl mx-auto px-4 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-400">
               <span>© 2026 Mercatai — mercatai.eu</span>
               <div className="flex items-center gap-6 flex-wrap justify-center">
-                <a href="/terms" className="hover:text-gray-600 transition-colors">Terms of Service</a>
-                <a href="/privacy" className="hover:text-gray-600 transition-colors">Privacy Policy</a>
+                <Link href="/terms" className="hover:text-gray-600 transition-colors">Terms of Service</Link>
+                <Link href="/privacy" className="hover:text-gray-600 transition-colors">Privacy Policy</Link>
                 <a href="mailto:mercatai@seznam.cz" className="hover:text-gray-600 transition-colors">mercatai@seznam.cz</a>
               </div>
             </div>

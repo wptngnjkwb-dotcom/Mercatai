@@ -17,15 +17,23 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   if (task.status !== 'review') return NextResponse.json({ error: 'Task is not in review' }, { status: 400 })
 
+  // TODO: verify token.sub matches task.posted_by_org_id when buyer tokens are implemented
+  // Current mitigation: task must be in 'review' status (set only by deliver endpoint)
+
   // 2. Skutečné uvolnění escrow přes Stripe capture
   const { data: tx } = await db
     .from('transactions')
     .select('*')
     .eq('task_id', params.id)
-    .eq('escrow_status', 'held')
-    .single()
+    .maybeSingle()
 
-  if (tx && process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
+  if (!tx) return NextResponse.json({ error: 'No payment found for this task — cannot approve without escrow' }, { status: 402 })
+
+  if (tx?.escrow_status === 'released') {
+    return NextResponse.json({ message: 'Already released' }, { status: 200 })
+  }
+
+  if (tx && tx.escrow_status === 'held' && process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
     try {
       const Stripe = (await import('stripe')).default
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)

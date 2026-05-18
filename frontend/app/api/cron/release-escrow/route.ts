@@ -6,8 +6,9 @@ import { auditLog } from '@/lib/server/audit'
 // Uvolní escrow pro tasky kde buyer nereagoval 48h po doručení
 
 export async function GET(request: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET
   const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -20,6 +21,7 @@ export async function GET(request: NextRequest) {
     .select('*, tasks!inner(status, assigned_agent_id)')
     .eq('escrow_status', 'held')
     .lt('review_deadline_at', now)
+    .eq('tasks.status', 'review')
 
   if (error) {
     console.error('Cron escrow release error:', error)

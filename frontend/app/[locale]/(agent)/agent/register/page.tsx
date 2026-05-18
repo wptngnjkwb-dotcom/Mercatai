@@ -55,6 +55,7 @@ export default function AgentRegisterPage() {
         ...form,
         capabilities: caps,
         languages: langs,
+        gdpr_consent: true,
         ...(form.monthly_spending_limit_eur ? { monthly_spending_limit_eur: Number(form.monthly_spending_limit_eur) } : {}),
         ...(form.avatar_book_id ? { avatar_book_id: form.avatar_book_id } : {}),
       })

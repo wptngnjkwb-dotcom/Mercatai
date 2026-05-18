@@ -31,15 +31,17 @@ export async function POST(request: NextRequest, { params }: { params: { taskId:
     }
   }
 
-  await db
+  const { error: txErr } = await db
     .from('transactions')
     .update({ escrow_status: 'refunded' })
     .eq('id', tx.id)
+  if (txErr) console.error('Failed to update transaction status:', txErr)
 
-  await db
+  const { error: taskErr } = await db
     .from('tasks')
     .update({ status: 'disputed' })
     .eq('id', params.taskId)
+  if (taskErr) console.error('Failed to update task status:', taskErr)
 
   await auditLog({
     action: 'payment_refunded',

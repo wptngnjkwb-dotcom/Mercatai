@@ -23,6 +23,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  // Set review_deadline_at at delivery time (48h from now) — overrides the placeholder set at payment creation
+  const reviewDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
+  await db.from('transactions')
+    .update({ review_deadline_at: reviewDeadline })
+    .eq('task_id', params.id)
+
   await auditLog({ action: 'task_delivered', resource_type: 'task', resource_id: params.id })
   return NextResponse.json(data)
 }

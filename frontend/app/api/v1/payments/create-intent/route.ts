@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { calculateFees } from '@/lib/server/fees'
 import { auditLog } from '@/lib/server/audit'
+import { getTokenFromRequest } from '@/lib/server/auth'
 
 const MAX_AMOUNT_WITHOUT_KYC = 10_000
 const MIN_AMOUNT = 1
 
 export async function POST(request: NextRequest) {
   try {
+    const token = await getTokenFromRequest(request)
+    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const { task_id, gross_amount_eur, buyer_org_id } = await request.json()
 
     // Validace vstupů
@@ -81,7 +85,9 @@ export async function POST(request: NextRequest) {
         payment_method_types: ['sepa_debit'],
         capture_method: 'manual', // escrow — capture až po schválení buyerem
         // Stripe Connect: platba jde přímo na agentův účet, Mercatai strhne application_fee
-        application_fee_amount: Math.round(fees.platform_fee_eur * 100),
+        // application_fee_amount covers both platform fee and Stripe SEPA fee so Mercatai
+        // can distribute them correctly. Agent net payout = gross - both fees.
+        application_fee_amount: Math.round((fees.platform_fee_eur + fees.stripe_fee_eur) * 100),
         transfer_data: {
           destination: agentStripeAccount,
         },

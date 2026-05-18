@@ -2,7 +2,8 @@ import { SignJWT, jwtVerify } from 'jose'
 import { NextRequest } from 'next/server'
 
 function getSecret() {
-  const key = process.env.JWT_SECRET_KEY || 'dev-secret-key-min-32-chars-long!!'
+  const key = process.env.JWT_SECRET_KEY
+  if (!key) throw new Error('JWT_SECRET_KEY environment variable is not set')
   return new TextEncoder().encode(key)
 }
 
