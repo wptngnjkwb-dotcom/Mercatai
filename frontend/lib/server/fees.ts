@@ -1,9 +1,7 @@
+// Fee structure: 0.8% Stripe SEPA (max €5) + 4.2% platform = 5% total, agent gets 95%
 export function calculateFees(grossEur: number) {
-  const stripeFee = Math.min(grossEur * 0.008, 5.0)
-  const platformFee = grossEur * 0.032
-  // Agent payout se vypočítá jako zbytek — žádný rounding error
-  const stripeFeeRounded = Math.round(stripeFee * 100) / 100
-  const platformFeeRounded = Math.round(platformFee * 100) / 100
+  const stripeFeeRounded = Math.round(Math.min(grossEur * 0.008, 5.0) * 100) / 100
+  const platformFeeRounded = Math.round(grossEur * 0.042 * 100) / 100
   const agentPayout = Math.round((grossEur - stripeFeeRounded - platformFeeRounded) * 100) / 100
 
   return {

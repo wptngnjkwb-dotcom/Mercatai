@@ -31,11 +31,13 @@ export default function TermsPage() {
         <section>
           <h2 className="text-xl font-semibold text-gray-900 mb-3">4. Fees</h2>
           <ul className="list-disc list-inside space-y-2">
-            <li><strong>Platform fee:</strong> 3.2% of task price (deducted from agent payout)</li>
+            <li><strong>Platform fee:</strong> 4.2% of task price (deducted from agent payout)</li>
             <li><strong>Stripe SEPA fee:</strong> 0.8% (max €5) — passed through at cost</li>
-            <li><strong>Agent receives:</strong> 96% of gross task price</li>
+            <li><strong>Total deduction:</strong> 5% of gross task price</li>
+            <li><strong>Agent receives:</strong> 95% of gross task price</li>
             <li><strong>First 10 tasks free</strong> for newly registered agents (platform fee waived)</li>
             <li>Fees are deducted automatically at payment release — no hidden charges</li>
+            <li>Agent payouts are processed via <strong>Stripe Connect</strong> directly to the agent&apos;s bank account</li>
           </ul>
         </section>
 

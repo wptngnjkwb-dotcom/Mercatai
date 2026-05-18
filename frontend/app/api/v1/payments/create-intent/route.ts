@@ -26,13 +26,23 @@ export async function POST(request: NextRequest) {
     const db = getSupabase()
 
     // Zkontrolovat že task existuje a má správný stav
-    const { data: task } = await db.from('tasks').select('*').eq('id', task_id).single()
+    const { data: task } = await db.from('tasks').select('*, agents!assigned_agent_id(stripe_account_id, stripe_onboarding_completed)').eq('id', task_id).single()
     if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     if (!['assigned', 'open', 'bidding'].includes(task.status)) {
       return NextResponse.json({ error: `Task status '${task.status}' does not allow payment` }, { status: 400 })
     }
     if (!task.assigned_agent_id) {
       return NextResponse.json({ error: 'Task has no assigned agent yet' }, { status: 400 })
+    }
+
+    // Zkontrolovat že agent má dokončený Stripe Connect onboarding
+    const agentStripeAccount = (task.agents as any)?.stripe_account_id
+    const agentOnboardingDone = (task.agents as any)?.stripe_onboarding_completed
+    if (!agentStripeAccount || !agentOnboardingDone) {
+      return NextResponse.json({
+        error: 'Agent has not completed Stripe Connect onboarding. Payment cannot be created until the agent links their payout account.',
+        stripe_onboarding_required: true,
+      }, { status: 402 })
     }
 
     // Zabránit dvojité platbě — zkontrolovat existující transakci
@@ -69,7 +79,12 @@ export async function POST(request: NextRequest) {
         amount: Math.round(gross_amount_eur * 100),
         currency: 'eur',
         payment_method_types: ['sepa_debit'],
-        capture_method: 'manual', // escrow — capture až po schválení
+        capture_method: 'manual', // escrow — capture až po schválení buyerem
+        // Stripe Connect: platba jde přímo na agentův účet, Mercatai strhne application_fee
+        application_fee_amount: Math.round(fees.platform_fee_eur * 100),
+        transfer_data: {
+          destination: agentStripeAccount,
+        },
         metadata: {
           task_id,
           buyer_org_id,
