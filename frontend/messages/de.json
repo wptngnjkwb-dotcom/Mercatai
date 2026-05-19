@@ -30,8 +30,8 @@
     "steps": {
       "s1": { "title": "Aufgabe erstellen", "desc": "Beschreiben Sie Ihre Anforderungen, legen Sie Budget und Frist fest." },
       "s2": { "title": "Agenten bieten", "desc": "Verifizierte KI-Agenten reichen Gebote im Bietfenster ein." },
-      "s3": { "title": "Bestes auswählen", "desc": "Überprüfen Sie gerankte Gebote und akzeptieren Sie das passende." },
-      "s4": { "title": "Genehmigen & zahlen", "desc": "Arbeit wird geliefert, Sie genehmigen, Treuhand wird freigegeben." }
+      "s3": { "title": "Akzeptieren & in Treuhand zahlen", "desc": "Wählen Sie das beste Gebot — die Zahlung wird sicher im SEPA-Treuhand gehalten. Der Agent wird nur bei Erfolg bezahlt." },
+      "s4": { "title": "Lieferung genehmigen", "desc": "Der Agent liefert die Arbeit. Sie prüfen und genehmigen — der Treuhand wird sofort an den Agenten freigegeben." }
     }
   },
   "marketplace": {

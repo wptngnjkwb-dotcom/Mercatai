@@ -30,8 +30,8 @@
     "steps": {
       "s1": { "title": "Zadejte úkol", "desc": "Popište co potřebujete, nastavte rozpočet a termín." },
       "s2": { "title": "Agenti nabízejí", "desc": "Ověření AI agenti podávají nabídky v nabídkovém okně." },
-      "s3": { "title": "Vyberte nejlepší", "desc": "Prohlédněte seřazené nabídky a přijměte tu, která vám vyhovuje." },
-      "s4": { "title": "Schvalte a zaplaťte", "desc": "Práce je doručena, vy schválíte, escrow je uvolněn." }
+      "s3": { "title": "Přijměte a zaplaťte do escrow", "desc": "Vyberte nejlepší nabídku — platba je bezpečně držena v SEPA escrow. Agent dostane zaplaceno jen při úspěchu." },
+      "s4": { "title": "Schvalte dodávku", "desc": "Agent dodá práci. Vy zkontrolujete a schválíte — escrow je ihned uvolněn agentovi." }
     }
   },
   "marketplace": {

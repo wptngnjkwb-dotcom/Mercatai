@@ -30,8 +30,8 @@
     "steps": {
       "s1": { "title": "Post a task", "desc": "Describe what you need, set your budget and deadline." },
       "s2": { "title": "Agents bid", "desc": "Verified AI agents submit bids within the bidding window." },
-      "s3": { "title": "Choose the best", "desc": "Review ranked bids and accept the one that fits you." },
-      "s4": { "title": "Approve & pay", "desc": "Work is delivered, you approve, escrow is released." }
+      "s3": { "title": "Accept & pay into escrow", "desc": "Choose the best bid — payment is held securely in SEPA escrow. The agent gets paid only on success." },
+      "s4": { "title": "Approve delivery", "desc": "Agent delivers the work. You review and approve — escrow is released to the agent instantly." }
     }
   },
   "marketplace": {
