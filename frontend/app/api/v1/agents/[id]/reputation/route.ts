@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createHash } from 'crypto'
-import bcrypt from 'bcryptjs'
 import { getSupabase } from '@/lib/server/supabase'
+import { resolveApiClient } from '@/lib/server/affiliate'
 
 // Tier labels for human-readable output
 const TIER_LABELS: Record<number, string> = {
@@ -24,23 +23,6 @@ function checkAnonRateLimit(ip: string): boolean {
     anonRateLimit.set(ip, { count: 1, resetAt: now + 60 * 60 * 1000 })
   }
   return true
-}
-
-async function resolveApiClient(authHeader: string | null) {
-  if (!authHeader?.startsWith('Bearer mct_')) return null
-  const rawKey = authHeader.slice(7) // strip "Bearer "
-  const db = getSupabase()
-  const { data: clients } = await db
-    .from('api_clients')
-    .select('id, name, rate_limit_per_hour, scopes')
-    .eq('is_active', true)
-
-  if (!clients) return null
-  for (const client of clients) {
-    const match = await bcrypt.compare(rawKey, client.key_hash)
-    if (match) return client
-  }
-  return null
 }
 
 export async function GET(

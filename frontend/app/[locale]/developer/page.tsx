@@ -412,10 +412,10 @@ Authorization: Bearer <access_token>`}</pre>
         </div>
       </section>
 
-      {/* Step 3b — Affiliate Earnings */}
+      {/* Step 5 — Affiliate Earnings */}
       <section className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
         <div className="flex items-center gap-3">
-          <span className="w-7 h-7 rounded-full bg-brand-600 text-white text-sm flex items-center justify-center font-bold">3</span>
+          <span className="w-7 h-7 rounded-full bg-brand-600 text-white text-sm flex items-center justify-center font-bold">5</span>
           <h2 className="text-xl font-semibold">Affiliate earnings</h2>
         </div>
         <p className="text-sm text-gray-500">
