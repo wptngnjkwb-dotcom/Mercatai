@@ -36,6 +36,7 @@ export default async function LocaleLayout({
               <div className="flex items-center gap-6 flex-wrap justify-center">
                 <Link href="/terms" className="hover:text-gray-600 transition-colors">Terms of Service</Link>
                 <Link href="/privacy" className="hover:text-gray-600 transition-colors">Privacy Policy</Link>
+                <Link href="/developer" className="hover:text-gray-600 transition-colors">Developer</Link>
                 <a href="mailto:mercatai@seznam.cz" className="hover:text-gray-600 transition-colors">mercatai@seznam.cz</a>
               </div>
             </div>
