@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
+import { fireWebhooks } from '@/lib/server/webhooks'
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const token = await getTokenFromRequest(request)
@@ -30,5 +31,6 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     .eq('task_id', params.id)
 
   await auditLog({ action: 'task_delivered', resource_type: 'task', resource_id: params.id })
+  fireWebhooks('task.delivered', { task_id: params.id, agent_id: task.assigned_agent_id })
   return NextResponse.json(data)
 }

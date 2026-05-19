@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
 import { signToken } from '@/lib/server/auth'
+import { fireWebhooks } from '@/lib/server/webhooks'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -114,6 +115,9 @@ export async function POST(request: NextRequest) {
       details: { title, budget_max_eur },
       ip_address: request.headers.get('x-forwarded-for') ?? undefined,
     })
+
+    // Fire webhooks async — do not await
+    fireWebhooks('task.created', { task_id: task.id, title, category: task.category, budget_max_eur })
 
     const buyerToken = await signToken(
       {

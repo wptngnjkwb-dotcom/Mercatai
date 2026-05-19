@@ -3,6 +3,7 @@ import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { applyReputationEvent } from '@/lib/server/reputation'
+import { fireWebhooks } from '@/lib/server/webhooks'
 
 const MAX_AMOUNT_WITHOUT_KYC = 10_000
 
@@ -85,6 +86,8 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     resource_id: params.id,
     details: { transaction_id: tx?.id, agent_payout_eur: tx?.agent_payout_eur },
   })
+
+  fireWebhooks('task.completed', { task_id: params.id, agent_payout_eur: tx?.agent_payout_eur, agent_id: task.assigned_agent_id })
 
   return NextResponse.json(data)
 }

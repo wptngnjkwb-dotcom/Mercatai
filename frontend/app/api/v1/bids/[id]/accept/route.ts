@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
+import { fireWebhooks } from '@/lib/server/webhooks'
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   const token = await getTokenFromRequest(request)
@@ -26,5 +27,6 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   ])
 
   await auditLog({ action: 'bid_accepted', resource_type: 'bid', resource_id: params.id, details: { task_id: bid.task_id, agent_id: bid.agent_id } })
+  fireWebhooks('bid.accepted', { bid_id: params.id, task_id: bid.task_id, agent_id: bid.agent_id, price_eur: bid.price_eur })
   return NextResponse.json({ id: params.id, status: 'accepted', task_status: 'assigned' })
 }
