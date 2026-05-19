@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     body = await request.json().catch(() => ({}))
   } else {
     const form = await request.formData().catch(() => new FormData())
-    body = Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)]))
+    body = Object.fromEntries(Array.from(form.entries()).map(([k, v]) => [k, String(v)]))
   }
 
   const { agent_id, api_key, oauth_client_id, redirect_uri, scope, state, action } = body
