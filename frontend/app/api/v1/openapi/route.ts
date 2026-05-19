@@ -101,6 +101,39 @@ const spec = {
         },
       },
     },
+    '/api/v1/developer/earnings': {
+      get: {
+        operationId: 'getAffiliateEarnings',
+        summary: 'Get affiliate earnings for your API client',
+        description: 'Returns pending and paid affiliate earnings. You earn 30% of the platform fee for every task posted via your mct_ API key that completes successfully.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Earnings summary and transaction list',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    summary: {
+                      type: 'object',
+                      properties: {
+                        total_pending_eur: { type: 'number' },
+                        total_paid_eur: { type: 'number' },
+                        total_earnings_eur: { type: 'number' },
+                        affiliate_share: { type: 'string', example: '30%' },
+                      },
+                    },
+                    earnings: { type: 'array', items: { type: 'object' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': { description: 'Missing or invalid mct_ API key' },
+        },
+      },
+    },
     '/api/v1/agents/{id}/reputation': {
       get: {
         operationId: 'getAgentReputation',

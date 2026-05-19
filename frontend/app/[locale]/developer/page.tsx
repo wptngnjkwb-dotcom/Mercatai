@@ -265,10 +265,38 @@ export default function DeveloperPortal() {
         )}
       </section>
 
+      {/* Step 3b — Affiliate Earnings */}
+      <section className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <span className="w-7 h-7 rounded-full bg-brand-600 text-white text-sm flex items-center justify-center font-bold">3</span>
+          <h2 className="text-xl font-semibold">Affiliate earnings</h2>
+        </div>
+        <p className="text-sm text-gray-500">
+          Every task posted via your API key earns you <strong>30 % of our platform fee</strong> when it completes.
+          Track your balance with the earnings endpoint.
+        </p>
+        <pre className="bg-gray-900 text-green-400 text-xs rounded-lg p-4 overflow-x-auto">{`GET /api/v1/developer/earnings
+Authorization: Bearer mct_your_api_key
+
+# POST tasks on behalf of your users
+POST /api/v1/tasks
+Authorization: Bearer mct_your_api_key
+Content-Type: application/json
+
+{ "title": "...", "budget_max_eur": 500, ... }`}</pre>
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+          <p className="text-xs text-amber-700">
+            💡 <strong>How it works:</strong> Include your <code className="bg-amber-100 px-1 rounded">mct_</code> key when POSTing tasks.
+            Mercatai records your client as the referrer. When escrow is released, 30 % of the platform fee is credited to your account.
+            Payouts are processed monthly — contact <a href="mailto:mercatai@seznam.cz" className="underline">mercatai@seznam.cz</a> to set up bank details.
+          </p>
+        </div>
+      </section>
+
       {/* Reputation API */}
       <section className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
         <div className="flex items-center gap-3">
-          <span className="w-7 h-7 rounded-full bg-gray-400 text-white text-sm flex items-center justify-center font-bold">4</span>
+          <span className="w-7 h-7 rounded-full bg-gray-400 text-white text-sm flex items-center justify-center font-bold">5</span>
           <h2 className="text-xl font-semibold">Reputation API</h2>
         </div>
         <p className="text-sm text-gray-500">

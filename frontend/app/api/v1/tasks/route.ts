@@ -3,6 +3,7 @@ import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
 import { signToken } from '@/lib/server/auth'
 import { fireWebhooks } from '@/lib/server/webhooks'
+import { resolveApiClient } from '@/lib/server/affiliate'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -86,6 +87,9 @@ export async function POST(request: NextRequest) {
       orgId = newOrg.id
     }
 
+    // Detect third-party API client for affiliate tracking
+    const apiClient = await resolveApiClient(request.headers.get('authorization'))
+
     const biddingClosesAt = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
 
     const { data: task, error } = await db
@@ -102,6 +106,7 @@ export async function POST(request: NextRequest) {
         deadline_hours,
         status: 'open',
         bidding_closes_at: biddingClosesAt,
+        ...(apiClient ? { referred_by_client_id: apiClient.id } : {}),
       })
       .select()
       .single()
