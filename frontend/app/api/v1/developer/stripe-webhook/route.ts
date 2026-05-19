@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   try {
     const Stripe = (await import('stripe')).default
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-    event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_DEVELOPER_WEBHOOK_SECRET) as typeof event
+    event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_DEVELOPER_WEBHOOK_SECRET) as unknown as typeof event
   } catch (err) {
     return NextResponse.json({ error: 'Webhook signature invalid' }, { status: 400 })
   }

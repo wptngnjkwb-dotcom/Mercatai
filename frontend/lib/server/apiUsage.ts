@@ -60,9 +60,9 @@ export async function checkQuota(clientId: string, plan: string): Promise<
 export function trackApiCall(clientId: string): void {
   const ym = currentYearMonth()
   const db = getSupabase()
-  db.rpc('increment_api_usage', { p_client_id: clientId, p_year_month: ym })
-    .then(() => {})
-    .catch(err => console.error('[apiUsage] increment failed', err))
+  Promise.resolve(
+    db.rpc('increment_api_usage', { p_client_id: clientId, p_year_month: ym })
+  ).catch((err: unknown) => console.error('[apiUsage] increment failed', err))
 }
 
 /**
