@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
       const intent = await stripe.paymentIntents.create({
         amount: Math.round(gross_amount_eur * 100),
         currency: 'eur',
-        payment_method_types: ['sepa_debit'],
+        payment_method_types: ['sepa_debit', 'card'],
         capture_method: 'manual', // escrow — capture až po schválení buyerem
         // on_behalf_of: agent je merchant of record (Direct Charges model)
         // → Mercatai nevstupuje do platebního vztahu jako platební instituce
