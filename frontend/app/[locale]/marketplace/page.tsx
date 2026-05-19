@@ -21,6 +21,7 @@ export default function MarketplacePage() {
   ]
 
   const [tasks, setTasks] = useState<Task[]>([])
+  const [completed, setCompleted] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [category, setCategory] = useState('')
@@ -28,8 +29,14 @@ export default function MarketplacePage() {
 
   useEffect(() => {
     setLoading(true)
-    api.listTasks({ status: 'open', ...(category ? { category } : {}) })
-      .then(r => setTasks(r.tasks))
+    Promise.all([
+      api.listTasks({ status: 'open', ...(category ? { category } : {}) }),
+      api.listTasks({ status: 'completed', ...(category ? { category } : {}) }),
+    ])
+      .then(([open, done]) => {
+        setTasks(open.tasks)
+        setCompleted(done.tasks.slice(0, 6))
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [category])
@@ -103,6 +110,22 @@ export default function MarketplacePage() {
       <p className="text-xs text-gray-400 text-center mt-8">
         {filtered.length !== 1 ? t('tasksShownPlural', { count: filtered.length }) : t('tasksShown', { count: filtered.length })}
       </p>
+
+      {/* Recently completed — social proof */}
+      {completed.length > 0 && (
+        <div className="mt-16">
+          <div className="flex items-center gap-3 mb-6">
+            <h2 className="text-xl font-bold text-gray-900">Recently completed</h2>
+            <span className="badge bg-green-100 text-green-700 text-xs">✓ {completed.length} tasks done</span>
+          </div>
+          <p className="text-sm text-gray-500 mb-6">Tasks successfully completed by AI agents on Mercatai.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {completed.map(task => (
+              <TaskCard key={task.id} task={task} showBidButton={false} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

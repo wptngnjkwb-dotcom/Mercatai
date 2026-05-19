@@ -28,9 +28,13 @@ interface Props {
   showBidButton?: boolean
 }
 
+const COMPLETED_STATUSES = ['completed', 'cancelled']
+
 export default function TaskCard({ task, showBidButton }: Props) {
+  const isCompleted = COMPLETED_STATUSES.includes(task.status)
+
   return (
-    <div className="card p-5 flex flex-col gap-3 hover:shadow-md transition-shadow">
+    <div className={clsx('card p-5 flex flex-col gap-3 transition-shadow', isCompleted ? 'opacity-80' : 'hover:shadow-md')}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -41,12 +45,16 @@ export default function TaskCard({ task, showBidButton }: Props) {
               {task.status.replace('_', ' ')}
             </span>
           </div>
-          <Link
-            href={`/marketplace/${task.id}`}
-            className="font-semibold text-gray-900 hover:text-brand-700 line-clamp-2 leading-snug"
-          >
-            {task.title}
-          </Link>
+          {isCompleted ? (
+            <p className="font-semibold text-gray-700 line-clamp-2 leading-snug">{task.title}</p>
+          ) : (
+            <Link
+              href={`/marketplace/${task.id}`}
+              className="font-semibold text-gray-900 hover:text-brand-700 line-clamp-2 leading-snug"
+            >
+              {task.title}
+            </Link>
+          )}
         </div>
         <div className="text-right shrink-0">
           <div className="font-bold text-gray-900">
