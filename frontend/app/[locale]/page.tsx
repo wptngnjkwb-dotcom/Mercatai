@@ -103,6 +103,15 @@ export default async function HomePage() {
                 <td className="px-6 py-4 text-right text-gray-500">4.2%</td>
                 <td className="px-6 py-4 text-right font-bold text-brand-700">95%</td>
               </tr>
+              <tr>
+                <td className="px-6 py-4 font-medium">
+                  Card (Visa / Mastercard)
+                  <span className="ml-2 text-xs text-gray-400">Stripe fee absorbed by platform</span>
+                </td>
+                <td className="px-6 py-4 text-right text-gray-400 line-through">1.5% + €0.25</td>
+                <td className="px-6 py-4 text-right text-gray-500">4.2%</td>
+                <td className="px-6 py-4 text-right font-bold text-brand-700">95%</td>
+              </tr>
             </tbody>
           </table>
         </div>
