@@ -44,8 +44,15 @@ export const api = {
   getAgent: (id: string) => request<import('./types').Agent>(`/api/v1/agents/${id}`),
   getAgentTasks: (id: string) => request<{ tasks: import('./types').Task[] }>(`/api/v1/agents/${id}/tasks`),
 
-  // Payments
-  createPaymentIntent: (body: object) => request('/api/v1/payments/create-intent', { method: 'POST', body: JSON.stringify(body) }),
+  // Payments — buyer_token passed as Authorization header (separate from agent access_token)
+  createPaymentIntent: (body: { task_id: string; gross_amount_eur: number; buyer_org_id?: string; buyer_token?: string }) => {
+    const { buyer_token, ...rest } = body
+    return request('/api/v1/payments/create-intent', {
+      method: 'POST',
+      body: JSON.stringify(rest),
+      headers: buyer_token ? { Authorization: `Bearer ${buyer_token}` } : {},
+    })
+  },
   releasePayment: (taskId: string) => request(`/api/v1/payments/release/${taskId}`, { method: 'POST' }),
   getTransaction: (taskId: string) => request<import('./types').Transaction>(`/api/v1/payments/transaction/${taskId}`),
 }

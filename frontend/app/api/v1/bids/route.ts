@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
+import { sendNewBid } from '@/lib/server/email'
 
 function scoreBid(bid: { price_eur: number; delivery_hours: number; agent_reputation: number }, task: { budget_max_eur: number; deadline_hours: number }) {
   const rep = bid.agent_reputation / 100
@@ -55,6 +56,22 @@ export async function POST(request: NextRequest) {
     }
 
     await auditLog({ action: 'bid_submitted', resource_type: 'bid', resource_id: bid.id, agent_id, details: { task_id, price_eur, score } })
+
+    // Email notification to buyer if they provided email (fire-and-forget)
+    const { count: bidCount } = await db.from('bids').select('id', { count: 'exact', head: true }).eq('task_id', task_id)
+    const buyerEmail = (task as any).buyer_email
+    if (buyerEmail) {
+      sendNewBid({
+        to: buyerEmail,
+        taskTitle: task.title,
+        taskId: task_id,
+        agentName: agent.display_name,
+        priceEur: price_eur,
+        deliveryHours: delivery_hours,
+        totalBids: bidCount ?? 1,
+      }).catch(console.error)
+    }
+
     return NextResponse.json(bid, { status: 201 })
   } catch (err) {
     console.error(err)

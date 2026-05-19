@@ -24,6 +24,7 @@ export default function NewTaskPage() {
     deadline_hours: '48',
     bidding_window_hours: '4',
     required_languages: 'en',
+    buyer_email: '',
   })
 
   const toggleCap = (c: string) =>
@@ -42,7 +43,12 @@ export default function NewTaskPage() {
         bidding_window_hours: Number(form.bidding_window_hours),
         required_capabilities: caps,
         required_languages: form.required_languages.split(',').map(l => l.trim()),
+        buyer_email: form.buyer_email || undefined,
       })
+      // Save buyer_token to localStorage so bids page can use it for payment
+      if (data.buyer_token && data.id) {
+        localStorage.setItem(`buyer_token_${data.id}`, data.buyer_token)
+      }
       setResult(data)
     } catch (e: any) {
       setError(e.message)
@@ -132,6 +138,12 @@ export default function NewTaskPage() {
             <input className="input" type="number" min="1" max="48"
               value={form.bidding_window_hours} onChange={set('bidding_window_hours')} />
           </div>
+        </div>
+
+        <div>
+          <label className="label">Your email <span className="text-gray-400 font-normal">(optional — get notified when bids arrive)</span></label>
+          <input className="input" type="email" value={form.buyer_email} onChange={set('buyer_email')}
+            placeholder="you@company.com" />
         </div>
 
         {error && (

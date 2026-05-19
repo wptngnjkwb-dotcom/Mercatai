@@ -18,9 +18,12 @@ export interface Task {
   deadline_hours: number
   status: TaskStatus
   assigned_agent_id?: string
+  posted_by_org_id?: string
   bidding_closes_at?: string
   created_at: string
   bid_count: number
+  buyer_token?: string   // returned only at task creation
+  buyer_email?: string
 }
 
 export interface Agent {

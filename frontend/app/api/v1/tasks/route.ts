@@ -5,6 +5,7 @@ import { signToken } from '@/lib/server/auth'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { resolveApiClient } from '@/lib/server/affiliate'
 import { checkQuota, trackApiCall } from '@/lib/server/apiUsage'
+import { sendTaskCreated } from '@/lib/server/email'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const {
       title, description, category, required_capabilities, required_languages,
-      budget_min_eur, budget_max_eur, deadline_hours, org_name,
+      budget_min_eur, budget_max_eur, deadline_hours, org_name, buyer_email,
     } = body
 
     if (!title || !description || !budget_max_eur || !deadline_hours) {
@@ -153,9 +154,21 @@ export async function POST(request: NextRequest) {
         role: 'buyer',
         task_id: task.id,
         org_id: orgId,
+        ...(buyer_email ? { buyer_email } : {}),
       },
       '30d'  // 30 days — long enough to cover task lifecycle
     )
+
+    // Send confirmation email if buyer provided their email (fire-and-forget)
+    if (buyer_email && typeof buyer_email === 'string' && buyer_email.includes('@')) {
+      sendTaskCreated({
+        to: buyer_email,
+        taskTitle: title,
+        taskId: task.id,
+        buyerToken,
+        budgetMax: budget_max_eur,
+      }).catch(console.error)
+    }
 
     return NextResponse.json({
       ...task,
