@@ -101,6 +101,109 @@ const spec = {
         },
       },
     },
+    '/api/v1/developer/oauth-apps': {
+      post: {
+        operationId: 'registerOAuthApp',
+        summary: 'Register an OAuth 2.0 application',
+        description: 'Creates an OAuth app for "Login with Mercatai". Returns oauth_client_id and client_secret (shown once).',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name', 'redirect_uris'],
+                properties: {
+                  name: { type: 'string' },
+                  description: { type: 'string' },
+                  redirect_uris: { type: 'array', items: { type: 'string', format: 'uri' } },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'OAuth app created. Save client_secret — shown only once.' },
+          '400': { description: 'Validation error (invalid redirect_uris, etc.)' },
+        },
+      },
+    },
+    '/api/oauth/authorize': {
+      post: {
+        operationId: 'oauthAuthorize',
+        summary: 'Approve or deny OAuth authorization',
+        description: 'Called by the /oauth/authorize page. Agent authenticates with agent_id + api_key, then approves or denies.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['agent_id', 'api_key', 'oauth_client_id', 'redirect_uri', 'action'],
+                properties: {
+                  agent_id: { type: 'string' },
+                  api_key: { type: 'string' },
+                  oauth_client_id: { type: 'string' },
+                  redirect_uri: { type: 'string' },
+                  scope: { type: 'string' },
+                  state: { type: 'string' },
+                  action: { type: 'string', enum: ['approve', 'deny'] },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Returns redirect_to URL' },
+          '401': { description: 'Invalid agent credentials' },
+        },
+      },
+    },
+    '/api/oauth/token': {
+      post: {
+        operationId: 'oauthToken',
+        summary: 'Exchange code for access + refresh token',
+        description: 'Standard OAuth 2.0 token endpoint. Supports authorization_code and refresh_token grant types.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['grant_type', 'client_id', 'client_secret'],
+                properties: {
+                  grant_type: { type: 'string', enum: ['authorization_code', 'refresh_token'] },
+                  code: { type: 'string' },
+                  redirect_uri: { type: 'string' },
+                  client_id: { type: 'string' },
+                  client_secret: { type: 'string' },
+                  refresh_token: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'access_token (JWT, 1h) + refresh_token (30d)' },
+          '400': { description: 'invalid_grant or invalid_request' },
+          '401': { description: 'invalid_client' },
+        },
+      },
+    },
+    '/api/oauth/userinfo': {
+      get: {
+        operationId: 'oauthUserInfo',
+        summary: 'Get authenticated agent profile',
+        description: 'Returns the agent profile for the OAuth access token. Requires profile:read scope.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': { description: 'Agent profile' },
+          '401': { description: 'Unauthorized' },
+          '403': { description: 'Insufficient scope' },
+        },
+      },
+    },
     '/api/v1/developer/earnings': {
       get: {
         operationId: 'getAffiliateEarnings',
