@@ -204,6 +204,33 @@ const spec = {
         },
       },
     },
+    '/api/v1/developer/usage': {
+      get: {
+        operationId: 'getApiUsage',
+        summary: 'Get current month API usage and plan limits',
+        description: 'Returns call count, remaining quota, plan tier and 6-month history. Authenticated clients exceeding their limit receive 429 on API calls.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Usage summary',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    plan: { type: 'object', properties: { name: { type: 'string', enum: ['free', 'starter', 'pro'] }, monthly_limit: { type: 'integer' }, price_eur_per_month: { type: 'number' } } },
+                    current_month: { type: 'object', properties: { calls_used: { type: 'integer' }, calls_remaining: { type: 'integer' }, pct_used: { type: 'integer' } } },
+                    history: { type: 'array', items: { type: 'object', properties: { year_month: { type: 'string' }, call_count: { type: 'integer' } } } },
+                    upgrade: { type: 'object', nullable: true, properties: { message: { type: 'string' }, url: { type: 'string' } } },
+                  },
+                },
+              },
+            },
+          },
+          '401': { description: 'Missing or invalid mct_ API key' },
+        },
+      },
+    },
     '/api/v1/developer/earnings': {
       get: {
         operationId: 'getAffiliateEarnings',

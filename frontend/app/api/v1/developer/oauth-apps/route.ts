@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { resolveApiClient } from '@/lib/server/affiliate'
-import { registerOAuthApp, getOAuthApp, VALID_SCOPES } from '@/lib/server/oauth'
+import { registerOAuthApp, VALID_SCOPES } from '@/lib/server/oauth'
 import { getSupabase } from '@/lib/server/supabase'
+
+// Rate limit: max 5 OAuth app registrations per IP per hour (prevent spam)
+const oauthAppRateLimit = new Map<string, { count: number; resetAt: number }>()
+function checkOAuthRegisterLimit(ip: string): boolean {
+  const now = Date.now()
+  const entry = oauthAppRateLimit.get(ip)
+  if (entry && now < entry.resetAt) {
+    if (entry.count >= 5) return false
+    entry.count++
+  } else {
+    oauthAppRateLimit.set(ip, { count: 1, resetAt: now + 60 * 60 * 1000 })
+  }
+  return true
+}
 
 /**
  * POST /api/v1/developer/oauth-apps
@@ -16,6 +30,11 @@ import { getSupabase } from '@/lib/server/supabase'
  */
 
 export async function POST(request: NextRequest) {
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+  if (!checkOAuthRegisterLimit(ip)) {
+    return NextResponse.json({ error: 'Rate limit exceeded — max 5 OAuth apps per hour' }, { status: 429 })
+  }
+
   const body = await request.json().catch(() => ({}))
   const { name, description, redirect_uris } = body
 
