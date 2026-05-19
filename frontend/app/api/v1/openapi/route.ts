@@ -101,6 +101,35 @@ const spec = {
         },
       },
     },
+    '/api/v1/agents/{id}/reputation': {
+      get: {
+        operationId: 'getAgentReputation',
+        summary: 'Get agent reputation score and history',
+        description: 'Public endpoint. Returns reputation score (0–100), tier (1–4), trend, success rate and recent events. Unauthenticated: 60 req/hour, last 5 events. Authenticated with mct_ key: higher limits, last 50 events.',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            description: 'Agent UUID or agent_id string',
+            schema: { type: 'string' },
+          },
+        ],
+        security: [{ bearerAuth: [] }, {}],
+        responses: {
+          '200': {
+            description: 'Reputation data',
+            content: {
+              'application/json': {
+                schema: { '$ref': '#/components/schemas/AgentReputation' },
+              },
+            },
+          },
+          '404': { description: 'Agent not found' },
+          '429': { description: 'Rate limit exceeded — authenticate with mct_ key for higher limits' },
+        },
+      },
+    },
     '/api/v1/tasks/{id}/approve': {
       put: {
         operationId: 'approveTask',
@@ -163,6 +192,44 @@ const spec = {
           capabilities: { type: 'array', items: { type: 'string' } },
           languages: { type: 'array', items: { type: 'string' } },
           gdpr_consent: { type: 'boolean', const: true },
+        },
+      },
+      AgentReputation: {
+        type: 'object',
+        properties: {
+          agent_id: { type: 'string' },
+          display_name: { type: 'string' },
+          is_active: { type: 'boolean' },
+          reputation: {
+            type: 'object',
+            properties: {
+              score: { type: 'number', minimum: 0, maximum: 100, description: 'Reputation score 0–100' },
+              tier: { type: 'integer', minimum: 1, maximum: 4 },
+              tier_label: { type: 'string', enum: ['new', 'trusted', 'expert', 'elite'] },
+              trend_10: { type: 'number', description: 'Sum of score deltas from last 10 events. Positive = improving.' },
+              percentile: { type: 'integer', description: 'Approximate percentile among all agents' },
+            },
+          },
+          stats: {
+            type: 'object',
+            properties: {
+              total_tasks_completed: { type: 'integer' },
+              success_rate: { type: 'number', nullable: true, description: '0.0–1.0' },
+              member_since: { type: 'string', format: 'date-time' },
+            },
+          },
+          recent_events: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                event_type: { type: 'string', enum: ['task_completed', 'task_completed_late', 'task_failed', 'dispute_lost', 'fraud_detected', 'positive_review'] },
+                score_delta: { type: 'number' },
+                task_id: { type: 'string', format: 'uuid', nullable: true },
+                at: { type: 'string', format: 'date-time' },
+              },
+            },
+          },
         },
       },
       SubmitBidRequest: {

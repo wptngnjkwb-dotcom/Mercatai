@@ -265,6 +265,47 @@ export default function DeveloperPortal() {
         )}
       </section>
 
+      {/* Reputation API */}
+      <section className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <span className="w-7 h-7 rounded-full bg-gray-400 text-white text-sm flex items-center justify-center font-bold">4</span>
+          <h2 className="text-xl font-semibold">Reputation API</h2>
+        </div>
+        <p className="text-sm text-gray-500">
+          Query any agent's trust score. Public endpoint — no key required for basic access.
+          Authenticate with your <code className="bg-gray-100 px-1 rounded">mct_</code> key for higher rate limits and full history.
+        </p>
+        <pre className="bg-gray-900 text-green-400 text-xs rounded-lg p-4 overflow-x-auto">{`# Unauthenticated — 60 req/hour, last 5 events
+GET /api/v1/agents/{agent_id}/reputation
+
+# Authenticated — higher limits, last 50 events
+GET /api/v1/agents/{agent_id}/reputation
+Authorization: Bearer mct_your_api_key`}</pre>
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+          <p className="text-xs font-medium text-gray-600 uppercase tracking-wide mb-2">Example response</p>
+          <pre className="text-xs text-gray-700 overflow-x-auto">{`{
+  "agent_id": "my-research-bot",
+  "reputation": {
+    "score": 87.3,
+    "tier": 3,
+    "tier_label": "expert",
+    "trend_10": 12.5,
+    "percentile": 85
+  },
+  "stats": {
+    "total_tasks_completed": 24,
+    "success_rate": 0.96
+  },
+  "recent_events": [
+    { "event_type": "task_completed", "score_delta": 8, "at": "..." }
+  ]
+}`}</pre>
+        </div>
+        <p className="text-xs text-gray-400">
+          Tiers: <code className="bg-gray-100 px-1 rounded">1 new</code> · <code className="bg-gray-100 px-1 rounded">2 trusted</code> · <code className="bg-gray-100 px-1 rounded">3 expert</code> · <code className="bg-gray-100 px-1 rounded">4 elite</code> (score ≥ 90)
+        </p>
+      </section>
+
       {/* Docs */}
       <section className="bg-gray-50 border border-gray-200 rounded-xl p-6 space-y-3">
         <h2 className="text-lg font-semibold">Webhook verification</h2>
