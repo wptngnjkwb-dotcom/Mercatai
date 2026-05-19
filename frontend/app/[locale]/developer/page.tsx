@@ -31,6 +31,11 @@ export default function DeveloperPortal() {
   const [webhooks, setWebhooks] = useState<any[]>([])
   const [listLoading, setListLoading] = useState(false)
 
+  // Usage meter
+  const [usageApiKey, setUsageApiKey] = useState('')
+  const [usageData, setUsageData] = useState<any>(null)
+  const [usageLoading, setUsageLoading] = useState(false)
+
   async function registerClient() {
     setClientLoading(true)
     setClientError('')
@@ -67,6 +72,19 @@ export default function DeveloperPortal() {
       setWebhookError(e.message)
     } finally {
       setWebhookLoading(false)
+    }
+  }
+
+  async function loadUsage() {
+    setUsageLoading(true)
+    try {
+      const res = await fetch('/api/v1/developer/usage', {
+        headers: { Authorization: `Bearer ${usageApiKey}` },
+      })
+      const data = await res.json()
+      setUsageData(data)
+    } finally {
+      setUsageLoading(false)
     }
   }
 
@@ -263,6 +281,66 @@ export default function DeveloperPortal() {
         {webhooks.length === 0 && listClientId && !listLoading && (
           <p className="text-sm text-gray-400">No webhooks found for this client ID.</p>
         )}
+      </section>
+
+      {/* Plans & Usage */}
+      <section className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
+        <h2 className="text-xl font-semibold">Plans & Usage</h2>
+
+        {/* Plan comparison */}
+        <div className="grid grid-cols-3 gap-3 text-sm">
+          {[
+            { name: 'Free', price: '€0', calls: '1 000 / mo', highlight: false },
+            { name: 'Starter', price: '€19 / mo', calls: '10 000 / mo', highlight: true },
+            { name: 'Pro', price: '€79 / mo', calls: '100 000 / mo', highlight: false },
+          ].map(plan => (
+            <div key={plan.name} className={`border rounded-lg p-3 text-center space-y-1 ${plan.highlight ? 'border-brand-500 bg-brand-50' : 'border-gray-200'}`}>
+              <p className="font-semibold">{plan.name}</p>
+              <p className="text-gray-500 text-xs">{plan.calls}</p>
+              <p className="font-bold text-brand-700">{plan.price}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Usage meter */}
+        <div className="space-y-2">
+          <p className="text-sm text-gray-500">Check your current usage:</p>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500"
+              placeholder="mct_your_api_key"
+              value={usageApiKey}
+              onChange={e => setUsageApiKey(e.target.value)}
+            />
+            <button
+              onClick={loadUsage}
+              disabled={!usageApiKey || usageLoading}
+              className="bg-gray-100 border border-gray-300 rounded-lg px-4 py-2 text-sm hover:bg-gray-200 disabled:opacity-50 transition"
+            >
+              {usageLoading ? '…' : 'Check'}
+            </button>
+          </div>
+
+          {usageData && !usageData.error && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium capitalize">{usageData.plan?.name} plan</span>
+                <span className="text-gray-500">{usageData.current_month?.calls_used?.toLocaleString()} / {usageData.plan?.monthly_limit?.toLocaleString()} calls</span>
+              </div>
+              <div className="w-full bg-gray-100 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full transition-all ${usageData.current_month?.pct_used >= 90 ? 'bg-red-500' : usageData.current_month?.pct_used >= 70 ? 'bg-amber-400' : 'bg-brand-500'}`}
+                  style={{ width: `${Math.min(usageData.current_month?.pct_used ?? 0, 100)}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-400">{usageData.current_month?.calls_remaining?.toLocaleString()} calls remaining this month</p>
+              {usageData.upgrade && (
+                <p className="text-xs text-brand-600">{usageData.upgrade.message}</p>
+              )}
+            </div>
+          )}
+          {usageData?.error && <p className="text-sm text-red-600">{usageData.error}</p>}
+        </div>
       </section>
 
       {/* Step 3b — Affiliate Earnings */}

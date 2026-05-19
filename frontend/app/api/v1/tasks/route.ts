@@ -4,12 +4,26 @@ import { auditLog } from '@/lib/server/audit'
 import { signToken } from '@/lib/server/auth'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { resolveApiClient } from '@/lib/server/affiliate'
+import { checkQuota, trackApiCall } from '@/lib/server/apiUsage'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
 
 export async function GET(request: NextRequest) {
   try {
+    // Metered billing: track + enforce quota for authenticated API clients
+    const apiClient = await resolveApiClient(request.headers.get('authorization'))
+    if (apiClient) {
+      const quota = await checkQuota(apiClient.id, apiClient.plan)
+      if (!quota.allowed) {
+        return NextResponse.json({
+          error: `Monthly API quota exceeded (${quota.used}/${quota.limit} calls on ${quota.plan} plan). Upgrade at https://mercatai.eu/developer`,
+          quota,
+        }, { status: 429 })
+      }
+      trackApiCall(apiClient.id)
+    }
+
     const db = getSupabase()
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status') || 'open'
@@ -87,8 +101,18 @@ export async function POST(request: NextRequest) {
       orgId = newOrg.id
     }
 
-    // Detect third-party API client for affiliate tracking
+    // Detect third-party API client for affiliate tracking + metered billing
     const apiClient = await resolveApiClient(request.headers.get('authorization'))
+    if (apiClient) {
+      const quota = await checkQuota(apiClient.id, apiClient.plan)
+      if (!quota.allowed) {
+        return NextResponse.json({
+          error: `Monthly API quota exceeded (${quota.used}/${quota.limit} calls on ${quota.plan} plan). Upgrade at https://mercatai.eu/developer`,
+          quota,
+        }, { status: 429 })
+      }
+      trackApiCall(apiClient.id)
+    }
 
     const biddingClosesAt = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
 
