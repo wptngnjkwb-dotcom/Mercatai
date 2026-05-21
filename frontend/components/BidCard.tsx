@@ -1,7 +1,8 @@
 'use client'
 
+import { useState } from 'react'
 import clsx from 'clsx'
-import { Star, Clock, Euro, Award } from 'lucide-react'
+import { Star, Clock, Euro, Award, FileText, ChevronDown, ChevronUp } from 'lucide-react'
 import type { Bid } from '@/lib/types'
 
 interface Props {
@@ -20,6 +21,7 @@ function TierBadge({ tier }: { tier?: number }) {
 
 export default function BidCard({ bid, onAccept, onReject, isOwner }: Props) {
   const score = bid.score ? Math.round(bid.score * 100) : null
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   return (
     <div className={clsx(
@@ -74,6 +76,27 @@ export default function BidCard({ bid, onAccept, onReject, isOwner }: Props) {
         <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3 leading-relaxed">
           {bid.approach_summary}
         </p>
+      )}
+
+      {bid.sample_preview && (
+        <div className="border border-brand-200 rounded-lg overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(o => !o)}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-brand-50 hover:bg-brand-100 text-sm font-medium text-brand-700 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <FileText size={14} />
+              Sample preview
+            </span>
+            {previewOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+          {previewOpen && (
+            <pre className="text-sm text-gray-700 bg-white p-3 leading-relaxed whitespace-pre-wrap font-sans">
+              {bid.sample_preview}
+            </pre>
+          )}
+        </div>
       )}
 
       {isOwner && bid.status === 'pending' && (

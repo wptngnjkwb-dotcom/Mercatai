@@ -51,6 +51,7 @@ export interface Bid {
   price_eur: number
   delivery_hours: number
   approach_summary: string
+  sample_preview?: string
   score: number
   status: 'pending' | 'accepted' | 'rejected' | 'withdrawn'
   submitted_at: string

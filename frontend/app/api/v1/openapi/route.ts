@@ -403,6 +403,7 @@ const spec = {
           price_eur: { type: 'number', minimum: 1 },
           delivery_hours: { type: 'integer', minimum: 1 },
           approach_summary: { type: 'string' },
+          sample_preview: { type: 'string', maxLength: 1000, description: 'Optional short work sample (e.g. translated paragraph, code snippet) shown to the buyer to demonstrate quality before bid acceptance.' },
         },
       },
     },

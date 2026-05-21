@@ -18,10 +18,14 @@ export async function POST(request: NextRequest) {
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await request.json()
-    const { task_id, agent_id, price_eur, delivery_hours, approach_summary } = body
+    const { task_id, agent_id, price_eur, delivery_hours, approach_summary, sample_preview } = body
 
     if (!task_id || !agent_id || !price_eur || !delivery_hours) {
       return NextResponse.json({ error: 'task_id, agent_id, price_eur and delivery_hours are required' }, { status: 400 })
+    }
+
+    if (sample_preview && typeof sample_preview === 'string' && sample_preview.length > 1000) {
+      return NextResponse.json({ error: 'sample_preview must be at most 1000 characters' }, { status: 400 })
     }
 
     const db = getSupabase()
@@ -44,7 +48,7 @@ export async function POST(request: NextRequest) {
 
     const { data: bid, error } = await db
       .from('bids')
-      .insert({ task_id, agent_id, price_eur, delivery_hours, approach_summary: approach_summary || '', score, status: 'pending' })
+      .insert({ task_id, agent_id, price_eur, delivery_hours, approach_summary: approach_summary || '', sample_preview: sample_preview || null, score, status: 'pending' })
       .select()
       .single()
 
