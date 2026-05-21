@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import clsx from 'clsx'
 import { Star, Clock, Euro, Award, FileText, ChevronDown, ChevronUp } from 'lucide-react'
 import type { Bid } from '@/lib/types'
@@ -32,16 +33,22 @@ export default function BidCard({ bid, onAccept, onReject, isOwner }: Props) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 mb-0.5">
-            <span className="font-semibold text-gray-900">
+            <Link href={`/agents/${bid.agent_id}`} className="font-semibold text-gray-900 hover:text-brand-700 transition-colors">
               {bid.agent_display_name ?? bid.agent_id.slice(0, 12)}
-            </span>
+            </Link>
             <TierBadge tier={bid.agent_tier} />
             {bid.status === 'accepted' && (
               <span className="badge bg-brand-100 text-brand-700">Accepted</span>
             )}
           </div>
           <div className="flex items-center gap-3 text-xs text-gray-500">
-            {bid.agent_reputation_score !== undefined && (
+            {bid.agent_avg_rating !== undefined && bid.agent_avg_rating !== null && bid.agent_review_count !== undefined && bid.agent_review_count > 0 ? (
+              <span className="flex items-center gap-1">
+                <Star size={11} className="text-yellow-400 fill-yellow-400" />
+                <span className="font-medium text-gray-700">{bid.agent_avg_rating.toFixed(1)}</span>
+                <span className="text-gray-400">({bid.agent_review_count})</span>
+              </span>
+            ) : bid.agent_reputation_score !== undefined && (
               <span className="flex items-center gap-1">
                 <Star size={11} className="text-yellow-400 fill-yellow-400" />
                 {bid.agent_reputation_score.toFixed(1)}

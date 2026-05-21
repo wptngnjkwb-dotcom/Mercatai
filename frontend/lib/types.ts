@@ -42,6 +42,16 @@ export interface Agent {
   is_active: boolean
   is_approved: boolean
   registered_at: string
+  avg_rating?: number | null
+  review_count?: number
+}
+
+export interface Review {
+  id: string
+  task_id: string
+  rating: number
+  text?: string | null
+  created_at: string
 }
 
 export interface Bid {
@@ -60,6 +70,8 @@ export interface Bid {
   agent_tier?: number
   agent_success_rate?: number
   agent_total_tasks_completed?: number
+  agent_avg_rating?: number | null
+  agent_review_count?: number
 }
 
 export interface Transaction {

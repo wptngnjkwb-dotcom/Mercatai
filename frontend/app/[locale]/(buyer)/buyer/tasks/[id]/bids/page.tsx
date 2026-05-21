@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, CheckCircle, AlertTriangle, Lock } from 'lucide-react'
+import { ArrowLeft, CheckCircle, AlertTriangle, Lock, Star } from 'lucide-react'
 import BidCard from '@/components/BidCard'
 import { api } from '@/lib/api'
 import type { Task, Bid } from '@/lib/types'
@@ -22,6 +22,13 @@ export default function TaskBidsPage() {
   const [buyerToken, setBuyerToken] = useState('')
   const [payLoading, setPayLoading] = useState(false)
   const [payError, setPayError] = useState('')
+
+  // Review step after task approval
+  const [pendingReview, setPendingReview] = useState<{ agentName: string } | null>(null)
+  const [reviewRating, setReviewRating] = useState(0)
+  const [reviewText, setReviewText] = useState('')
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewError, setReviewError] = useState('')
 
   useEffect(() => {
     Promise.all([api.getTask(id), api.getTaskBids(id)])
@@ -85,17 +92,113 @@ export default function TaskBidsPage() {
   }
 
   const handleApproveTask = async () => {
-    if (!confirm('Approve delivery and release escrow payment to the agent?')) return
+    if (!confirm('Approve delivery and release payment to the agent?')) return
     try {
       await api.approveTask(id)
-      await api.releasePayment(id)
-      router.push('/buyer/dashboard')
+      const acceptedBid = bids.find(b => b.status === 'accepted')
+      setPendingReview({ agentName: acceptedBid?.agent_display_name ?? 'the agent' })
     } catch (e: any) {
       setError(e.message)
     }
   }
 
+  const handleSubmitReview = async () => {
+    if (!reviewRating || !buyerToken) return
+    setReviewLoading(true)
+    setReviewError('')
+    try {
+      await api.submitReview({
+        task_id: id,
+        rating: reviewRating,
+        text: reviewText || undefined,
+        buyer_token: buyerToken,
+      })
+      router.push('/buyer/dashboard?reviewed=1')
+    } catch (e: any) {
+      setReviewError(e.message ?? 'Failed to submit review')
+    } finally {
+      setReviewLoading(false)
+    }
+  }
+
+  const handleSkipReview = () => {
+    router.push('/buyer/dashboard')
+  }
+
   if (loading) return <div className="max-w-3xl mx-auto px-4 py-10 text-gray-500">Loading...</div>
+
+  // Review step overlay after task approval
+  if (pendingReview) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16 space-y-6">
+        <div className="text-center space-y-2">
+          <div className="w-14 h-14 bg-yellow-50 rounded-full mx-auto flex items-center justify-center">
+            <Star className="text-yellow-500 fill-yellow-400" size={28} />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900">Rate the delivery</h1>
+          <p className="text-gray-500 text-sm">
+            Your payment has been released to <strong>{pendingReview.agentName}</strong>. Your honest review
+            helps other buyers choose the right agent.
+          </p>
+        </div>
+
+        <div className="flex justify-center gap-2">
+          {[1, 2, 3, 4, 5].map(n => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setReviewRating(n)}
+              className="p-1 transition-transform hover:scale-110"
+              aria-label={`${n} star${n > 1 ? 's' : ''}`}
+            >
+              <Star
+                size={36}
+                className={n <= reviewRating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}
+              />
+            </button>
+          ))}
+        </div>
+
+        <textarea
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 h-24 resize-none"
+          placeholder="Optional — what went well? Anything to improve? (max 2000 chars)"
+          maxLength={2000}
+          value={reviewText}
+          onChange={e => setReviewText(e.target.value)}
+        />
+
+        {!buyerToken && (
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">Your buyer token</label>
+            <textarea
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500 h-20 resize-none"
+              placeholder="Paste your buyer token (eyJ...)"
+              value={buyerToken}
+              onChange={e => setBuyerToken(e.target.value)}
+            />
+          </div>
+        )}
+
+        {reviewError && <p className="text-sm text-red-600">{reviewError}</p>}
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleSubmitReview}
+            disabled={!reviewRating || !buyerToken || reviewLoading}
+            className="flex-1 bg-brand-600 text-white rounded-xl py-3 font-semibold hover:bg-brand-700 disabled:opacity-50 transition"
+          >
+            {reviewLoading ? 'Submitting…' : 'Submit review'}
+          </button>
+          <button
+            onClick={handleSkipReview}
+            className="px-4 py-3 text-sm text-gray-500 hover:text-gray-700"
+          >
+            Skip
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   // Payment step overlay after bid acceptance
   if (pendingPayment) {
@@ -106,10 +209,10 @@ export default function TaskBidsPage() {
           <div className="w-14 h-14 bg-brand-50 rounded-full mx-auto flex items-center justify-center">
             <Lock className="text-brand-600" size={28} />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Pay into escrow</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Authorize payment</h1>
           <p className="text-gray-500 text-sm">
-            Bid accepted from <strong>{pendingPayment.agentName}</strong>. Your payment is held securely
-            until you approve the delivery.
+            Bid accepted from <strong>{pendingPayment.agentName}</strong>. Payment is securely
+            authorized via Stripe and released only after you approve the delivery.
           </p>
         </div>
 
@@ -137,10 +240,10 @@ export default function TaskBidsPage() {
           disabled={!buyerToken || payLoading}
           className="w-full bg-brand-600 text-white rounded-xl py-3 font-semibold hover:bg-brand-700 disabled:opacity-50 transition"
         >
-          {payLoading ? 'Processing…' : `Pay €${(pendingPayment.priceEur + fee).toFixed(2)} into escrow`}
+          {payLoading ? 'Processing…' : `Authorize €${(pendingPayment.priceEur + fee).toFixed(2)} payment`}
         </button>
         <p className="text-xs text-center text-gray-400">
-          Secured by Stripe · SEPA Direct Debit · Released only after your approval
+          Secured by Stripe · SEPA &amp; card · Released only after your approval
         </p>
       </div>
     )
@@ -169,7 +272,7 @@ export default function TaskBidsPage() {
           {task.status === 'review' && (
             <div className="mt-4 flex gap-3">
               <button onClick={handleApproveTask} className="btn-primary flex-1 justify-center">
-                <CheckCircle size={16} /> Approve Delivery & Release Payment
+                <CheckCircle size={16} /> Approve Delivery &amp; Release Payment
               </button>
               <button onClick={() => api.disputeTask(id)} className="btn-danger">
                 <AlertTriangle size={16} /> Dispute

@@ -43,6 +43,17 @@ export const api = {
   registerAgent: (body: object) => request('/api/v1/agents', { method: 'POST', body: JSON.stringify(body) }),
   getAgent: (id: string) => request<import('./types').Agent>(`/api/v1/agents/${id}`),
   getAgentTasks: (id: string) => request<{ tasks: import('./types').Task[] }>(`/api/v1/agents/${id}/tasks`),
+  getAgentReviews: (id: string) => request<{ reviews: import('./types').Review[]; count: number; avg_rating: number | null }>(`/api/v1/agents/${id}/reviews`),
+
+  // Reviews — buyer_token passed as Authorization header
+  submitReview: (body: { task_id: string; rating: number; text?: string; buyer_token: string }) => {
+    const { buyer_token, ...rest } = body
+    return request('/api/v1/reviews', {
+      method: 'POST',
+      body: JSON.stringify(rest),
+      headers: { Authorization: `Bearer ${buyer_token}` },
+    })
+  },
 
   // Payments — buyer_token passed as Authorization header (separate from agent access_token)
   createPaymentIntent: (body: { task_id: string; gross_amount_eur: number; buyer_org_id?: string; buyer_token?: string }) => {
