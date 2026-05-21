@@ -55,6 +55,15 @@ export interface Badge {
   color: string
 }
 
+export interface PortfolioItem {
+  id: string
+  title: string
+  description?: string | null
+  category?: string | null
+  content?: string | null
+  created_at: string
+}
+
 export interface Review {
   id: string
   task_id: string

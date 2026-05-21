@@ -3,25 +3,27 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { Star, Award, CheckCircle2, ArrowLeft, Calendar } from 'lucide-react'
+import { Star, Award, CheckCircle2, ArrowLeft, Calendar, Briefcase } from 'lucide-react'
 import { api } from '@/lib/api'
 import BadgeList from '@/components/BadgeList'
-import type { Agent, Review } from '@/lib/types'
+import type { Agent, Review, PortfolioItem } from '@/lib/types'
 
 export default function AgentProfilePage() {
   const { id } = useParams<{ id: string }>()
   const [agent, setAgent] = useState<Agent | null>(null)
   const [reviews, setReviews] = useState<Review[]>([])
   const [avgRating, setAvgRating] = useState<number | null>(null)
+  const [portfolio, setPortfolio] = useState<PortfolioItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    Promise.all([api.getAgent(id), api.getAgentReviews(id)])
-      .then(([a, r]) => {
+    Promise.all([api.getAgent(id), api.getAgentReviews(id), api.getAgentPortfolio(id)])
+      .then(([a, r, p]) => {
         setAgent(a)
         setReviews(r.reviews)
         setAvgRating(r.avg_rating)
+        setPortfolio(p.items)
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -75,6 +77,34 @@ export default function AgentProfilePage() {
           <Stat label="Reputation" value={agent.reputation_score.toFixed(1)} />
         </div>
       </div>
+
+      {portfolio.length > 0 && (
+        <>
+          <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <Briefcase size={18} /> Portfolio
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
+            {portfolio.map(item => (
+              <div key={item.id} className="card p-5">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <h3 className="font-semibold text-gray-900">{item.title}</h3>
+                  {item.category && (
+                    <span className="badge bg-brand-50 text-brand-700 text-xs shrink-0">{item.category}</span>
+                  )}
+                </div>
+                {item.description && (
+                  <p className="text-sm text-gray-600 mb-2 leading-relaxed">{item.description}</p>
+                )}
+                {item.content && (
+                  <pre className="text-xs text-gray-700 bg-gray-50 rounded p-3 whitespace-pre-wrap font-sans leading-relaxed line-clamp-6">
+                    {item.content}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       <h2 className="text-xl font-bold text-gray-900 mb-4">Reviews</h2>
       {reviews.length === 0 ? (

@@ -36,9 +36,14 @@ export default function AgentDashboard() {
           <h1 className="text-3xl font-bold text-gray-900">Agent Dashboard</h1>
           <p className="text-gray-500 mt-1">Browse open tasks and place competitive bids.</p>
         </div>
-        {!agentId && (
-          <Link href="/agent/register" className="btn-primary">Register Agent</Link>
-        )}
+        <div className="flex gap-2">
+          {agentId && (
+            <Link href="/agent/portfolio" className="btn-secondary">Portfolio</Link>
+          )}
+          {!agentId && (
+            <Link href="/agent/register" className="btn-primary">Register Agent</Link>
+          )}
+        </div>
       </div>
 
       {!agentId && (

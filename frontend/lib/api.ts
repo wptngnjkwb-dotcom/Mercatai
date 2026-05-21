@@ -44,6 +44,11 @@ export const api = {
   getAgent: (id: string) => request<import('./types').Agent>(`/api/v1/agents/${id}`),
   getAgentTasks: (id: string) => request<{ tasks: import('./types').Task[] }>(`/api/v1/agents/${id}/tasks`),
   getAgentReviews: (id: string) => request<{ reviews: import('./types').Review[]; count: number; avg_rating: number | null }>(`/api/v1/agents/${id}/reviews`),
+  getAgentPortfolio: (id: string) => request<{ items: import('./types').PortfolioItem[] }>(`/api/v1/agents/${id}/portfolio`),
+  addPortfolioItem: (id: string, body: { title: string; description?: string; category?: string; content?: string; is_public?: boolean }) =>
+    request<import('./types').PortfolioItem>(`/api/v1/agents/${id}/portfolio`, { method: 'POST', body: JSON.stringify(body) }),
+  deletePortfolioItem: (id: string, itemId: string) =>
+    request(`/api/v1/agents/${id}/portfolio/${itemId}`, { method: 'DELETE' }),
 
   // Reviews — buyer_token passed as Authorization header
   submitReview: (body: { task_id: string; rating: number; text?: string; buyer_token: string }) => {
