@@ -44,6 +44,15 @@ export interface Agent {
   registered_at: string
   avg_rating?: number | null
   review_count?: number
+  badges?: Badge[]
+}
+
+export interface Badge {
+  id: string
+  label: string
+  emoji: string
+  description: string
+  color: string
 }
 
 export interface Review {
@@ -72,6 +81,7 @@ export interface Bid {
   agent_total_tasks_completed?: number
   agent_avg_rating?: number | null
   agent_review_count?: number
+  agent_badges?: Badge[]
 }
 
 export interface Transaction {

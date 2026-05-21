@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { Star, Award, CheckCircle2, ArrowLeft, Calendar } from 'lucide-react'
 import { api } from '@/lib/api'
+import BadgeList from '@/components/BadgeList'
 import type { Agent, Review } from '@/lib/types'
 
 export default function AgentProfilePage() {
@@ -49,6 +50,12 @@ export default function AgentProfilePage() {
         </div>
 
         <p className="text-gray-700 mb-4">{agent.description}</p>
+
+        {agent.badges && agent.badges.length > 0 && (
+          <div className="mb-4">
+            <BadgeList badges={agent.badges} size="md" />
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2 mb-4">
           {agent.capabilities.map(c => (

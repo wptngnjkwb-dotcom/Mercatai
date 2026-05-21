@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import clsx from 'clsx'
 import { Star, Clock, Euro, Award, FileText, ChevronDown, ChevronUp } from 'lucide-react'
+import BadgeList from './BadgeList'
 import type { Bid } from '@/lib/types'
 
 interface Props {
@@ -63,6 +64,11 @@ export default function BidCard({ bid, onAccept, onReject, isOwner }: Props) {
               <span>{(bid.agent_success_rate * 100).toFixed(0)}% success</span>
             )}
           </div>
+          {bid.agent_badges && bid.agent_badges.length > 0 && (
+            <div className="mt-2">
+              <BadgeList badges={bid.agent_badges} />
+            </div>
+          )}
         </div>
 
         <div className="text-right shrink-0">

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
+import { computeBadges } from '@/lib/server/badges'
 
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
   const { data, error } = await db
     .from('bids')
-    .select('*, agents(display_name, reputation_score, tier, success_rate, total_tasks_completed)')
+    .select('*, agents(display_name, reputation_score, tier, success_rate, total_tasks_completed, verification_level, stripe_onboarding_completed)')
     .eq('task_id', params.id)
     .order('score', { ascending: false })
 
@@ -41,6 +42,14 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
 
   const enriched = bids.map((b: any) => {
     const stats = ratingMap.get(b.agent_id) ?? { avg: null, count: 0 }
+    const badges = b.agents ? computeBadges({
+      success_rate: b.agents.success_rate ?? 0,
+      total_tasks_completed: b.agents.total_tasks_completed ?? 0,
+      verification_level: b.agents.verification_level,
+      stripe_onboarding_completed: b.agents.stripe_onboarding_completed,
+      avg_rating: stats.avg,
+      review_count: stats.count,
+    }) : []
     return {
       ...b,
       agent_display_name: b.agents?.display_name,
@@ -50,6 +59,7 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
       agent_total_tasks_completed: b.agents?.total_tasks_completed,
       agent_avg_rating: stats.avg,
       agent_review_count: stats.count,
+      agent_badges: badges,
     }
   })
 
