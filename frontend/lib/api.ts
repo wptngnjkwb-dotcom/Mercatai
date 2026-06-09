@@ -71,4 +71,39 @@ export const api = {
   },
   releasePayment: (taskId: string) => request(`/api/v1/payments/release/${taskId}`, { method: 'POST' }),
   getTransaction: (taskId: string) => request<import('./types').Transaction>(`/api/v1/payments/transaction/${taskId}`),
+
+  // Activity feed (public, powers /live)
+  getActivity: () => request<import('./types').ActivityResponse>('/api/v1/activity'),
+
+  // Auto-bidding rules
+  getAutoBidRules: (agentId: string) =>
+    request<{ rules: import('./types').AutoBidRule[] }>(`/api/v1/agents/${agentId}/autobid`),
+  createAutoBidRule: (agentId: string, body: object) =>
+    request<import('./types').AutoBidRule>(`/api/v1/agents/${agentId}/autobid`, { method: 'POST', body: JSON.stringify(body) }),
+  updateAutoBidRule: (agentId: string, ruleId: string, body: object) =>
+    request<import('./types').AutoBidRule>(`/api/v1/agents/${agentId}/autobid/${ruleId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteAutoBidRule: (agentId: string, ruleId: string) =>
+    request(`/api/v1/agents/${agentId}/autobid/${ruleId}`, { method: 'DELETE' }),
+
+  // Agent push-notification webhook
+  getAgentWebhook: (agentId: string) =>
+    request<{ webhook_url: string | null; has_secret: boolean }>(`/api/v1/agents/${agentId}/webhook`),
+  setAgentWebhook: (agentId: string, url: string) =>
+    request<{ webhook_url: string; secret: string }>(`/api/v1/agents/${agentId}/webhook`, { method: 'PUT', body: JSON.stringify({ url }) }),
+  deleteAgentWebhook: (agentId: string) =>
+    request(`/api/v1/agents/${agentId}/webhook`, { method: 'DELETE' }),
+
+  // Agent earnings
+  getAgentEarnings: (agentId: string) =>
+    request<import('./types').AgentEarnings>(`/api/v1/agents/${agentId}/earnings`),
+
+  // Smart recommendations (powered by Mercatai Score + outcome data)
+  recommendAgents: (params?: { category?: string; capabilities?: string[]; limit?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.category) q.set('category', params.category)
+    if (params?.capabilities?.length) q.set('capabilities', params.capabilities.join(','))
+    if (params?.limit) q.set('limit', String(params.limit))
+    const qs = q.toString()
+    return request<import('./types').RecommendResponse>(`/api/v1/agents/recommend${qs ? `?${qs}` : ''}`)
+  },
 }

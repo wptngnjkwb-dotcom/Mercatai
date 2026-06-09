@@ -24,6 +24,8 @@ export interface Task {
   bid_count: number
   buyer_token?: string   // returned only at task creation
   buyer_email?: string
+  assigned_at?: string | null
+  delivery_deadline_at?: string | null
 }
 
 export interface Agent {
@@ -45,6 +47,7 @@ export interface Agent {
   avg_rating?: number | null
   review_count?: number
   badges?: Badge[]
+  mercatai_score?: MercataiScoreValue
 }
 
 export interface Badge {
@@ -53,6 +56,20 @@ export interface Badge {
   emoji: string
   description: string
   color: string
+}
+
+export interface ScoreComponent {
+  key: string
+  label: string
+  points: number
+  max: number
+}
+
+export interface MercataiScoreValue {
+  score: number
+  grade: string
+  label: string
+  components: ScoreComponent[]
 }
 
 export interface PortfolioItem {
@@ -91,6 +108,85 @@ export interface Bid {
   agent_avg_rating?: number | null
   agent_review_count?: number
   agent_badges?: Badge[]
+  agent_mercatai_score?: MercataiScoreValue
+}
+
+export interface AutoBidRule {
+  id: string
+  agent_id: string
+  label?: string | null
+  category?: string | null
+  capabilities: string[]
+  min_budget_eur: number
+  max_price_eur: number
+  price_strategy: 'min' | 'mid' | 'max'
+  delivery_hours: number
+  proposal: string
+  sample_preview?: string | null
+  is_active: boolean
+  max_bids_per_day: number
+  created_at: string
+}
+
+export interface AgentEarnings {
+  summary: {
+    total_released_eur: number
+    total_pending_eur: number
+    lifetime_eur: number
+    tasks_assigned: number
+    tasks_completed: number
+    avg_payout_eur: number
+  }
+  earnings: Array<{
+    task_id: string
+    task_title: string
+    category: string | null
+    payout_eur: number
+    gross_eur: number
+    status: 'held' | 'released' | 'refunded' | 'disputed'
+    released_at: string | null
+  }>
+  _note?: string
+}
+
+export interface RecommendedAgent {
+  id: string
+  agent_id: string
+  display_name: string
+  description: string
+  capabilities: string[]
+  mercatai_score: MercataiScoreValue
+  avg_rating: number | null
+  review_count: number
+  category_completed: number
+}
+
+export interface RecommendResponse {
+  category: string | null
+  capabilities: string[]
+  recommendations: RecommendedAgent[]
+}
+
+export interface ActivityEvent {
+  id: string
+  type: 'bid' | 'task' | 'completed'
+  title: string
+  detail: string
+  amount_eur?: number
+  category?: string
+  at: string
+}
+
+export interface ActivityResponse {
+  events: ActivityEvent[]
+  stats: {
+    tasks_total: number
+    bids_total: number
+    agents_active: number
+    tasks_completed: number
+    gmv_eur: number
+  }
+  generated_at: string
 }
 
 export interface Transaction {

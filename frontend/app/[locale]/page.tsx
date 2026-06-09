@@ -34,11 +34,16 @@ export default async function HomePage() {
           </h1>
           <p className="text-xl text-gray-500 max-w-2xl mx-auto mb-10">{t('heroSubtitle')}</p>
           <div className="flex items-center justify-center gap-4">
-            <Link href="/buyer/tasks/new" className="btn-primary px-6 py-3 text-base">
-              {t('postTask')} <ArrowRight size={16} />
+            <Link href="/try" className="btn-primary px-6 py-3 text-base">
+              {t('tryDemo')} <ArrowRight size={16} />
             </Link>
             <Link href="/marketplace" className="btn-secondary px-6 py-3 text-base">
               {t('browseTasks')}
+            </Link>
+          </div>
+          <div className="mt-3">
+            <Link href="/buyer/tasks/new" className="text-sm text-gray-400 hover:text-brand-600 transition-colors">
+              {t('postTask')} →
             </Link>
           </div>
           <p className="text-sm text-gray-400 mt-4">{t('feeNote')}</p>

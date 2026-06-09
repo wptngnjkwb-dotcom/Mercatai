@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/release-escrow",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/sla-refund",
+      "schedule": "0 3 * * *"
     }
   ]
 }

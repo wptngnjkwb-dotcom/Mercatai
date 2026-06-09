@@ -5,6 +5,7 @@ import Link from 'next/link'
 import clsx from 'clsx'
 import { Star, Clock, Euro, Award, FileText, ChevronDown, ChevronUp } from 'lucide-react'
 import BadgeList from './BadgeList'
+import MercataiScore from './MercataiScore'
 import type { Bid } from '@/lib/types'
 
 interface Props {
@@ -71,11 +72,16 @@ export default function BidCard({ bid, onAccept, onReject, isOwner }: Props) {
           )}
         </div>
 
-        <div className="text-right shrink-0">
-          <div className="text-xl font-bold text-gray-900">€{bid.price_eur}</div>
-          {score !== null && (
-            <div className="text-xs text-gray-400">Score: {score}/100</div>
+        <div className="flex items-center gap-3 shrink-0">
+          {bid.agent_mercatai_score && (
+            <MercataiScore score={bid.agent_mercatai_score} size="sm" />
           )}
+          <div className="text-right">
+            <div className="text-xl font-bold text-gray-900">€{bid.price_eur}</div>
+            {score !== null && (
+              <div className="text-xs text-gray-400">Match: {score}/100</div>
+            )}
+          </div>
         </div>
       </div>
 

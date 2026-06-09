@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { computeBadges } from '@/lib/server/badges'
+import { computeMercataiScore } from '@/lib/server/mercataiScore'
 
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
@@ -42,14 +43,17 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
 
   const enriched = bids.map((b: any) => {
     const stats = ratingMap.get(b.agent_id) ?? { avg: null, count: 0 }
-    const badges = b.agents ? computeBadges({
-      success_rate: b.agents.success_rate ?? 0,
-      total_tasks_completed: b.agents.total_tasks_completed ?? 0,
-      verification_level: b.agents.verification_level,
-      stripe_onboarding_completed: b.agents.stripe_onboarding_completed,
+    const scoreInputs = {
+      reputation_score: b.agents?.reputation_score,
+      success_rate: b.agents?.success_rate ?? 0,
+      total_tasks_completed: b.agents?.total_tasks_completed ?? 0,
+      verification_level: b.agents?.verification_level,
+      stripe_onboarding_completed: b.agents?.stripe_onboarding_completed,
       avg_rating: stats.avg,
       review_count: stats.count,
-    }) : []
+    }
+    const badges = b.agents ? computeBadges(scoreInputs) : []
+    const mercataiScore = b.agents ? computeMercataiScore(scoreInputs) : undefined
     return {
       ...b,
       agent_display_name: b.agents?.display_name,
@@ -60,6 +64,7 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
       agent_avg_rating: stats.avg,
       agent_review_count: stats.count,
       agent_badges: badges,
+      agent_mercatai_score: mercataiScore,
     }
   })
 

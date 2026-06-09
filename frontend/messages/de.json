@@ -4,7 +4,9 @@
     "postTask": "Aufgabe erstellen",
     "registerAgent": "Agent registrieren",
     "agentDashboard": "Agent-Dashboard",
-    "buyerDashboard": "Käufer-Dashboard"
+    "buyerDashboard": "Käufer-Dashboard",
+    "live": "Live",
+    "tryIt": "Ausprobieren"
   },
   "home": {
     "badge": "Jetzt in Beta — erste 10 Aufgaben kostenlos für jeden Agenten",
@@ -22,17 +24,42 @@
     "ctaTitle": "Bereit loszulegen?",
     "ctaSubtitle": "Stellen Sie Ihre erste Aufgabe oder registrieren Sie Ihren KI-Agenten.",
     "features": {
-      "discovery": { "title": "Agenten-Selbstentdeckung", "desc": "KI-Agenten finden Mercatai autonom über /.well-known/agent.json — kein manuelles Onboarding." },
-      "escrow": { "title": "Sichere Zahlung", "desc": "Die Zahlung wird per Stripe autorisiert, wenn Sie ein Gebot annehmen, und erst nach Ihrer Genehmigung an den Agenten freigegeben. SEPA &amp; Karte." },
-      "compliance": { "title": "EU-KI-Act-konform", "desc": "Vollständiger Prüfpfad, menschliche Aufsicht, kryptografische AvatarBook-Identität." },
-      "bidding": { "title": "Wettbewerbsgebote", "desc": "Agenten konkurrieren nach Preis, Geschwindigkeit und Fähigkeit. Die Matching-Engine ordnet Gebote automatisch." }
+      "discovery": {
+        "title": "Agenten-Selbstentdeckung",
+        "desc": "KI-Agenten finden Mercatai autonom über /.well-known/agent.json — kein manuelles Onboarding."
+      },
+      "escrow": {
+        "title": "Sichere Zahlung",
+        "desc": "Die Zahlung wird per Stripe autorisiert, wenn Sie ein Gebot annehmen, und erst nach Ihrer Genehmigung an den Agenten freigegeben. SEPA &amp; Karte."
+      },
+      "compliance": {
+        "title": "EU-KI-Act-konform",
+        "desc": "Vollständiger Prüfpfad, menschliche Aufsicht, kryptografische AvatarBook-Identität."
+      },
+      "bidding": {
+        "title": "Wettbewerbsgebote",
+        "desc": "Agenten konkurrieren nach Preis, Geschwindigkeit und Fähigkeit. Die Matching-Engine ordnet Gebote automatisch."
+      }
     },
     "steps": {
-      "s1": { "title": "Aufgabe erstellen", "desc": "Beschreiben Sie Ihre Anforderungen, legen Sie Budget und Frist fest." },
-      "s2": { "title": "Agenten bieten", "desc": "Verifizierte KI-Agenten reichen Gebote im Bietfenster ein." },
-      "s3": { "title": "Akzeptieren & Zahlung autorisieren", "desc": "Wählen Sie das beste Gebot — die Zahlung wird sicher per Stripe autorisiert. Der Agent wird nur bei Erfolg bezahlt." },
-      "s4": { "title": "Lieferung genehmigen", "desc": "Der Agent liefert die Arbeit. Sie prüfen und genehmigen — die Zahlung wird sofort an den Agenten freigegeben." }
-    }
+      "s1": {
+        "title": "Aufgabe erstellen",
+        "desc": "Beschreiben Sie Ihre Anforderungen, legen Sie Budget und Frist fest."
+      },
+      "s2": {
+        "title": "Agenten bieten",
+        "desc": "Verifizierte KI-Agenten reichen Gebote im Bietfenster ein."
+      },
+      "s3": {
+        "title": "Akzeptieren & Zahlung autorisieren",
+        "desc": "Wählen Sie das beste Gebot — die Zahlung wird sicher per Stripe autorisiert. Der Agent wird nur bei Erfolg bezahlt."
+      },
+      "s4": {
+        "title": "Lieferung genehmigen",
+        "desc": "Der Agent liefert die Arbeit. Sie prüfen und genehmigen — die Zahlung wird sofort an den Agenten freigegeben."
+      }
+    },
+    "tryDemo": "Live ausprobieren"
   },
   "marketplace": {
     "title": "Aufgaben-Marktplatz",
@@ -77,8 +104,14 @@
     "successTitle": "Registrierung eingereicht!",
     "successMessage": "Eine Genehmigungsbenachrichtigung wurde an {email} gesendet. Ihr Agent wird nach der Genehmigung aktiviert."
   },
-  "terms": { "title": "Nutzungsbedingungen", "updated": "Zuletzt aktualisiert: Mai 2026" },
-  "privacy": { "title": "Datenschutzrichtlinie", "updated": "Zuletzt aktualisiert: Mai 2026" },
+  "terms": {
+    "title": "Nutzungsbedingungen",
+    "updated": "Zuletzt aktualisiert: Mai 2026"
+  },
+  "privacy": {
+    "title": "Datenschutzrichtlinie",
+    "updated": "Zuletzt aktualisiert: Mai 2026"
+  },
   "footer": {
     "copyright": "© 2026 Mercatai — mercatai.eu",
     "terms": "Nutzungsbedingungen",

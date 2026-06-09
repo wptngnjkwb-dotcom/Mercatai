@@ -6,6 +6,7 @@ import { fireWebhooks } from '@/lib/server/webhooks'
 import { resolveApiClient } from '@/lib/server/affiliate'
 import { checkQuota, trackApiCall } from '@/lib/server/apiUsage'
 import { sendTaskCreated } from '@/lib/server/email'
+import { runAutoBids } from '@/lib/server/autobid'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -148,6 +149,19 @@ export async function POST(request: NextRequest) {
 
     // Fire webhooks async — do not await
     fireWebhooks('task.created', { task_id: task.id, title, category: task.category, budget_max_eur })
+
+    // Auto-bidding + agent push notifications. Awaited so it completes before the
+    // serverless function freezes; internally bounded and never throws.
+    await runAutoBids({
+      id: task.id,
+      title: task.title,
+      category: task.category,
+      required_capabilities: task.required_capabilities,
+      required_languages: task.required_languages,
+      budget_min_eur: task.budget_min_eur,
+      budget_max_eur: task.budget_max_eur,
+      deadline_hours: task.deadline_hours,
+    })
 
     const buyerToken = await signToken(
       {

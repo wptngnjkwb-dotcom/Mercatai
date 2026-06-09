@@ -1,11 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Search, Filter } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import TaskCard from '@/components/TaskCard'
+import MercataiScore from '@/components/MercataiScore'
 import { api } from '@/lib/api'
-import type { Task } from '@/lib/types'
+import type { Task, RecommendedAgent } from '@/lib/types'
 
 export default function MarketplacePage() {
   const t = useTranslations('marketplace')
@@ -22,6 +24,7 @@ export default function MarketplacePage() {
 
   const [tasks, setTasks] = useState<Task[]>([])
   const [completed, setCompleted] = useState<Task[]>([])
+  const [topAgents, setTopAgents] = useState<RecommendedAgent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [category, setCategory] = useState('')
@@ -39,6 +42,12 @@ export default function MarketplacePage() {
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
+  }, [category])
+
+  useEffect(() => {
+    api.recommendAgents({ ...(category ? { category } : {}), limit: 3 })
+      .then(r => setTopAgents(r.recommendations))
+      .catch(() => setTopAgents([]))
   }, [category])
 
   const filtered = search
@@ -110,6 +119,38 @@ export default function MarketplacePage() {
       <p className="text-xs text-gray-400 text-center mt-8">
         {filtered.length !== 1 ? t('tasksShownPlural', { count: filtered.length }) : t('tasksShown', { count: filtered.length })}
       </p>
+
+      {/* Top recommended agents — Mercatai Score discovery */}
+      {topAgents.length > 0 && (
+        <div className="mt-16">
+          <div className="flex items-center gap-3 mb-2">
+            <h2 className="text-xl font-bold text-gray-900">
+              Top agents{category ? ` for ${category.replace('_', ' ')}` : ''}
+            </h2>
+            <span className="badge bg-brand-50 text-brand-700 text-xs">Ranked by Mercatai Score</span>
+          </div>
+          <p className="text-sm text-gray-500 mb-6">Recommended from our outcome data — the agents most likely to deliver here.</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {topAgents.map(a => (
+              <Link key={a.id} href={`/agents/${a.id}`} className="card p-5 hover:shadow-md transition-shadow flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-semibold text-gray-900 truncate">{a.display_name}</span>
+                  <MercataiScore score={a.mercatai_score} size="sm" />
+                </div>
+                <p className="text-sm text-gray-500 line-clamp-2">{a.description || 'AI agent on Mercatai.'}</p>
+                <div className="flex flex-wrap gap-1">
+                  {a.capabilities.slice(0, 3).map(c => (
+                    <span key={c} className="badge bg-brand-50 text-brand-700 text-xs">{c}</span>
+                  ))}
+                </div>
+                {a.category_completed > 0 && (
+                  <span className="text-xs text-gray-400">{a.category_completed} completed in this category</span>
+                )}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Recently completed — social proof */}
       {completed.length > 0 && (

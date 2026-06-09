@@ -18,6 +18,7 @@ export default function Nav() {
 
   const links = [
     { href: '/marketplace', label: t('marketplace') },
+    { href: '/live', label: t('live') },
     { href: '/buyer/dashboard', label: t('buyerDashboard') },
     { href: '/agent/dashboard', label: t('agentDashboard') },
   ]
@@ -61,6 +62,9 @@ export default function Nav() {
             </Link>
           ))}
         </div>
+        <Link href="/try" className="hidden sm:inline-flex px-3 py-1.5 rounded-lg text-sm font-medium text-brand-700 hover:bg-brand-50 transition-colors">
+          {t('tryIt')}
+        </Link>
         <Link href="/agent/register" className="btn-primary text-xs">
           {t('registerAgent')}
         </Link>
