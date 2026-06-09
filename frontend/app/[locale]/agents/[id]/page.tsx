@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { Star, Award, CheckCircle2, ArrowLeft, Calendar, Briefcase } from 'lucide-react'
 import { api } from '@/lib/api'
 import BadgeList from '@/components/BadgeList'
+import MercataiScore from '@/components/MercataiScore'
 import type { Agent, Review, PortfolioItem } from '@/lib/types'
 
 export default function AgentProfilePage() {
@@ -52,6 +53,12 @@ export default function AgentProfilePage() {
         </div>
 
         <p className="text-gray-700 mb-4">{agent.description}</p>
+
+        {agent.mercatai_score && (
+          <div className="mb-4 p-4 rounded-xl bg-gray-50 border border-gray-100">
+            <MercataiScore score={agent.mercatai_score} size="lg" showBreakdown />
+          </div>
+        )}
 
         {agent.badges && agent.badges.length > 0 && (
           <div className="mb-4">

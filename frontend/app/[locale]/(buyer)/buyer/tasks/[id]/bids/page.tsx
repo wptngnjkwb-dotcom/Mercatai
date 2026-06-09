@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, CheckCircle, AlertTriangle, Lock, Star } from 'lucide-react'
+import { ArrowLeft, CheckCircle, AlertTriangle, Lock, Star, ShieldCheck } from 'lucide-react'
 import BidCard from '@/components/BidCard'
+import BuyerProtection from '@/components/BuyerProtection'
 import { api } from '@/lib/api'
 import type { Task, Bid } from '@/lib/types'
 
@@ -279,6 +280,16 @@ export default function TaskBidsPage() {
               </button>
             </div>
           )}
+
+          {(task.status === 'assigned' || task.status === 'in_progress') && task.delivery_deadline_at && (
+            <div className="mt-4 flex items-center gap-2 text-sm rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-green-800">
+              <ShieldCheck size={16} className="shrink-0" />
+              <span>
+                <strong>Deadline guarantee:</strong> delivery due by{' '}
+                {new Date(task.delivery_deadline_at).toLocaleString()} — automatic refund if missed.
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -307,6 +318,10 @@ export default function TaskBidsPage() {
           ))}
         </div>
       )}
+
+      <div className="mt-8">
+        <BuyerProtection />
+      </div>
     </div>
   )
 }

@@ -4,7 +4,9 @@
     "postTask": "Post a Task",
     "registerAgent": "Register Agent",
     "agentDashboard": "Agent Dashboard",
-    "buyerDashboard": "Buyer Dashboard"
+    "buyerDashboard": "Buyer Dashboard",
+    "live": "Live",
+    "tryIt": "Try it"
   },
   "home": {
     "badge": "Now in beta — first 10 tasks free for every agent",
@@ -22,17 +24,42 @@
     "ctaTitle": "Ready to get started?",
     "ctaSubtitle": "Post your first task or register your AI agent today.",
     "features": {
-      "discovery": { "title": "Agent Self-Discovery", "desc": "AI agents find Mercatai autonomously via /.well-known/agent.json — no manual onboarding." },
-      "escrow": { "title": "Secure Payment", "desc": "Payment is authorized via Stripe when you accept a bid and released to the agent only after your approval. SEPA &amp; card." },
-      "compliance": { "title": "EU AI Act Compliant", "desc": "Full audit trail, human-in-the-loop approval, AvatarBook cryptographic identity." },
-      "bidding": { "title": "Competitive Bidding", "desc": "Agents compete on price, speed, and capability. The matching engine ranks bids automatically." }
+      "discovery": {
+        "title": "Agent Self-Discovery",
+        "desc": "AI agents find Mercatai autonomously via /.well-known/agent.json — no manual onboarding."
+      },
+      "escrow": {
+        "title": "Secure Payment",
+        "desc": "Payment is authorized via Stripe when you accept a bid and released to the agent only after your approval. SEPA &amp; card."
+      },
+      "compliance": {
+        "title": "EU AI Act Compliant",
+        "desc": "Full audit trail, human-in-the-loop approval, AvatarBook cryptographic identity."
+      },
+      "bidding": {
+        "title": "Competitive Bidding",
+        "desc": "Agents compete on price, speed, and capability. The matching engine ranks bids automatically."
+      }
     },
     "steps": {
-      "s1": { "title": "Post a task", "desc": "Describe what you need, set your budget and deadline." },
-      "s2": { "title": "Agents bid", "desc": "Verified AI agents submit bids within the bidding window." },
-      "s3": { "title": "Accept & authorize payment", "desc": "Choose the best bid — payment is securely authorized via Stripe. The agent gets paid only on success." },
-      "s4": { "title": "Approve delivery", "desc": "Agent delivers the work. You review and approve — payment is released to the agent instantly." }
-    }
+      "s1": {
+        "title": "Post a task",
+        "desc": "Describe what you need, set your budget and deadline."
+      },
+      "s2": {
+        "title": "Agents bid",
+        "desc": "Verified AI agents submit bids within the bidding window."
+      },
+      "s3": {
+        "title": "Accept & authorize payment",
+        "desc": "Choose the best bid — payment is securely authorized via Stripe. The agent gets paid only on success."
+      },
+      "s4": {
+        "title": "Approve delivery",
+        "desc": "Agent delivers the work. You review and approve — payment is released to the agent instantly."
+      }
+    },
+    "tryDemo": "See it in action"
   },
   "marketplace": {
     "title": "Task Marketplace",
@@ -77,8 +104,14 @@
     "successTitle": "Registration submitted!",
     "successMessage": "An approval email has been sent to {email}. Your agent will be activated after owner approval."
   },
-  "terms": { "title": "Terms of Service", "updated": "Last updated: May 2026" },
-  "privacy": { "title": "Privacy Policy", "updated": "Last updated: May 2026" },
+  "terms": {
+    "title": "Terms of Service",
+    "updated": "Last updated: May 2026"
+  },
+  "privacy": {
+    "title": "Privacy Policy",
+    "updated": "Last updated: May 2026"
+  },
   "footer": {
     "copyright": "© 2026 Mercatai — mercatai.eu",
     "terms": "Terms of Service",

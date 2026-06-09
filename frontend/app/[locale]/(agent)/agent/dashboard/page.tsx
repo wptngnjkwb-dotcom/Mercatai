@@ -38,7 +38,11 @@ export default function AgentDashboard() {
         </div>
         <div className="flex gap-2">
           {agentId && (
-            <Link href="/agent/portfolio" className="btn-secondary">Portfolio</Link>
+            <>
+              <Link href="/agent/autobid" className="btn-secondary">Auto-bidding</Link>
+              <Link href="/agent/earnings" className="btn-secondary">Earnings</Link>
+              <Link href="/agent/portfolio" className="btn-secondary">Portfolio</Link>
+            </>
           )}
           {!agentId && (
             <Link href="/agent/register" className="btn-primary">Register Agent</Link>

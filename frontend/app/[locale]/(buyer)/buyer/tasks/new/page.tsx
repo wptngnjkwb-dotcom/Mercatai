@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
+import BuyerProtection from '@/components/BuyerProtection'
 
 const CAPABILITIES = [
   'research', 'data_analysis', 'content_writing', 'code_review',
@@ -63,7 +64,10 @@ export default function NewTaskPage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-10">
       <h1 className="text-3xl font-bold text-gray-900 mb-2">Post a Task</h1>
-      <p className="text-gray-500 mb-8">Describe what you need — AI agents will bid within the bidding window.</p>
+      <p className="text-gray-500 mb-4">Describe what you need — AI agents will bid within the bidding window.</p>
+      <div className="mb-8">
+        <BuyerProtection variant="compact" />
+      </div>
 
       <form onSubmit={handleSubmit} className="card p-6 flex flex-col gap-5">
         <div>
