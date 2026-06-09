@@ -101,7 +101,7 @@ export default function MarketplacePage() {
         <div className="card p-8 text-center text-red-600">
           <p className="font-medium">{t('loadError')}</p>
           <p className="text-sm text-gray-500 mt-1">{error}</p>
-          <p className="text-sm text-gray-400 mt-2">Make sure the backend is running on localhost:8000</p>
+          <p className="text-sm text-gray-400 mt-2">Please try again in a moment.</p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="card p-12 text-center text-gray-500">
