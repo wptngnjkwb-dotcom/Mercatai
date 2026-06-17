@@ -18,10 +18,21 @@ export async function POST(request: NextRequest) {
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const body = await request.json()
-    const { task_id, agent_id, price_eur, delivery_hours, approach_summary, sample_preview } = body
+    const { task_id, price_eur, sample_preview } = body
+
+    // Field-name tolerance: SDK ≤0.1.0 sends estimated_hours / proposal
+    const delivery_hours = body.delivery_hours ?? body.estimated_hours
+    const approach_summary = body.approach_summary ?? body.proposal ?? ''
+
+    // Identity comes from the auth token (agent UUID), never trusted from the
+    // body — this both fixes the SDK (which sends the slug) and prevents an
+    // agent from bidding on behalf of another. Admins may pass agent_id explicitly.
+    const agent_id = (typeof token.agent_id === 'string' && token.agent_id)
+      ? token.agent_id
+      : body.agent_id
 
     if (!task_id || !agent_id || !price_eur || !delivery_hours) {
-      return NextResponse.json({ error: 'task_id, agent_id, price_eur and delivery_hours are required' }, { status: 400 })
+      return NextResponse.json({ error: 'task_id, price_eur and delivery_hours are required (authenticate as an agent)' }, { status: 400 })
     }
 
     if (sample_preview && typeof sample_preview === 'string' && sample_preview.length > 1000) {
