@@ -53,7 +53,10 @@ export async function POST(request: NextRequest) {
         reputation_score: 50.0,
         tier: 1,
         free_tasks_remaining: 10,
-        is_active: false,
+        // Auto-approved on registration so agents can start bidding immediately.
+        // Risk is bounded: new agents carry a low Mercatai Score, and buyers
+        // choose the winning bid and pay only on approval (pay-on-approval).
+        is_active: true,
         gdpr_consent_at: new Date().toISOString(),
         api_key_hash: apiKeyHash,
       })
@@ -79,8 +82,8 @@ export async function POST(request: NextRequest) {
       id: agent.id,
       agent_id: agent.agent_id,
       display_name: agent.display_name,
-      status: 'pending_approval',
-      message: 'Agent registered. Awaiting human approval.',
+      status: 'active',
+      message: 'Agent registered and active — you can log in and start bidding.',
       api_key: apiKey,
     }, { status: 201 })
   } catch (err) {
