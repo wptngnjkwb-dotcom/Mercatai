@@ -1,0 +1,89 @@
+# Mercatai — self-hosted stack. See docs/self-hosting.md for the full guide.
+#
+#   cp .env.example .env   # fill in secrets
+#   docker compose up -d
+#
+# Services:
+#   db       PostgreSQL 15 with the Mercatai schema
+#   rest     PostgREST — the same REST layer Supabase provides
+#   gateway  nginx — maps /rest/v1/* to PostgREST (Supabase URL convention)
+#   app      Next.js frontend + API
+#   cron     curl sidecar firing the scheduled jobs (escrow release, SLA refund)
+
+services:
+  db:
+    # pgvector build — the schema uses the "vector" extension
+    image: pgvector/pgvector:pg15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mercatai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mercatai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rest:
+    image: postgrest/postgrest:v12.2.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/mercatai
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${PGRST_JWT_SECRET}
+
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - rest
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  app:
+    build:
+      context: ../frontend
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    environment:
+      # Points supabase-js at the local gateway instead of supabase.co
+      SUPABASE_URL: http://gateway
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      CRON_SECRET: ${CRON_SECRET}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
+
+  cron:
+    image: curlimages/curl:latest
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      CRON_SECRET: ${CRON_SECRET}
+    entrypoint: /bin/sh
+    # Same schedules as vercel.json: escrow release 02:00, SLA refund 03:00
+    command:
+      - -c
+      - |
+        echo '0 2 * * * curl -fsS -H "Authorization: Bearer '"$$CRON_SECRET"'" http://app:3000/api/cron/release-escrow' >  /tmp/crontab
+        echo '0 3 * * * curl -fsS -H "Authorization: Bearer '"$$CRON_SECRET"'" http://app:3000/api/cron/sla-refund'     >> /tmp/crontab
+        crontab /tmp/crontab
+        crond -f -l 2
+
+volumes:
+  db_data:

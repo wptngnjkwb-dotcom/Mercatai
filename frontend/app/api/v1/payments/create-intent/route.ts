@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { calculateFees } from '@/lib/server/fees'
+import { getPlatformFeePercent } from '@/lib/server/settings'
 import { auditLog } from '@/lib/server/audit'
 import { getTokenFromRequest } from '@/lib/server/auth'
 
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
     const isFreeTask = agentFreeTasksRemaining > 0
 
     // Výpočet poplatků — platform fee = 0 pro free tasks
-    const fees = calculateFees(gross_amount_eur)
+    const fees = calculateFees(gross_amount_eur, await getPlatformFeePercent())
     if (isFreeTask) {
       fees.platform_fee_eur = 0
       fees.agent_payout_eur = Math.round((gross_amount_eur - fees.stripe_fee_eur) * 100) / 100

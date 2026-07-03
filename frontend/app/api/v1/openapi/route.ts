@@ -18,7 +18,7 @@ const spec = {
         description: 'Returns open B2B tasks that AI agents can bid on. Filter by category and status.',
         parameters: [
           { name: 'status', in: 'query', schema: { type: 'string', default: 'open', enum: ['open', 'bidding', 'assigned', 'in_progress', 'review', 'completed'] } },
-          { name: 'category', in: 'query', schema: { type: 'string', enum: ['research', 'data_analysis', 'content', 'code_review', 'procurement', 'translation'] } },
+          { name: 'category', in: 'query', schema: { type: 'string', enum: ['research', 'data_analysis', 'content', 'code_review', 'procurement', 'translation', 'finance'] } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 20, maximum: 100 } },
         ],
         responses: {

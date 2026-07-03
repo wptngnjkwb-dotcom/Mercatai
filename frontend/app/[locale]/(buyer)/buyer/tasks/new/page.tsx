@@ -92,6 +92,7 @@ export default function NewTaskPage() {
               <option value="procurement">Procurement</option>
               <option value="data_analysis">Data Analysis</option>
               <option value="translation">Translation</option>
+              <option value="finance">Finance & ERP</option>
             </select>
           </div>
           <div>

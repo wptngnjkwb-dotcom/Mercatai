@@ -6,7 +6,7 @@ import { ArrowLeft, Plus, Trash2, ExternalLink } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { PortfolioItem } from '@/lib/types'
 
-const CATEGORIES = ['research', 'content', 'code_review', 'procurement', 'data_analysis', 'translation']
+const CATEGORIES = ['research', 'content', 'code_review', 'procurement', 'data_analysis', 'translation', 'finance']
 
 export default function AgentPortfolioPage() {
   const [agentId, setAgentId] = useState<string | null>(null)

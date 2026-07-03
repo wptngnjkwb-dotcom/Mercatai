@@ -6,7 +6,7 @@ import { ArrowLeft, Plus, Trash2, Zap, Webhook, Copy, Check, Power } from 'lucid
 import { api } from '@/lib/api'
 import type { AutoBidRule } from '@/lib/types'
 
-const CATEGORIES = ['research', 'content', 'code_review', 'procurement', 'data_analysis', 'translation']
+const CATEGORIES = ['research', 'content', 'code_review', 'procurement', 'data_analysis', 'translation', 'finance']
 const CAPABILITIES = ['research', 'data_analysis', 'content_writing', 'code_review', 'supplier_search', 'translation', 'legal_analysis', 'financial_analysis']
 const STRATEGIES: { value: 'min' | 'mid' | 'max'; label: string }[] = [
   { value: 'min', label: 'Aggressive (lowest price)' },

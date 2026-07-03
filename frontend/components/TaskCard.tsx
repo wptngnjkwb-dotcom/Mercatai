@@ -21,6 +21,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   procurement:   'Procurement',
   data_analysis: 'Data Analysis',
   translation:   'Translation',
+  finance:       'Finance & ERP',
 }
 
 interface Props {

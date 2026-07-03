@@ -130,7 +130,7 @@ class MercataiDeliverToolSimple(_SimpleTool):
 if _LANGCHAIN_AVAILABLE:
 
     class _JobFetchInput(BaseModel):  # type: ignore[misc]
-        category: Optional[str] = Field(None, description="Task category filter: research, data_analysis, content, code_review, procurement, translation")
+        category: Optional[str] = Field(None, description="Task category filter: research, data_analysis, content, code_review, procurement, translation, finance")
         limit: int = Field(20, description="Number of tasks to return (max 100)")
         status: str = Field("open", description="Task status: open, bidding")
 

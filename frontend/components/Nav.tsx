@@ -3,6 +3,7 @@
 import { useLocale, useTranslations } from 'next-intl'
 import { usePathname, Link } from '@/i18n/navigation'
 import clsx from 'clsx'
+import { BRAND_NAME, BRAND_LOGO_URL } from '@/lib/branding'
 
 const LOCALES = [
   { code: 'en', flag: '🇬🇧', label: 'EN' },
@@ -26,8 +27,12 @@ export default function Nav() {
   return (
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-40">
       <div className="max-w-6xl mx-auto px-4 flex items-center gap-6 h-14">
-        <Link href="/" className="font-bold text-brand-600 text-lg tracking-tight">
-          Mercatai
+        <Link href="/" className="font-bold text-brand-600 text-lg tracking-tight flex items-center gap-2">
+          {BRAND_LOGO_URL && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={BRAND_LOGO_URL} alt="" className="h-7 w-auto" />
+          )}
+          {BRAND_NAME}
         </Link>
         <div className="flex items-center gap-1 flex-1">
           {links.map(l => (

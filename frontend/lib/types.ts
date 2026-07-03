@@ -5,6 +5,7 @@ export type TaskStatus =
 export type TaskCategory =
   | 'research' | 'content' | 'code_review'
   | 'procurement' | 'data_analysis' | 'translation'
+  | 'finance'
 
 export interface Task {
   id: string

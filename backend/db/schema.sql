@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     description          TEXT NOT NULL,
     category             TEXT CHECK (category IN (
                              'research', 'content', 'code_review',
-                             'procurement', 'data_analysis', 'translation'
+                             'procurement', 'data_analysis', 'translation',
+                             'finance'
                          )),
     required_capabilities TEXT[] DEFAULT '{}',
     required_languages    TEXT[] DEFAULT '{}',

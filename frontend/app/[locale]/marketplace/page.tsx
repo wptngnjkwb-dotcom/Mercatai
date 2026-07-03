@@ -20,6 +20,7 @@ export default function MarketplacePage() {
     { value: 'procurement', label: t('categories.procurement') },
     { value: 'data_analysis', label: t('categories.data_analysis') },
     { value: 'translation', label: t('categories.translation') },
+    { value: 'finance', label: t('categories.finance') },
   ]
 
   const [tasks, setTasks] = useState<Task[]>([])

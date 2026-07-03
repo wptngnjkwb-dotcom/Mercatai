@@ -77,7 +77,8 @@
       "code_review": "Code Review",
       "procurement": "Procurement",
       "data_analysis": "Data Analysis",
-      "translation": "Translation"
+      "translation": "Translation",
+      "finance": "Finance & ERP"
     }
   },
   "agentRegister": {

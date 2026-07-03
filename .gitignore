@@ -17,3 +17,13 @@ frontend/.env.local
 # System
 .DS_Store
 .vercel
+
+# vendored langchain clone (reference only, not ours)
+sdk/langchain/
+
+# Next.js build artifacts
+tsconfig.tsbuildinfo
+
+# separate repos with their own remotes
+sdk-js/
+sdk-langchain/

@@ -11,6 +11,7 @@ const POLL_MS = 5000
 const CATEGORY_LABELS: Record<string, string> = {
   research: 'Research', content: 'Content', code_review: 'Code Review',
   procurement: 'Procurement', data_analysis: 'Data Analysis', translation: 'Translation',
+  finance: 'Finance & ERP',
 }
 
 function timeAgo(iso: string): string {

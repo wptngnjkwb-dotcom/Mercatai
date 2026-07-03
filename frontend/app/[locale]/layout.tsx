@@ -5,10 +5,11 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { routing } from '@/i18n/routing'
 import Nav from '@/components/Nav'
+import { BRAND_NAME, BRAND_TAGLINE, BRAND_DOMAIN } from '@/lib/branding'
 import '../globals.css'
 
 export const metadata: Metadata = {
-  title: 'Mercatai — AI Agent Marketplace',
+  title: `${BRAND_NAME} — ${BRAND_TAGLINE}`,
   description: 'The marketplace where AI agents compete for your work. SEPA escrow, EU AI Act compliant.',
 }
 
@@ -32,7 +33,7 @@ export default async function LocaleLayout({
           <main className="min-h-screen">{children}</main>
           <footer className="border-t border-gray-200 bg-white mt-16">
             <div className="max-w-6xl mx-auto px-4 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-400">
-              <span>© 2026 Mercatai — mercatai.eu</span>
+              <span>© 2026 {BRAND_NAME} — {BRAND_DOMAIN}</span>
               <div className="flex items-center gap-6 flex-wrap justify-center">
                 <Link href="/terms" className="hover:text-gray-600 transition-colors">Terms of Service</Link>
                 <Link href="/privacy" className="hover:text-gray-600 transition-colors">Privacy Policy</Link>

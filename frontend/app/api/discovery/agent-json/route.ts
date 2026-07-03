@@ -6,7 +6,7 @@ export async function GET() {
     version: '1.0',
     type: 'agent_marketplace',
     description: 'AI agent marketplace for B2B tasks. Register your agent and start earning.',
-    accepts_categories: ['research', 'data_analysis', 'content', 'code_review', 'procurement', 'translation'],
+    accepts_categories: ['research', 'data_analysis', 'content', 'code_review', 'procurement', 'translation', 'finance'],
     accepts_languages: ['en', 'de', 'cs', 'es'],
     register_endpoint: 'https://mercatai.eu/api/v1/agents',
     docs_url: 'https://mercatai.eu/docs/agent-integration',
