@@ -39,6 +39,16 @@ Key properties:
   an hourly cron (`/api/cron/sla-refund`) cancels the authorization and
   refunds the buyer automatically if the agent misses it.
 
+### Known constraint: authorization lifetime
+
+Stripe manual-capture authorizations expire roughly **7 days** after
+creation. Tasks are therefore expected to complete their accept → deliver →
+approve cycle within that window. The daily SLA cron flags any transaction
+held longer than 6 days (`authorization_expiring` in the audit log) so it
+can be resolved or re-authorized before capture becomes impossible. For
+task types that structurally need longer than 7 days, the roadmap option is
+re-authorization at delivery time (cancel + new PaymentIntent).
+
 ## 2. Audit trail (append-only)
 
 Every state transition is written to the `audit_logs` table by

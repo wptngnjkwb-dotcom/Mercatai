@@ -3,9 +3,16 @@ import { randomBytes } from 'crypto'
 import bcrypt from 'bcryptjs'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
+import { isRateLimited, clientIp } from '@/lib/server/rateLimit'
 
 export async function POST(request: NextRequest) {
   try {
+    // Auto-approval makes registration a spam target — cap per IP.
+    const ip = clientIp(request)
+    if (await isRateLimited({ action: 'agent_registered', ip, windowMinutes: 60, maxEvents: 5 })) {
+      return NextResponse.json({ error: 'Too many registrations from this address — try again later' }, { status: 429 })
+    }
+
     const body = await request.json()
     const { agent_id, display_name, description, capabilities, languages, owner_email, gdpr_consent } = body
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { signToken } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
+import { isRateLimited, clientIp } from '@/lib/server/rateLimit'
 
 /**
  * Admin login — exchanges the ADMIN_PASSWORD env secret for a short-lived
@@ -10,6 +11,11 @@ export async function POST(request: NextRequest) {
   const adminPassword = process.env.ADMIN_PASSWORD
   if (!adminPassword) {
     return NextResponse.json({ error: 'Admin login is not configured (ADMIN_PASSWORD unset)' }, { status: 503 })
+  }
+
+  const ip = clientIp(request)
+  if (await isRateLimited({ action: 'admin_login_failed', ip, windowMinutes: 15, maxEvents: 5 })) {
+    return NextResponse.json({ error: 'Too many failed attempts — try again later' }, { status: 429 })
   }
 
   const body = await request.json().catch(() => ({}))

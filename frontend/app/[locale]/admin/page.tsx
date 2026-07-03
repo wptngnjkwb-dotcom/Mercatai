@@ -11,7 +11,7 @@ interface Overview {
     gmv_eur: number
     platform_revenue_eur: number
   }
-  disputes: { id: string; title: string; category: string; budget_max_eur: number; created_at: string }[]
+  disputes: { id: string; title: string; description: string; category: string; budget_max_eur: number; delivery_note: string | null; dispute_reason: string | null; created_at: string }[]
   agents: { id: string; agent_id: string; display_name: string; is_active: boolean; reputation_score: number; total_tasks_completed: number }[]
   audit_tail: { action: string; resource_type: string; resource_id: string; created_at: string }[]
 }
@@ -169,10 +169,20 @@ export default function AdminPage() {
             {data.disputes.length === 0 && <p className="text-sm text-gray-400">No open disputes.</p>}
             <div className="flex flex-col gap-2">
               {data.disputes.map(d => (
-                <div key={d.id} className="card p-4 flex items-center justify-between gap-3">
-                  <div>
+                <div key={d.id} className="card p-4 flex flex-col md:flex-row md:items-start justify-between gap-3">
+                  <div className="min-w-0">
                     <p className="font-medium">{d.title}</p>
                     <p className="text-sm text-gray-500">{d.category} · up to €{d.budget_max_eur}</p>
+                    {d.dispute_reason && (
+                      <p className="text-sm mt-2"><span className="font-medium text-red-700">Buyer&apos;s reason:</span> {d.dispute_reason}</p>
+                    )}
+                    <details className="mt-2 text-sm">
+                      <summary className="cursor-pointer text-gray-600">Task brief & delivered work</summary>
+                      <p className="mt-1 text-gray-600 whitespace-pre-wrap"><span className="font-medium">Brief:</span> {d.description}</p>
+                      <p className="mt-2 text-gray-800 whitespace-pre-wrap bg-gray-50 rounded p-2 max-h-64 overflow-y-auto">
+                        {d.delivery_note || 'No delivery recorded.'}
+                      </p>
+                    </details>
                   </div>
                   <div className="flex gap-2 shrink-0">
                     <button className="btn-secondary flex items-center gap-1" onClick={() => resolveDispute(d.id, 'refund_buyer')}>

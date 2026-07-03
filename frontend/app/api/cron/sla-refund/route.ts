@@ -80,6 +80,28 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Early warning: Stripe manual-capture authorizations expire ~7 days after
+  // creation. Flag anything held longer than 6 days so it can be re-authorized
+  // or resolved before the money silently becomes uncapturable.
+  try {
+    const sixDaysAgo = new Date(Date.now() - 6 * 24 * 3600 * 1000).toISOString()
+    const { data: expiring } = await db
+      .from('transactions')
+      .select('id, task_id, gross_amount_eur, created_at')
+      .eq('escrow_status', 'held')
+      .lt('created_at', sixDaysAgo)
+    for (const tx of expiring ?? []) {
+      await auditLog({
+        action: 'authorization_expiring',
+        resource_type: 'transaction',
+        resource_id: tx.id,
+        details: { task_id: tx.task_id, gross_amount_eur: tx.gross_amount_eur, authorized_at: tx.created_at },
+      })
+    }
+  } catch {
+    // advisory only — never fail the cron over it
+  }
+
   return NextResponse.json({
     refunded: results.filter(r => r.status === 'refunded').length,
     results,
