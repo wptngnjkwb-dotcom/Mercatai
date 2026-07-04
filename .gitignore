@@ -27,3 +27,6 @@ tsconfig.tsbuildinfo
 # separate repos with their own remotes
 sdk-js/
 sdk-langchain/
+
+# local-only business materials (not for the repo)
+docs/pitch/
