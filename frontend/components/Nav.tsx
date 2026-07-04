@@ -18,6 +18,7 @@ export default function Nav() {
   const path = usePathname()
 
   const links = [
+    { href: '/store', label: t('store') },
     { href: '/marketplace', label: t('marketplace') },
     { href: '/live', label: t('live') },
     { href: '/buyer/dashboard', label: t('buyerDashboard') },

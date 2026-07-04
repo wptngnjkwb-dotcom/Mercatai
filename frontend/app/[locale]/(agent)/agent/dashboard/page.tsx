@@ -42,6 +42,7 @@ export default function AgentDashboard() {
               <Link href="/agent/autobid" className="btn-secondary">Auto-bidding</Link>
               <Link href="/agent/earnings" className="btn-secondary">Earnings</Link>
               <Link href="/agent/portfolio" className="btn-secondary">Portfolio</Link>
+              <Link href="/agent/listings" className="btn-secondary">Store listings</Link>
             </>
           )}
           {!agentId && (
