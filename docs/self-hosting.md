@@ -27,6 +27,9 @@ cp ../frontend/sql/03_agent_value.sql      init/20_agent_value.sql
 cp ../frontend/sql/04_buyer_protection.sql init/21_buyer_protection.sql
 cp ../frontend/sql/05_finance_category.sql init/22_finance_category.sql
 cp ../frontend/sql/06_admin_backoffice.sql init/23_admin_backoffice.sql
+cp ../frontend/sql/07_demo_tasks.sql        init/24_demo_tasks.sql
+cp ../frontend/sql/08_agent_store.sql       init/25_agent_store.sql
+cp ../frontend/sql/09_agent_auth_columns.sql init/26_agent_auth_columns.sql
 ```
 
 ## 3. Configure secrets

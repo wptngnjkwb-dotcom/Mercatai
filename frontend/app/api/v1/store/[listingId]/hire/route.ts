@@ -18,6 +18,13 @@ import { sendTaskCreated } from '@/lib/server/email'
  */
 export async function POST(request: NextRequest, { params }: { params: { listingId: string } }) {
   try {
+    // Fail fast on config errors, before creating any task/bid — signToken
+    // needs the task id so it can only run after those writes, and we don't
+    // want a misconfigured secret to leave an orphaned assigned task behind.
+    if (!process.env.JWT_SECRET_KEY) {
+      throw new Error('JWT_SECRET_KEY environment variable is not set')
+    }
+
     const body = await request.json().catch(() => ({}))
     const { details, org_name, buyer_email } = body
 
