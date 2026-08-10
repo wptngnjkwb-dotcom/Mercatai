@@ -5,6 +5,17 @@ function getToken(): string | null {
   return localStorage.getItem('access_token')
 }
 
+/**
+ * Buyer actions (accept/reject a bid, approve/dispute a delivery) are
+ * authorized by a token bound to that specific task, not by the agent's
+ * generic access_token — the backend rejects anything else.
+ */
+function buyerAuthHeader(taskId: string): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  const buyerToken = localStorage.getItem(`buyer_token_${taskId}`)
+  return buyerToken ? { Authorization: `Bearer ${buyerToken}` } : {}
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken()
   const res = await fetch(`${API}${path}`, {
@@ -30,14 +41,14 @@ export const api = {
   },
   getTask: (id: string) => request<import('./types').Task>(`/api/v1/tasks/${id}`),
   createTask: (body: object) => request<import('./types').Task>('/api/v1/tasks', { method: 'POST', body: JSON.stringify(body) }),
-  approveTask: (id: string) => request(`/api/v1/tasks/${id}/approve`, { method: 'PUT' }),
-  disputeTask: (id: string) => request(`/api/v1/tasks/${id}/dispute`, { method: 'PUT' }),
+  approveTask: (id: string) => request(`/api/v1/tasks/${id}/approve`, { method: 'PUT', headers: buyerAuthHeader(id) }),
+  disputeTask: (id: string) => request(`/api/v1/tasks/${id}/dispute`, { method: 'PUT', headers: buyerAuthHeader(id) }),
   getTaskBids: (id: string) => request<{ bids: import('./types').Bid[] }>(`/api/v1/tasks/${id}/bids`),
 
   // Bids
   submitBid: (body: object) => request('/api/v1/bids', { method: 'POST', body: JSON.stringify(body) }),
-  acceptBid: (id: string) => request(`/api/v1/bids/${id}/accept`, { method: 'PUT' }),
-  rejectBid: (id: string) => request(`/api/v1/bids/${id}/reject`, { method: 'PUT' }),
+  acceptBid: (id: string, taskId: string) => request(`/api/v1/bids/${id}/accept`, { method: 'PUT', headers: buyerAuthHeader(taskId) }),
+  rejectBid: (id: string, taskId: string) => request(`/api/v1/bids/${id}/reject`, { method: 'PUT', headers: buyerAuthHeader(taskId) }),
 
   // Agents
   registerAgent: (body: object) => request('/api/v1/agents', { method: 'POST', body: JSON.stringify(body) }),
@@ -60,13 +71,15 @@ export const api = {
     })
   },
 
-  // Payments — buyer_token passed as Authorization header (separate from agent access_token)
-  createPaymentIntent: (body: { task_id: string; gross_amount_eur: number; buyer_org_id?: string; buyer_token?: string }) => {
-    const { buyer_token, ...rest } = body
-    return request('/api/v1/payments/create-intent', {
+  // Payments — buyer_token passed as Authorization header (separate from agent access_token).
+  // Amount and buyer org are derived server-side from the accepted bid and
+  // the token, so the client only names the task.
+  createPaymentIntent: (body: { task_id: string; buyer_token?: string }) => {
+    const { buyer_token, task_id } = body
+    return request<import('./types').PaymentIntentResponse>('/api/v1/payments/create-intent', {
       method: 'POST',
-      body: JSON.stringify(rest),
-      headers: buyer_token ? { Authorization: `Bearer ${buyer_token}` } : {},
+      body: JSON.stringify({ task_id }),
+      headers: buyer_token ? { Authorization: `Bearer ${buyer_token}` } : buyerAuthHeader(task_id),
     })
   },
   releasePayment: (taskId: string) => request(`/api/v1/payments/release/${taskId}`, { method: 'POST' }),

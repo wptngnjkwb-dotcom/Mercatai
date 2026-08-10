@@ -45,7 +45,7 @@ export default function TaskBidsPage() {
     if (!confirm('Accept this bid? All other bids will be rejected.')) return
     setAction(bidId)
     try {
-      await api.acceptBid(bidId)
+      await api.acceptBid(bidId, id)
       const acceptedBid = bids.find(b => b.id === bidId)
       // Show payment step instead of redirecting
       setPendingPayment({
@@ -66,12 +66,7 @@ export default function TaskBidsPage() {
     setPayLoading(true)
     setPayError('')
     try {
-      await api.createPaymentIntent({
-        task_id: id,
-        gross_amount_eur: pendingPayment.priceEur,
-        buyer_org_id: task?.posted_by_org_id,
-        buyer_token: buyerToken,
-      })
+      await api.createPaymentIntent({ task_id: id, buyer_token: buyerToken })
       router.push('/buyer/dashboard?paid=1')
     } catch (e: any) {
       setPayError(e.message ?? 'Payment failed')
@@ -83,7 +78,7 @@ export default function TaskBidsPage() {
   const handleReject = async (bidId: string) => {
     setAction(bidId)
     try {
-      await api.rejectBid(bidId)
+      await api.rejectBid(bidId, id)
       setBids(prev => prev.map(b => b.id === bidId ? { ...b, status: 'rejected' } : b))
     } catch (e: any) {
       setError(e.message)

@@ -26,12 +26,23 @@ export async function POST(request: NextRequest, { params }: { params: { taskId:
 
   if (!tx) return NextResponse.json({ error: 'No held transaction found — cannot refund' }, { status: 404 })
 
-  // Zrušit Stripe Payment Intent (refund)
+  // Cancel an uncaptured card hold; a SEPA charge has already settled to
+  // the agent (SEPA has no manual capture), so it needs a real refund —
+  // cancelling a succeeded intent would error.
   if (process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
     try {
       const Stripe = (await import('stripe')).default
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-      await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id)
+      const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+      if (intent.status === 'succeeded') {
+        await stripe.refunds.create({
+          payment_intent: tx.stripe_payment_intent_id,
+          reverse_transfer: true,
+          refund_application_fee: true,
+        })
+      } else {
+        await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id)
+      }
     } catch (stripeErr: unknown) {
       const msg = stripeErr instanceof Error ? stripeErr.message : String(stripeErr)
       return NextResponse.json({ error: `Stripe refund failed: ${msg}` }, { status: 502 })

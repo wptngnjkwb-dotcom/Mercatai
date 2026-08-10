@@ -13,20 +13,22 @@ export async function POST(request: NextRequest) {
     const token = await getTokenFromRequest(request)
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { task_id, gross_amount_eur, buyer_org_id } = await request.json()
+    const { task_id, payment_method: requestedMethod } = await request.json()
+    if (!task_id) {
+      return NextResponse.json({ error: 'task_id is required' }, { status: 400 })
+    }
 
-    // Validace vstupů
-    if (!task_id || !gross_amount_eur || !buyer_org_id) {
-      return NextResponse.json({ error: 'task_id, gross_amount_eur and buyer_org_id are required' }, { status: 400 })
+    // The buyer token is bound to a specific task at issuance (see
+    // /api/v1/tasks and /api/v1/store/[listingId]/hire) — task_id and
+    // buyer_org_id must come from the verified token, never from the
+    // request body, or any caller with any valid token could fund an
+    // arbitrary task under an arbitrary organization.
+    const isBuyer = token.role === 'buyer' && token.task_id === task_id
+    const isAdmin = token.tier === 'admin'
+    if (!isBuyer && !isAdmin) {
+      return NextResponse.json({ error: 'Forbidden — only the task buyer can fund this task' }, { status: 403 })
     }
-    if (typeof gross_amount_eur !== 'number' || gross_amount_eur < MIN_AMOUNT) {
-      return NextResponse.json({ error: `Minimum transaction amount is €${MIN_AMOUNT}` }, { status: 400 })
-    }
-    if (gross_amount_eur > MAX_AMOUNT_WITHOUT_KYC) {
-      return NextResponse.json({
-        error: `Transactions over €${MAX_AMOUNT_WITHOUT_KYC} require KYC verification. Contact mercatai@seznam.cz`,
-      }, { status: 403 })
-    }
+    const buyer_org_id = isAdmin ? undefined : (token.org_id as string)
 
     const db = getSupabase()
 
@@ -38,6 +40,32 @@ export async function POST(request: NextRequest) {
     }
     if (!task.assigned_agent_id) {
       return NextResponse.json({ error: 'Task has no assigned agent yet' }, { status: 400 })
+    }
+    const resolvedBuyerOrgId = buyer_org_id ?? task.posted_by_org_id
+    if (isAdmin && !resolvedBuyerOrgId) {
+      return NextResponse.json({ error: 'Task has no buyer organization on record' }, { status: 400 })
+    }
+
+    // The amount is never trusted from the client — it's the accepted
+    // bid's price for this task, full stop.
+    const { data: acceptedBid } = await db
+      .from('bids')
+      .select('price_eur')
+      .eq('task_id', task_id)
+      .eq('status', 'accepted')
+      .maybeSingle()
+    if (!acceptedBid) {
+      return NextResponse.json({ error: 'No accepted bid found for this task' }, { status: 400 })
+    }
+    const gross_amount_eur = Number(acceptedBid.price_eur)
+
+    if (typeof gross_amount_eur !== 'number' || gross_amount_eur < MIN_AMOUNT) {
+      return NextResponse.json({ error: `Minimum transaction amount is €${MIN_AMOUNT}` }, { status: 400 })
+    }
+    if (gross_amount_eur > MAX_AMOUNT_WITHOUT_KYC) {
+      return NextResponse.json({
+        error: `Transactions over €${MAX_AMOUNT_WITHOUT_KYC} require KYC verification. Contact mercatai@seznam.cz`,
+      }, { status: 403 })
     }
 
     // Zkontrolovat že agent má dokončený Stripe Connect onboarding
@@ -83,7 +111,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Fee calculation error' }, { status: 500 })
     }
 
+    // SEPA Direct Debit does not support manual capture, so the two methods
+    // cannot share one intent. Card = authorization hold captured on buyer
+    // approval. SEPA = charged immediately, funds move to the agent before
+    // approval, and a dispute becomes a refund rather than a released hold.
+    const paymentMethod: 'card' | 'sepa_debit' = requestedMethod === 'sepa_debit' ? 'sepa_debit' : 'card'
+    const captureMode: 'manual' | 'immediate' = paymentMethod === 'card' ? 'manual' : 'immediate'
+
     let stripePaymentIntentId = `mock_${Date.now()}`
+    let stripeClientSecret = `mock_secret_${Date.now()}`
 
     if (process.env.STRIPE_SECRET_KEY) {
       const Stripe = (await import('stripe')).default
@@ -91,8 +127,8 @@ export async function POST(request: NextRequest) {
       const intent = await stripe.paymentIntents.create({
         amount: Math.round(gross_amount_eur * 100),
         currency: 'eur',
-        payment_method_types: ['sepa_debit', 'card'],
-        capture_method: 'manual', // escrow — capture až po schválení buyerem
+        payment_method_types: [paymentMethod],
+        ...(captureMode === 'manual' ? { capture_method: 'manual' as const } : {}),
         // on_behalf_of: agent je merchant of record (Direct Charges model)
         // → Mercatai nevstupuje do platebního vztahu jako platební instituce
         on_behalf_of: agentStripeAccount,
@@ -104,13 +140,16 @@ export async function POST(request: NextRequest) {
         },
         metadata: {
           task_id,
-          buyer_org_id,
+          buyer_org_id: resolvedBuyerOrgId,
           agent_id: task.assigned_agent_id,
           platform: 'mercatai',
           free_task: isFreeTask ? 'true' : 'false',
+          capture_mode: captureMode,
         },
       })
       stripePaymentIntentId = intent.id
+      if (!intent.client_secret) throw new Error('Stripe returned no client_secret')
+      stripeClientSecret = intent.client_secret
     }
 
     const reviewDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
@@ -119,7 +158,7 @@ export async function POST(request: NextRequest) {
       .from('transactions')
       .insert({
         task_id,
-        buyer_org_id,
+        buyer_org_id: resolvedBuyerOrgId,
         agent_id: task.assigned_agent_id,
         gross_amount_eur,
         ...fees,
@@ -151,12 +190,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       transaction_id: tx.id,
-      client_secret: stripePaymentIntentId,
+      client_secret: stripeClientSecret,
       gross_amount_eur,
       ...fees,
       free_task: isFreeTask,
       free_tasks_remaining_after: isFreeTask ? agentFreeTasksRemaining - 1 : agentFreeTasksRemaining,
       review_deadline_at: reviewDeadline,
+      capture_mode: captureMode,
     }, { status: 201 })
 
   } catch (err) {

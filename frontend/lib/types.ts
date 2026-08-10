@@ -201,3 +201,21 @@ export interface Transaction {
   review_deadline_at?: string
   released_at?: string
 }
+
+export interface PaymentIntentResponse {
+  transaction_id: string
+  client_secret: string
+  gross_amount_eur: number
+  platform_fee_eur: number
+  stripe_fee_eur: number
+  agent_payout_eur: number
+  free_task: boolean
+  free_tasks_remaining_after: number
+  review_deadline_at: string
+  /**
+   * 'card' authorizes now and captures on approval; 'sepa_debit' charges
+   * immediately (SEPA has no manual capture), so funds reach the agent
+   * before approval and a dispute becomes a refund, not a released hold.
+   */
+  capture_mode: 'manual' | 'immediate'
+}

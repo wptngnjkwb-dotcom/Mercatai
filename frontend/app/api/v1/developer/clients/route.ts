@@ -10,6 +10,7 @@ import { randomBytes } from 'crypto'
 import bcrypt from 'bcryptjs'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
+import { resolveApiClient } from '@/lib/server/affiliate'
 
 const VALID_SCOPES = ['tasks:read', 'agents:read', 'bids:read', 'webhooks:write']
 
@@ -93,21 +94,30 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const db = getSupabase()
-  const { searchParams } = new URL(request.url)
-  const orgName = searchParams.get('org_name')
+  const caller = await resolveApiClient(request.headers.get('authorization'))
+  if (!caller) {
+    return NextResponse.json({ error: 'Authenticate with a Bearer API key to list clients' }, { status: 401 })
+  }
 
-  let query = db
+  const db = getSupabase()
+
+  const { data: callerRecord } = await db
+    .from('api_clients')
+    .select('owner_org_id')
+    .eq('id', caller.id)
+    .single()
+
+  if (!callerRecord?.owner_org_id) {
+    return NextResponse.json({ clients: [] })
+  }
+
+  const { data, error } = await db
     .from('api_clients')
     .select('id, name, scopes, rate_limit_per_hour, is_active, created_at')
     .eq('is_active', true)
+    .eq('owner_org_id', callerRecord.owner_org_id)
+    .order('created_at', { ascending: false })
 
-  if (orgName) {
-    const { data: org } = await db.from('organizations').select('id').eq('name', orgName).maybeSingle()
-    if (org) query = query.eq('owner_org_id', org.id)
-  }
-
-  const { data, error } = await query.order('created_at', { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ clients: data })
 }

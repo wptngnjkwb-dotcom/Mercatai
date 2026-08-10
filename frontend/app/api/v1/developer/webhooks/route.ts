@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomBytes } from 'crypto'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
+import { resolveApiClient } from '@/lib/server/affiliate'
+import { validateWebhookUrl } from '@/lib/server/webhookSecurity'
 
 const VALID_EVENTS = [
   'task.created',
@@ -19,6 +21,14 @@ const VALID_EVENTS = [
 
 export async function POST(request: NextRequest) {
   try {
+    const caller = await resolveApiClient(request.headers.get('authorization'))
+    if (!caller) {
+      return NextResponse.json({ error: 'Authenticate with a Bearer API key to register a webhook' }, { status: 401 })
+    }
+    if (!caller.scopes?.includes('webhooks:write')) {
+      return NextResponse.json({ error: 'API key is missing the webhooks:write scope' }, { status: 403 })
+    }
+
     const body = await request.json()
     const { client_id, url, events } = body
 
@@ -26,12 +36,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'client_id, url and events are required' }, { status: 400 })
     }
 
-    // Validate URL
-    try {
-      const parsed = new URL(url)
-      if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error()
-    } catch {
-      return NextResponse.json({ error: 'url must be a valid HTTP/HTTPS URL' }, { status: 400 })
+    if (client_id !== caller.id) {
+      return NextResponse.json({ error: 'client_id must match the authenticated API client' }, { status: 403 })
+    }
+
+    // Validate URL — rejects malformed URLs and SSRF targets (private/internal addresses)
+    const urlCheck = await validateWebhookUrl(url)
+    if (!urlCheck.ok) {
+      return NextResponse.json({ error: urlCheck.error }, { status: 400 })
     }
 
     // Validate events
@@ -95,17 +107,21 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const db = getSupabase()
-  const { searchParams } = new URL(request.url)
-  const clientId = searchParams.get('client_id')
+  const caller = await resolveApiClient(request.headers.get('authorization'))
+  if (!caller) {
+    return NextResponse.json({ error: 'Authenticate with a Bearer API key to list webhooks' }, { status: 401 })
+  }
 
-  let query = db
+  const db = getSupabase()
+
+  // Always scoped to the authenticated client — a client_id query param
+  // would let one client enumerate another client's webhooks.
+  const { data, error } = await db
     .from('webhooks')
     .select('id, url, events, is_active, last_fired_at, failure_count, created_at')
+    .eq('client_id', caller.id)
+    .order('created_at', { ascending: false })
 
-  if (clientId) query = query.eq('client_id', clientId)
-
-  const { data, error } = await query.order('created_at', { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ webhooks: data })
 }

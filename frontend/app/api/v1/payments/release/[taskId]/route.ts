@@ -24,12 +24,18 @@ export async function POST(request: NextRequest, { params }: { params: { taskId:
     return NextResponse.json({ error: `Cannot release escrow with status: ${tx.escrow_status}` }, { status: 400 })
   }
 
-  // Skutečný Stripe capture — teprve teď jdou peníze
+  // Skutečný Stripe capture — teprve teď jdou peníze.
+  // SEPA intents are created with automatic capture (SEPA has no manual
+  // capture), so the money already moved at charge time — capturing again
+  // would error. Only card holds get captured here.
   if (process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
     try {
       const Stripe = (await import('stripe')).default
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-      await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+      const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+      if (intent.capture_method === 'manual' && intent.status === 'requires_capture') {
+        await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+      }
     } catch (stripeErr: unknown) {
       const msg = stripeErr instanceof Error ? stripeErr.message : String(stripeErr)
       await auditLog({

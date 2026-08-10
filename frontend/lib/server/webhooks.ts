@@ -6,6 +6,7 @@
 
 import crypto from 'crypto'
 import { getSupabase } from './supabase'
+import { validateWebhookUrl } from './webhookSecurity'
 
 export type WebhookEvent =
   | 'task.created'
@@ -54,6 +55,22 @@ export async function fireWebhooks(event: WebhookEvent, data: Record<string, unk
         const signature = sign(wh.secret, body)
         let success = false
         let responseStatus: number | null = null
+
+        // Re-check at delivery time, not just at registration — a hostname
+        // that resolved to a public address when the webhook was created
+        // could since have been repointed at an internal one (DNS rebinding).
+        const urlCheck = await validateWebhookUrl(wh.url)
+        if (!urlCheck.ok) {
+          await db.from('webhook_deliveries').insert({
+            webhook_id: wh.id,
+            event,
+            payload,
+            response_status: null,
+            success: false,
+          })
+          await db.rpc('increment_webhook_failures', { webhook_id: wh.id })
+          return
+        }
 
         try {
           const res = await fetch(wh.url, {
