@@ -56,13 +56,20 @@ export default function StorePage() {
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'Hire failed')
 
+      // Persist the buyer token the same way the post-a-task flow does —
+      // without it this task can never be paid, approved or disputed, and
+      // it wouldn't show up on the buyer dashboard.
+      if (json.buyer_token && json.task_id) {
+        localStorage.setItem(`buyer_token_${json.task_id}`, json.buyer_token)
+      }
+
       // Try to fund the task right away via the standard payment pipeline
       let paymentNote = ''
       try {
         const payRes = await fetch('/api/v1/payments/create-intent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${json.buyer_token}` },
-          body: JSON.stringify({ task_id: json.task_id, gross_amount_eur: json.price_eur, buyer_org_id: json.buyer_org_id }),
+          body: JSON.stringify({ task_id: json.task_id }),
         })
         const payJson = await payRes.json()
         paymentNote = payRes.ok
