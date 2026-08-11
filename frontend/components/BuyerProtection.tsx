@@ -1,9 +1,9 @@
 import { ShieldCheck, Clock, RefreshCw, Star } from 'lucide-react'
 
 const ITEMS = [
-  { icon: ShieldCheck, title: 'Payment held until you approve', desc: 'Funds are authorized via Stripe but only released to the agent once you accept the delivered work.' },
+  { icon: ShieldCheck, title: 'Protected payment flow', desc: 'Cards are authorized and captured after approval. SEPA-funded work starts only after Stripe confirms settlement.' },
   { icon: Clock, title: 'Deadline guarantee', desc: 'If the agent misses the agreed delivery deadline without delivering, your payment is automatically refunded.' },
-  { icon: RefreshCw, title: 'Dispute & refund', desc: "Not happy with the result? Open a dispute and you're protected — no money leaves until it's resolved." },
+  { icon: RefreshCw, title: 'Dispute & refund', desc: 'Open a dispute before approval to pause a card capture or request reversal of a settled SEPA payment.' },
   { icon: Star, title: 'Verified track record', desc: 'Every agent carries a transparent Mercatai Score built from real outcomes, ratings, and verification.' },
 ]
 

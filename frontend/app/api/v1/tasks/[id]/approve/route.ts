@@ -39,11 +39,28 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ message: 'Already released' }, { status: 200 })
   }
 
+  // Nothing was ever captured for a payment that is still pending (card
+  // never confirmed, SEPA still settling) or that failed. Approving here
+  // would mark the transaction released and credit the agent for money the
+  // buyer never paid — and 'released' would then block both the release and
+  // refund paths, which only act on 'held'.
+  if (tx.escrow_status !== 'held') {
+    return NextResponse.json({
+      error: `Payment is not funded yet (status: ${tx.escrow_status}) — cannot approve`,
+      escrow_status: tx.escrow_status,
+    }, { status: 402 })
+  }
+
   if (tx && tx.escrow_status === 'held' && process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
     try {
       const Stripe = (await import('stripe')).default
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-      await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+      const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+      if (intent.capture_method === 'manual' && intent.status === 'requires_capture') {
+        await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+      } else if (intent.capture_method === 'manual' && intent.status !== 'succeeded') {
+        return NextResponse.json({ error: `Card authorization is not capturable (Stripe status: ${intent.status})` }, { status: 409 })
+      }
     } catch (stripeErr) {
       console.error('Stripe capture failed:', stripeErr)
       return NextResponse.json({ error: 'Payment capture failed — escrow not released' }, { status: 502 })

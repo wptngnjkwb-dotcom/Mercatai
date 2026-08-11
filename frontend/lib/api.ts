@@ -74,11 +74,11 @@ export const api = {
   // Payments — buyer_token passed as Authorization header (separate from agent access_token).
   // Amount and buyer org are derived server-side from the accepted bid and
   // the token, so the client only names the task.
-  createPaymentIntent: (body: { task_id: string; buyer_token?: string }) => {
-    const { buyer_token, task_id } = body
+  createPaymentIntent: (body: { task_id: string; buyer_token?: string; payment_method?: 'card' | 'sepa_debit' }) => {
+    const { buyer_token, task_id, payment_method } = body
     return request<import('./types').PaymentIntentResponse>('/api/v1/payments/create-intent', {
       method: 'POST',
-      body: JSON.stringify({ task_id }),
+      body: JSON.stringify({ task_id, payment_method }),
       headers: buyer_token ? { Authorization: `Bearer ${buyer_token}` } : buyerAuthHeader(task_id),
     })
   },

@@ -197,7 +197,7 @@ export interface Transaction {
   platform_fee_eur: number
   stripe_fee_eur: number
   agent_payout_eur: number
-  escrow_status: 'held' | 'released' | 'refunded' | 'disputed'
+  escrow_status: 'pending' | 'held' | 'released' | 'refunded' | 'disputed' | 'failed'
   review_deadline_at?: string
   released_at?: string
 }
@@ -218,4 +218,5 @@ export interface PaymentIntentResponse {
    * before approval and a dispute becomes a refund, not a released hold.
    */
   capture_mode: 'manual' | 'immediate'
+  payment_method: 'card' | 'sepa_debit'
 }

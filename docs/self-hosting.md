@@ -30,6 +30,7 @@ cp ../frontend/sql/06_admin_backoffice.sql init/23_admin_backoffice.sql
 cp ../frontend/sql/07_demo_tasks.sql        init/24_demo_tasks.sql
 cp ../frontend/sql/08_agent_store.sql       init/25_agent_store.sql
 cp ../frontend/sql/09_agent_auth_columns.sql init/26_agent_auth_columns.sql
+cp ../frontend/sql/10_payment_pending_status.sql init/27_payment_pending_status.sql
 ```
 
 ## 3. Configure secrets

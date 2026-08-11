@@ -27,6 +27,41 @@ export default function BuyerDashboard() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('all')
+  const [paymentNotice, setPaymentNotice] = useState('')
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const returnedTaskId = params.get('task_id')
+    const directState = params.get('payment')
+
+    if (directState === 'authorized') {
+      setPaymentNotice('Card authorized. Work can start; capture happens after you approve the delivery.')
+    } else if (directState === 'processing') {
+      setPaymentNotice('SEPA debit submitted. Work starts after Stripe confirms settlement.')
+    }
+
+    if (!returnedTaskId || params.get('payment_return') !== '1') return
+    const buyerToken = localStorage.getItem(`buyer_token_${returnedTaskId}`)
+    if (!buyerToken) {
+      setPaymentNotice('Payment returned from Stripe, but this browser has no buyer token to verify it.')
+      return
+    }
+
+    fetch(`/api/v1/payments/status/${returnedTaskId}`, {
+      headers: { Authorization: `Bearer ${buyerToken}` },
+      cache: 'no-store',
+    })
+      .then(async response => {
+        const body = await response.json()
+        if (!response.ok) throw new Error(body.error || 'Payment verification failed')
+        setPaymentNotice(body.payment_state === 'processing'
+          ? 'SEPA debit submitted. Work starts after Stripe confirms settlement.'
+          : body.payment_state === 'authorized'
+            ? 'Payment authorized. Work can start.'
+            : 'Payment still needs confirmation. Open the task to finish payment.')
+      })
+      .catch(error => setPaymentNotice(error instanceof Error ? error.message : 'Payment verification failed'))
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -64,6 +99,12 @@ export default function BuyerDashboard() {
       </div>
 
       {/* Tabs */}
+      {paymentNotice && (
+        <div role="status" className="mb-5 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+          {paymentNotice}
+        </div>
+      )}
+
       <div className="flex gap-1 mb-6 overflow-x-auto">
         {STATUS_TABS.map(s => (
           <button
@@ -109,6 +150,14 @@ export default function BuyerDashboard() {
                   className="absolute top-4 right-4 btn-primary text-xs py-1"
                 >
                   View {task.bid_count} bid{task.bid_count !== 1 ? 's' : ''} <ArrowRight size={12} />
+                </Link>
+              )}
+              {task.status === 'assigned' && (
+                <Link
+                  href={`/buyer/tasks/${task.id}/bids`}
+                  className="absolute top-4 right-4 btn-primary text-xs py-1"
+                >
+                  Complete payment <ArrowRight size={12} />
                 </Link>
               )}
               {task.status === 'review' && (

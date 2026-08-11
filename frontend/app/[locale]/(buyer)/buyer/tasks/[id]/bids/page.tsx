@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft, CheckCircle, AlertTriangle, Lock, Star, ShieldCheck } from 'lucide-react'
 import BidCard from '@/components/BidCard'
 import BuyerProtection from '@/components/BuyerProtection'
+import PaymentCheckout from '@/components/PaymentCheckout'
 import { api } from '@/lib/api'
 import type { Task, Bid } from '@/lib/types'
 
@@ -21,8 +22,6 @@ export default function TaskBidsPage() {
   // Payment step after bid acceptance
   const [pendingPayment, setPendingPayment] = useState<{ bidId: string; priceEur: number; agentName: string } | null>(null)
   const [buyerToken, setBuyerToken] = useState('')
-  const [payLoading, setPayLoading] = useState(false)
-  const [payError, setPayError] = useState('')
 
   // Review step after task approval
   const [pendingReview, setPendingReview] = useState<{ agentName: string } | null>(null)
@@ -33,7 +32,21 @@ export default function TaskBidsPage() {
 
   useEffect(() => {
     Promise.all([api.getTask(id), api.getTaskBids(id)])
-      .then(([t, b]) => { setTask(t); setBids(b.bids) })
+      .then(([t, b]) => {
+        setTask(t)
+        setBids(b.bids)
+        // A store hire or a page reload can land directly in the assigned
+        // state. Reconstruct the payment step from the accepted bid instead
+        // of requiring the buyer to accept it again.
+        const accepted = b.bids.find(bid => bid.status === 'accepted')
+        if (t.status === 'assigned' && accepted) {
+          setPendingPayment({
+            bidId: accepted.id,
+            priceEur: accepted.price_eur,
+            agentName: accepted.agent_display_name ?? 'Agent',
+          })
+        }
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
     // Pre-fill buyer_token from localStorage if saved at task creation
@@ -58,20 +71,6 @@ export default function TaskBidsPage() {
       setError(e.message)
     } finally {
       setAction(null)
-    }
-  }
-
-  const handlePayEscrow = async () => {
-    if (!pendingPayment || !buyerToken) return
-    setPayLoading(true)
-    setPayError('')
-    try {
-      await api.createPaymentIntent({ task_id: id, buyer_token: buyerToken })
-      router.push('/buyer/dashboard?paid=1')
-    } catch (e: any) {
-      setPayError(e.message ?? 'Payment failed')
-    } finally {
-      setPayLoading(false)
     }
   }
 
@@ -198,7 +197,6 @@ export default function TaskBidsPage() {
 
   // Payment step overlay after bid acceptance
   if (pendingPayment) {
-    const fee = Math.round(pendingPayment.priceEur * 0.05 * 100) / 100
     return (
       <div className="max-w-md mx-auto px-4 py-16 space-y-6">
         <div className="text-center space-y-2">
@@ -207,15 +205,15 @@ export default function TaskBidsPage() {
           </div>
           <h1 className="text-2xl font-bold text-gray-900">Authorize payment</h1>
           <p className="text-gray-500 text-sm">
-            Bid accepted from <strong>{pendingPayment.agentName}</strong>. Payment is securely
-            authorized via Stripe and released only after you approve the delivery.
+            Bid accepted from <strong>{pendingPayment.agentName}</strong>. Choose a card hold
+            captured after approval, or a SEPA debit that starts work after settlement.
           </p>
         </div>
 
         <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 space-y-2 text-sm">
           <div className="flex justify-between"><span className="text-gray-500">Task price</span><span className="font-medium">€{pendingPayment.priceEur}</span></div>
-          <div className="flex justify-between"><span className="text-gray-500">Platform fee (5%)</span><span className="font-medium">€{fee}</span></div>
-          <div className="flex justify-between border-t border-gray-200 pt-2 mt-2"><span className="font-semibold">Total</span><span className="font-bold text-brand-700">€{(pendingPayment.priceEur + fee).toFixed(2)}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Buyer fee</span><span className="font-medium">€0.00</span></div>
+          <div className="flex justify-between border-t border-gray-200 pt-2 mt-2"><span className="font-semibold">Total</span><span className="font-bold text-brand-700">€{pendingPayment.priceEur.toFixed(2)}</span></div>
         </div>
 
         <div className="space-y-2">
@@ -229,18 +227,12 @@ export default function TaskBidsPage() {
           <p className="text-xs text-gray-400">You received this token when you posted the task. Check your email or the task creation page.</p>
         </div>
 
-        {payError && <p className="text-sm text-red-600">{payError}</p>}
-
-        <button
-          onClick={handlePayEscrow}
-          disabled={!buyerToken || payLoading}
-          className="w-full bg-brand-600 text-white rounded-xl py-3 font-semibold hover:bg-brand-700 disabled:opacity-50 transition"
-        >
-          {payLoading ? 'Processing…' : `Authorize €${(pendingPayment.priceEur + fee).toFixed(2)} payment`}
-        </button>
-        <p className="text-xs text-center text-gray-400">
-          Secured by Stripe · SEPA &amp; card · Released only after your approval
-        </p>
+        <PaymentCheckout
+          taskId={id}
+          buyerToken={buyerToken}
+          amountEur={pendingPayment.priceEur}
+          onComplete={state => router.push(`/buyer/dashboard?payment=${state}`)}
+        />
       </div>
     )
   }

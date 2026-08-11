@@ -36,11 +36,19 @@ export async function GET(request: NextRequest) {
 
   for (const tx of expiredTx) {
     try {
-      // Stripe capture
+      // Capture card holds. SEPA uses automatic capture and is already
+      // settled before its transaction can reach the held state.
       if (process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
         const Stripe = (await import('stripe')).default
         const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-        await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+        const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+        if (intent.capture_method === 'manual' && intent.status === 'requires_capture') {
+          await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+        } else if (intent.capture_method === 'manual' && intent.status !== 'succeeded') {
+          throw new Error(`Card authorization is not capturable (Stripe status: ${intent.status})`)
+        } else if (intent.capture_method !== 'manual' && intent.status !== 'succeeded') {
+          throw new Error(`Automatic payment has not settled (Stripe status: ${intent.status})`)
+        }
       }
 
       // Uvolnit escrow v DB

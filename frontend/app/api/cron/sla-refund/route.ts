@@ -46,11 +46,21 @@ export async function GET(request: NextRequest) {
 
   for (const tx of overdue) {
     try {
-      // Cancel the authorized Stripe payment (refund to buyer)
+      // Cancel an uncaptured card authorization; refund an already settled
+      // SEPA debit (automatic-capture intents cannot be canceled).
       if (process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
         const Stripe = (await import('stripe')).default
         const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-        await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id)
+        const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+        if (intent.status === 'succeeded') {
+          await stripe.refunds.create({
+            payment_intent: tx.stripe_payment_intent_id,
+            reverse_transfer: true,
+            refund_application_fee: true,
+          })
+        } else {
+          await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id)
+        }
       }
 
       await db.from('transactions').update({ escrow_status: 'refunded' }).eq('id', tx.id)

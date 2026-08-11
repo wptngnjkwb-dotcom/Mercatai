@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ShoppingBag, Clock, Zap, X, Star } from 'lucide-react'
+import PaymentCheckout from '@/components/PaymentCheckout'
 
 interface Listing {
   id: string
@@ -31,7 +32,12 @@ export default function StorePage() {
   const [hiring, setHiring] = useState<Listing | null>(null)
   const [form, setForm] = useState({ details: '', org_name: '', buyer_email: '' })
   const [submitting, setSubmitting] = useState(false)
-  const [result, setResult] = useState<{ task_id: string; buyer_token: string; payment_note: string } | null>(null)
+  const [result, setResult] = useState<{
+    task_id: string
+    buyer_token: string
+    payment_note: string
+    payment_state?: 'authorized' | 'processing'
+  } | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -63,23 +69,11 @@ export default function StorePage() {
         localStorage.setItem(`buyer_token_${json.task_id}`, json.buyer_token)
       }
 
-      // Try to fund the task right away via the standard payment pipeline
-      let paymentNote = ''
-      try {
-        const payRes = await fetch('/api/v1/payments/create-intent', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${json.buyer_token}` },
-          body: JSON.stringify({ task_id: json.task_id }),
-        })
-        const payJson = await payRes.json()
-        paymentNote = payRes.ok
-          ? 'Payment authorized — the agent has been engaged and work can start.'
-          : `Task created, payment pending: ${payJson.error}`
-      } catch {
-        paymentNote = 'Task created; complete the payment from your buyer dashboard.'
-      }
-
-      setResult({ task_id: json.task_id, buyer_token: json.buyer_token, payment_note: paymentNote })
+      setResult({
+        task_id: json.task_id,
+        buyer_token: json.buyer_token,
+        payment_note: 'Task created. Complete the secure payment below to engage the agent.',
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Hire failed')
     } finally {
@@ -153,27 +147,43 @@ export default function StorePage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-bold">{result ? 'Agent hired' : `Hire: ${hiring.title}`}</h2>
+              <h2 className="text-lg font-bold">{result ? (result.payment_state ? 'Agent hired' : 'Complete payment') : `Hire: ${hiring.title}`}</h2>
               <button onClick={() => setHiring(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
 
             {result ? (
               <div className="flex flex-col gap-3 text-sm">
-                <p className="text-green-700">{result.payment_note}</p>
+                <p className={result.payment_state ? 'text-green-700' : 'text-gray-600'}>{result.payment_note}</p>
                 <div>
                   <p className="font-medium mb-1">Your buyer token — save it now, it is shown once:</p>
                   <code className="block bg-gray-50 rounded p-2 break-all text-xs">{result.buyer_token}</code>
                 </div>
                 <p className="text-gray-500">
                   Track the task in your <Link href="/buyer/dashboard" className="text-brand-700 underline">buyer dashboard</Link>.
-                  You approve the work before any money is released.
+                  Card payments are captured after approval; settled SEPA payments remain covered by the dispute and refund flow.
                 </p>
+                {!result.payment_state && (
+                  <div className="border-t border-gray-200 pt-4 mt-1">
+                    <PaymentCheckout
+                      taskId={result.task_id}
+                      buyerToken={result.buyer_token}
+                      amountEur={hiring.price_eur}
+                      onComplete={paymentState => setResult(current => current ? {
+                        ...current,
+                        payment_state: paymentState,
+                        payment_note: paymentState === 'processing'
+                          ? 'SEPA debit submitted. The agent will start after Stripe confirms settlement.'
+                          : 'Card authorized. The agent is engaged; funds are captured only after your approval.',
+                      } : current)}
+                    />
+                  </div>
+                )}
               </div>
             ) : (
               <form onSubmit={hire} className="flex flex-col gap-3">
                 <p className="text-sm text-gray-500">
                   €{hiring.price_eur} · delivery within {hiring.delivery_hours}h by {hiring.agents.display_name}.
-                  Payment is only authorized now and released after you approve the result.
+                  Choose a card authorization captured after approval, or a SEPA debit that starts work after settlement.
                 </p>
                 <div>
                   <label className="label">Your brief / input for the agent</label>

@@ -55,6 +55,25 @@ details are documented in [`sdk/README.md`](sdk/README.md).
 
 First 10 tasks per agent: **0% platform fee**. After that: 5%.
 
+## Stripe payments
+
+The Next.js app needs `STRIPE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`, and
+`STRIPE_WEBHOOK_SECRET`. Register the payment webhook at
+`/api/v1/payments/stripe-webhook` for these events:
+
+- `payment_intent.amount_capturable_updated`
+- `payment_intent.processing`
+- `payment_intent.succeeded`
+- `payment_intent.payment_failed`
+- `payment_intent.canceled`
+
+Cards are authorized with manual capture and captured only after buyer
+approval. SEPA Direct Debit is asynchronous; the task starts only after Stripe
+reports that the debit succeeded. Apply
+`frontend/sql/10_payment_pending_status.sql` to an existing database before
+deploying this payment flow. Fresh self-host installations apply the matching
+`deploy/init/27_payment_pending_status.sql` automatically.
+
 ## Self-hosting
 
 Run the whole platform — Postgres + PostgREST + nginx + Next.js — on your
