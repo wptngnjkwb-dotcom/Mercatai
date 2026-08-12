@@ -22,22 +22,36 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
   const db = getSupabase()
 
-  const { data: task } = await db.from('tasks').select('*').eq('id', params.id).single()
+  // Task and payment are read together: which answer is correct depends on
+  // the combination, so the task status alone cannot be checked first.
+  const [{ data: task }, { data: tx }] = await Promise.all([
+    db.from('tasks').select('*').eq('id', params.id).single(),
+    db.from('transactions').select('*').eq('task_id', params.id).maybeSingle(),
+  ])
+
   if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+
+  if (tx?.escrow_status === 'released') {
+    // Completed + released is the settled end state — repeat approvals are
+    // a no-op rather than an error.
+    if (task.status === 'completed') {
+      return NextResponse.json({ message: 'Already released' }, { status: 200 })
+    }
+    // A released payment on a task that never completed means the two
+    // records disagree. Reporting success here would paper over it.
+    if (task.status === 'review') {
+      return NextResponse.json({
+        error: 'Payment is released but the task is still in review — inconsistent state, needs manual review',
+        task_status: task.status,
+        escrow_status: tx.escrow_status,
+      }, { status: 409 })
+    }
+  }
+
   if (task.status !== 'review') return NextResponse.json({ error: 'Task is not in review' }, { status: 400 })
 
   // 2. Skutečné uvolnění escrow přes Stripe capture
-  const { data: tx } = await db
-    .from('transactions')
-    .select('*')
-    .eq('task_id', params.id)
-    .maybeSingle()
-
   if (!tx) return NextResponse.json({ error: 'No payment found for this task — cannot approve without escrow' }, { status: 402 })
-
-  if (tx?.escrow_status === 'released') {
-    return NextResponse.json({ message: 'Already released' }, { status: 200 })
-  }
 
   // Nothing was ever captured for a payment that is still pending (card
   // never confirmed, SEPA still settling) or that failed. Approving here

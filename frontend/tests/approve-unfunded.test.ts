@@ -47,7 +47,12 @@ const auditLog = vi.fn(async () => {})
 const applyReputationEvent = vi.fn(async () => {})
 const fireWebhooks = vi.fn(async () => {})
 const recordAffiliateEarning = vi.fn(async () => {})
-const stripeConstructor = vi.fn()
+const retrievePaymentIntent = vi.fn(async () => ({ capture_method: 'manual', status: 'requires_capture' }))
+const capturePaymentIntent = vi.fn(async () => ({}))
+// Must be a function expression, not an arrow — the route calls `new Stripe(...)`
+const stripeConstructor = vi.fn(function () {
+  return { paymentIntents: { retrieve: retrievePaymentIntent, capture: capturePaymentIntent } }
+})
 
 vi.mock('@/lib/server/audit', () => ({ auditLog }))
 vi.mock('@/lib/server/reputation', () => ({ applyReputationEvent }))
@@ -107,12 +112,26 @@ describe('PUT /api/v1/tasks/[id]/approve', () => {
     })
   }
 
-  it('is idempotent for an already released payment', async () => {
+  it('is idempotent when the task is completed and the payment released', async () => {
+    taskRow = { id: TASK_ID, status: 'completed', assigned_agent_id: 'agent-1' }
     transactionRow = { id: 'tx-1', task_id: TASK_ID, escrow_status: 'released', platform_fee_eur: 5 }
 
     const response = await PUT(approveRequest(), { params: { id: TASK_ID } })
 
     expect(response.status).toBe(200)
+    expectNoSideEffects()
+  })
+
+  it('reports a conflict when the payment is released but the task is still in review', async () => {
+    transactionRow = { id: 'tx-1', task_id: TASK_ID, escrow_status: 'released', platform_fee_eur: 5 }
+
+    const response = await PUT(approveRequest(), { params: { id: TASK_ID } })
+    const body = await response.json()
+
+    // Records disagree — reporting "already released" would hide it
+    expect(response.status).toBe(409)
+    expect(body.task_status).toBe('review')
+    expect(body.escrow_status).toBe('released')
     expectNoSideEffects()
   })
 
@@ -123,5 +142,36 @@ describe('PUT /api/v1/tasks/[id]/approve', () => {
 
     expect(response.status).toBe(402)
     expectNoSideEffects()
+  })
+
+  it('rejects approval when the task is not in review', async () => {
+    taskRow = { id: TASK_ID, status: 'in_progress', assigned_agent_id: 'agent-1' }
+    transactionRow = { id: 'tx-1', task_id: TASK_ID, escrow_status: 'held', platform_fee_eur: 5 }
+
+    const response = await PUT(approveRequest(), { params: { id: TASK_ID } })
+
+    expect(response.status).toBe(400)
+    expectNoSideEffects()
+  })
+
+  // The guards above must not have made legitimate approval unreachable.
+  it('captures and releases a funded payment', async () => {
+    transactionRow = {
+      id: 'tx-1',
+      task_id: TASK_ID,
+      escrow_status: 'held',
+      platform_fee_eur: 5,
+      agent_payout_eur: 90,
+      stripe_payment_intent_id: 'pi_test',
+    }
+
+    const response = await PUT(approveRequest(), { params: { id: TASK_ID } })
+
+    expect(response.status).toBe(200)
+    expect(capturePaymentIntent).toHaveBeenCalledWith('pi_test')
+    expect(taskUpdates).toContainEqual({ status: 'completed' })
+    expect(transactionUpdates[0]).toMatchObject({ escrow_status: 'released' })
+    expect(applyReputationEvent).toHaveBeenCalled()
+    expect(fireWebhooks).toHaveBeenCalled()
   })
 })
