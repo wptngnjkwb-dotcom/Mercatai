@@ -14,24 +14,25 @@ this is an alternative deployment path, not a replacement.
 - A Stripe account (payments run through your own Stripe keys)
 - ~2 GB RAM on the host
 
-## 2. Prepare the database schema
+## 2. Database schema
 
-The schema ships in `backend/db/schema.sql`. Copy it (and any migrations
-from `frontend/sql/`) into the init directory — files run in name order on
-first boot:
+Nothing to prepare. `docker-compose.yml` mounts `backend/db/schema.sql` and
+the migrations in `frontend/sql/` straight into the database container's
+init directory, so a fresh clone is ready to boot and there is only ever
+one copy of each file to maintain.
 
-```bash
-cd deploy
-cp ../backend/db/schema.sql        init/10_schema.sql
-cp ../frontend/sql/03_agent_value.sql      init/20_agent_value.sql
-cp ../frontend/sql/04_buyer_protection.sql init/21_buyer_protection.sql
-cp ../frontend/sql/05_finance_category.sql init/22_finance_category.sql
-cp ../frontend/sql/06_admin_backoffice.sql init/23_admin_backoffice.sql
-cp ../frontend/sql/07_demo_tasks.sql        init/24_demo_tasks.sql
-cp ../frontend/sql/08_agent_store.sql       init/25_agent_store.sql
-cp ../frontend/sql/09_agent_auth_columns.sql init/26_agent_auth_columns.sql
-cp ../frontend/sql/10_payment_pending_status.sql init/27_payment_pending_status.sql
-```
+> **These scripts run only on an empty data volume.** Postgres executes
+> `/docker-entrypoint-initdb.d/*` on first initialisation and never again.
+> An installation that is already running must apply new migrations by
+> hand, for example:
+>
+> ```bash
+> docker compose exec -T db psql -U postgres -d mercatai \
+>   -f - < ../frontend/sql/10_payment_pending_status.sql
+> ```
+>
+> To start over from scratch instead, `docker compose down -v` drops the
+> volume — and with it all data.
 
 ## 3. Configure secrets
 
@@ -75,6 +76,12 @@ curl -s localhost:3000/api/v1/tasks | head   # → {"tasks":[]}
 docker compose logs cron                     # crontab installed
 ```
 
+> **Never paste `docker compose config` output into an issue, a chat or a
+> pull request.** It interpolates `.env` and prints every secret in full —
+> database password, JWT keys, `SUPABASE_SERVICE_ROLE_KEY` and your Stripe
+> keys. Use `docker compose config --quiet` (validation only, no output) when
+> you just want to check the file parses.
+
 ## 5. Scheduled jobs
 
 Vercel crons are replaced by the `cron` sidecar, which calls the same
@@ -90,10 +97,27 @@ safe to expose.
 
 ## 6. Stripe webhooks
 
-Point your Stripe webhook endpoint (Dashboard → Developers → Webhooks) at
-`https://your-domain/api/webhooks/stripe` and set the corresponding secret
-in `.env`. For local testing use `stripe listen --forward-to
-localhost:3000/api/webhooks/stripe`.
+Payments only move out of the `pending` state when Stripe confirms them, so
+this endpoint is required — without it every payment stalls.
+
+Register an endpoint (Dashboard → Developers → Webhooks) at
+`https://your-domain/api/v1/payments/stripe-webhook` subscribed to:
+
+- `payment_intent.amount_capturable_updated`
+- `payment_intent.processing`
+- `payment_intent.succeeded`
+- `payment_intent.payment_failed`
+- `payment_intent.canceled`
+
+Put that endpoint's signing secret in `STRIPE_WEBHOOK_SECRET` (it is
+per-endpoint, not per-account) and the publishable key in
+`STRIPE_PUBLISHABLE_KEY`, or the payment form will not load.
+
+For local testing:
+
+```bash
+stripe listen --forward-to localhost:3000/api/v1/payments/stripe-webhook
+```
 
 ## 7. Production notes
 

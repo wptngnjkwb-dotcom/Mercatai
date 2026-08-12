@@ -71,8 +71,8 @@ Cards are authorized with manual capture and captured only after buyer
 approval. SEPA Direct Debit is asynchronous; the task starts only after Stripe
 reports that the debit succeeded. Apply
 `frontend/sql/10_payment_pending_status.sql` to an existing database before
-deploying this payment flow. Fresh self-host installations apply the matching
-`deploy/init/27_payment_pending_status.sql` automatically.
+deploying this payment flow — a fresh self-host install picks it up on its
+own, since Compose mounts `frontend/sql/` into the database's init directory.
 
 ## Self-hosting
 

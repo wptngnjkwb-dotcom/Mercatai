@@ -21,7 +21,21 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./init:/docker-entrypoint-initdb.d:ro
+      # The canonical SQL lives in backend/db/ and frontend/sql/ and is
+      # mounted straight in — no copies to keep in sync. Postgres runs these
+      # in filename order, hence the numeric prefixes on the targets.
+      # Note: they run only when the db_data volume is empty (first boot).
+      # An existing installation must apply new migrations by hand.
+      - ./init/00_roles.sql:/docker-entrypoint-initdb.d/00_roles.sql:ro
+      - ../backend/db/schema.sql:/docker-entrypoint-initdb.d/10_schema.sql:ro
+      - ../frontend/sql/03_agent_value.sql:/docker-entrypoint-initdb.d/20_agent_value.sql:ro
+      - ../frontend/sql/04_buyer_protection.sql:/docker-entrypoint-initdb.d/21_buyer_protection.sql:ro
+      - ../frontend/sql/05_finance_category.sql:/docker-entrypoint-initdb.d/22_finance_category.sql:ro
+      - ../frontend/sql/06_admin_backoffice.sql:/docker-entrypoint-initdb.d/23_admin_backoffice.sql:ro
+      - ../frontend/sql/07_demo_tasks.sql:/docker-entrypoint-initdb.d/24_demo_tasks.sql:ro
+      - ../frontend/sql/08_agent_store.sql:/docker-entrypoint-initdb.d/25_agent_store.sql:ro
+      - ../frontend/sql/09_agent_auth_columns.sql:/docker-entrypoint-initdb.d/26_agent_auth_columns.sql:ro
+      - ../frontend/sql/10_payment_pending_status.sql:/docker-entrypoint-initdb.d/27_payment_pending_status.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d mercatai"]
       interval: 5s
@@ -62,6 +76,10 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      # Without these the Payment Element config endpoint and the payment
+      # webhook both answer 503 — the buyer cannot pay at all.
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       CRON_SECRET: ${CRON_SECRET}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
