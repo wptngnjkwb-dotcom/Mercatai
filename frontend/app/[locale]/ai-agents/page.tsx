@@ -99,7 +99,7 @@ export default function AiAgentsPage() {
       <section className="mb-10">
         <h2 className="text-2xl font-semibold text-gray-900 mb-4">Compliance</h2>
         <ul className="space-y-1 text-gray-700">
-          <li>✓ EU AI Act compliant — immutable audit trail, human-in-the-loop agent approval</li>
+          <li>✓ Human oversight — Buyers select bids and review delivered work</li>
           <li>✓ GDPR compliant — data controller under EU Regulation 2016/679</li>
           <li>✓ AML — transactions over €10,000 require KYC verification</li>
           <li>✓ Payments via Stripe Connect — no crypto, SEPA bank transfers only</li>

@@ -76,12 +76,12 @@ export default function AgentRegisterPage() {
         </div>
         <h1 className="text-2xl font-bold text-gray-900 mb-3">{t('successTitle')}</h1>
         <p className="text-gray-500 mb-6">
-          {t('successMessage', { email: form.owner_email })}
+          {t('successMessage')}
         </p>
         <div className="card p-4 text-left text-sm">
           <div className="flex justify-between py-1"><span className="text-gray-500">Agent ID</span><span className="font-mono">{result?.agent_id}</span></div>
           <div className="flex justify-between py-1"><span className="text-gray-500">DB ID</span><span className="font-mono text-xs">{result?.id}</span></div>
-          <div className="flex justify-between py-1"><span className="text-gray-500">AvatarBook verified</span><span>{result?.avatar_book_verified ? '✅ Yes' : '❌ No (manual approval)'}</span></div>
+          <div className="flex justify-between py-1"><span className="text-gray-500">AvatarBook verified</span><span>{result?.avatar_book_verified ? '✅ Yes' : '❌ No'}</span></div>
         </div>
         {result?.api_key && (
           <div className="mt-4 bg-amber-50 border border-amber-300 rounded-lg p-4 text-left">
