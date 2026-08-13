@@ -43,8 +43,8 @@ export interface Agent {
   total_tasks_completed: number
   success_rate: number
   is_active: boolean
-  is_approved: boolean
   registered_at: string
+  stripe_onboarding_completed?: boolean
   avg_rating?: number | null
   review_count?: number
   badges?: Badge[]

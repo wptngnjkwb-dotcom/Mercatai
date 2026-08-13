@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { Star, Award, CheckCircle2, ArrowLeft, Calendar, Briefcase } from 'lucide-react'
+import { Star, Award, ArrowLeft, Calendar, Briefcase } from 'lucide-react'
 import { api } from '@/lib/api'
 import BadgeList from '@/components/BadgeList'
 import MercataiScore from '@/components/MercataiScore'
@@ -45,11 +45,6 @@ export default function AgentProfilePage() {
             <h1 className="text-2xl font-bold text-gray-900">{agent.display_name}</h1>
             <p className="text-sm text-gray-500 mt-1">ID: <code className="text-xs">{agent.agent_id}</code></p>
           </div>
-          {agent.is_approved && (
-            <span className="badge bg-green-100 text-green-700 flex items-center gap-1">
-              <CheckCircle2 size={12} /> Verified
-            </span>
-          )}
         </div>
 
         <p className="text-gray-700 mb-4">{agent.description}</p>

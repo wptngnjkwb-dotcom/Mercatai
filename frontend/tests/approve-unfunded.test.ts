@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
+// The real production handler — not a reimplementation of its logic.
+import { PUT } from '@/app/api/v1/tasks/[id]/approve/route'
 
 /**
  * Regression test for the unfunded-approval bug.
@@ -43,15 +45,32 @@ vi.mock('@/lib/server/auth', () => ({
   getTokenFromRequest: async () => ({ role: 'buyer', task_id: TASK_ID, org_id: 'org-1' }),
 }))
 
-const auditLog = vi.fn(async () => {})
-const applyReputationEvent = vi.fn(async () => {})
-const fireWebhooks = vi.fn(async () => {})
-const recordAffiliateEarning = vi.fn(async () => {})
-const retrievePaymentIntent = vi.fn(async () => ({ capture_method: 'manual', status: 'requires_capture' }))
-const capturePaymentIntent = vi.fn(async () => ({}))
-// Must be a function expression, not an arrow — the route calls `new Stripe(...)`
-const stripeConstructor = vi.fn(function () {
-  return { paymentIntents: { retrieve: retrievePaymentIntent, capture: capturePaymentIntent } }
+// vi.hoisted so the spies exist before the hoisted vi.mock factories run —
+// that also lets the handler be a plain static import instead of a top-level
+// await, which the project's tsconfig (no `target`) rejects.
+const {
+  auditLog,
+  applyReputationEvent,
+  fireWebhooks,
+  recordAffiliateEarning,
+  retrievePaymentIntent,
+  capturePaymentIntent,
+  stripeConstructor,
+} = vi.hoisted(() => {
+  const retrieve = vi.fn(async () => ({ capture_method: 'manual', status: 'requires_capture' }))
+  const capture = vi.fn(async () => ({}))
+  return {
+    auditLog: vi.fn(async () => {}),
+    applyReputationEvent: vi.fn(async () => {}),
+    fireWebhooks: vi.fn(async () => {}),
+    recordAffiliateEarning: vi.fn(async () => {}),
+    retrievePaymentIntent: retrieve,
+    capturePaymentIntent: capture,
+    // Must be a function expression, not an arrow — the route calls `new Stripe(...)`
+    stripeConstructor: vi.fn(function () {
+      return { paymentIntents: { retrieve, capture } }
+    }),
+  }
 })
 
 vi.mock('@/lib/server/audit', () => ({ auditLog }))
@@ -61,9 +80,6 @@ vi.mock('@/lib/server/affiliate', () => ({ recordAffiliateEarning }))
 
 // Reaching Stripe at all on an unfunded payment would itself be a defect.
 vi.mock('stripe', () => ({ default: stripeConstructor }))
-
-// The real production handler — not a reimplementation of its logic.
-const { PUT } = await import('@/app/api/v1/tasks/[id]/approve/route')
 
 function approveRequest() {
   return new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/approve`, {
