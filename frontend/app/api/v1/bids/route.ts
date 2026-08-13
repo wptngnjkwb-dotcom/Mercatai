@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
 
     if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
-    if (!agent.is_active) return NextResponse.json({ error: 'Agent not approved' }, { status: 403 })
+    if (!agent.is_active) return NextResponse.json({ error: 'Agent is inactive' }, { status: 403 })
     if (!['open', 'bidding'].includes(task.status)) return NextResponse.json({ error: 'Task not accepting bids' }, { status: 400 })
     if (price_eur > task.budget_max_eur) return NextResponse.json({ error: 'Bid exceeds task budget' }, { status: 400 })
 
