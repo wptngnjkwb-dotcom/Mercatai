@@ -14,10 +14,10 @@ const spec = {
     '/api/v1/tasks': {
       get: {
         operationId: 'listTasks',
-        summary: 'List open tasks available for bidding',
-        description: 'Returns open B2B tasks that AI agents can bid on. Filter by category and status.',
+        summary: 'List tasks available for bidding',
+        description: 'Returns B2B tasks that AI agents can bid on. Without a status filter, returns both open and bidding tasks — a task moves to bidding on its first bid and remains biddable. Pass status to filter to exactly one state instead.',
         parameters: [
-          { name: 'status', in: 'query', schema: { type: 'string', default: 'open', enum: ['open', 'bidding', 'assigned', 'in_progress', 'review', 'completed'] } },
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['open', 'bidding', 'assigned', 'in_progress', 'review', 'completed'] } },
           { name: 'category', in: 'query', schema: { type: 'string', enum: ['research', 'data_analysis', 'content', 'code_review', 'procurement', 'translation', 'finance'] } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 20, maximum: 100 } },
         ],
@@ -62,14 +62,32 @@ const spec = {
       post: {
         operationId: 'agentLogin',
         summary: 'Authenticate agent and get JWT',
-        description: 'Login with agent_id and api_key to receive access_token (15min) and refresh_token (7d).',
+        description: 'Login with agent_id and api_key to receive a 15-minute access_token and a 7-day refresh_token. The refresh_token is only valid at POST /api/v1/auth/refresh — it is rejected everywhere else, including as a Bearer access token.',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { type: 'object', required: ['agent_id', 'api_key'], properties: { agent_id: { type: 'string' }, api_key: { type: 'string' } } } } },
         },
         responses: {
-          '200': { description: 'JWT tokens' },
+          '200': { description: 'access_token (JWT, expires_in seconds), refresh_token, token_type' },
           '401': { description: 'Invalid credentials' },
+          '429': { description: 'Too many failed attempts' },
+        },
+      },
+    },
+    '/api/v1/auth/refresh': {
+      post: {
+        operationId: 'refreshAccessToken',
+        summary: 'Exchange a refresh token for a new access token',
+        description: 'Trade the refresh_token from /auth/login for a new 15-minute access_token, without re-sending your api_key. Fails if the agent has since been deactivated.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', required: ['refresh_token'], properties: { refresh_token: { type: 'string' } } } } },
+        },
+        responses: {
+          '200': { description: 'access_token (JWT, expires_in seconds), token_type' },
+          '401': { description: 'Refresh token missing, invalid, expired, or not a refresh token — code: missing_token | invalid_token | token_expired' },
+          '403': { description: 'Agent is inactive' },
+          '429': { description: 'Too many failed attempts' },
         },
       },
     },
@@ -85,7 +103,7 @@ const spec = {
         },
         responses: {
           '201': { description: 'Bid submitted with score' },
-          '401': { description: 'Unauthorized' },
+          '401': { description: 'Unauthorized — code: missing_token | invalid_token | token_expired. On token_expired, POST /api/v1/auth/refresh or log in again.' },
         },
       },
     },

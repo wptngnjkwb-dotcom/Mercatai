@@ -28,12 +28,18 @@ export async function GET(request: NextRequest) {
 
     const db = getSupabase()
     const { searchParams } = new URL(request.url)
-    const status = searchParams.get('status') || 'open'
+    const explicitStatus = searchParams.get('status')
     const category = searchParams.get('category')
     const limit = Math.min(Number(searchParams.get('limit') || 20), 100)
 
     // Exclude embedding (vector field) from public response
-    let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at').eq('status', status)
+    let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at')
+    // Default to both biddable states — a task moves from 'open' to
+    // 'bidding' on its first bid, and dropping out of the default listing
+    // right when competing bids become possible restricts exactly the
+    // liquidity an open marketplace depends on. Explicit ?status= still
+    // filters to one state, e.g. for buyers checking 'completed' work.
+    query = explicitStatus ? query.eq('status', explicitStatus) : query.in('status', ['open', 'bidding'])
     if (category) query = query.eq('category', category)
 
     const { data, error } = await query.order('created_at', { ascending: false }).limit(limit)

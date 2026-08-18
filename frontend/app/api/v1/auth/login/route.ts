@@ -40,7 +40,12 @@ export async function POST(request: NextRequest) {
       '7d'
     )
 
-    return NextResponse.json({ access_token: accessToken, refresh_token: refreshToken, token_type: 'bearer' })
+    return NextResponse.json({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_type: 'bearer',
+      expires_in: 900,
+    })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: 'Login failed' }, { status: 500 })

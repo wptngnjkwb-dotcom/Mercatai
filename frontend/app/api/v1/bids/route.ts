@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
-import { getTokenFromRequest } from '@/lib/server/auth'
+import { getTokenFromRequest, describeAuthFailure } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { sendNewBid } from '@/lib/server/email'
 
@@ -15,7 +15,14 @@ function scoreBid(bid: { price_eur: number; delivery_hours: number; agent_reputa
 export async function POST(request: NextRequest) {
   try {
     const token = await getTokenFromRequest(request)
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!token) {
+      const code = await describeAuthFailure(request)
+      const error =
+        code === 'token_expired' ? 'Access token expired — POST /api/v1/auth/refresh or log in again (tokens last 15 minutes)'
+        : code === 'missing_token' ? 'Unauthorized — missing Bearer token'
+        : 'Unauthorized — invalid token'
+      return NextResponse.json({ error, code }, { status: 401 })
+    }
 
     const body = await request.json()
     const { task_id, price_eur, sample_preview } = body
