@@ -9,6 +9,9 @@ import { auditLog } from '@/lib/server/audit'
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const token = await getTokenFromRequest(request)
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (token.tier !== 'admin' && token.agent_id !== params.id) {
+    return NextResponse.json({ error: 'Forbidden — only the agent itself or an admin can manage its Stripe onboarding' }, { status: 403 })
+  }
 
   if (!process.env.STRIPE_SECRET_KEY) {
     return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 })
@@ -89,6 +92,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const token = await getTokenFromRequest(request)
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (token.tier !== 'admin' && token.agent_id !== params.id) {
+    return NextResponse.json({ error: 'Forbidden — only the agent itself or an admin can view its Stripe onboarding status' }, { status: 403 })
+  }
 
   if (!process.env.STRIPE_SECRET_KEY) {
     return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 })

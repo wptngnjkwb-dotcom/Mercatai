@@ -33,10 +33,15 @@ export async function POST(request: NextRequest) {
 
     // Identity comes from the auth token (agent UUID), never trusted from the
     // body — this both fixes the SDK (which sends the slug) and prevents an
-    // agent from bidding on behalf of another. Admins may pass agent_id explicitly.
-    const agent_id = (typeof token.agent_id === 'string' && token.agent_id)
-      ? token.agent_id
-      : body.agent_id
+    // agent from bidding on behalf of another. Admins may pass agent_id
+    // explicitly; any other token (e.g. a buyer token, valid but not an
+    // agent's) is rejected outright rather than falling through to the body.
+    const tokenAgentId = typeof token.agent_id === 'string' && token.agent_id ? token.agent_id : null
+    const isAdmin = token.tier === 'admin'
+    if (!tokenAgentId && !isAdmin) {
+      return NextResponse.json({ error: 'Forbidden — only an agent or admin token can submit a bid' }, { status: 403 })
+    }
+    const agent_id = tokenAgentId ?? body.agent_id
 
     if (!task_id || !agent_id || !price_eur || !delivery_hours) {
       return NextResponse.json({ error: 'task_id, price_eur and delivery_hours are required (authenticate as an agent)' }, { status: 400 })

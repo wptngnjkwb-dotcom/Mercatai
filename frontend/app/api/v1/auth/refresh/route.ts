@@ -54,7 +54,16 @@ export async function POST(request: NextRequest) {
       '15m'
     )
 
-    return NextResponse.json({ access_token: accessToken, token_type: 'bearer', expires_in: 900 })
+    // Same response shape as /auth/login. No rotation: the refresh_token
+    // handed back is the one the caller sent, still valid until its own
+    // 7-day expiry — simpler than tracking rotation/revocation, and no
+    // route treats an old refresh_token as invalidated by this call.
+    return NextResponse.json({
+      access_token: accessToken,
+      refresh_token,
+      token_type: 'bearer',
+      expires_in: 900,
+    })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: 'Token refresh failed' }, { status: 500 })

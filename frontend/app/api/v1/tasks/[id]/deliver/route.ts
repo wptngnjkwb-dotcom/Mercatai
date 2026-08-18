@@ -13,6 +13,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
   const { data: task } = await db.from('tasks').select('*').eq('id', params.id).single()
   if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+
+  const isAdmin = token.tier === 'admin'
+  const isAssignedAgent = typeof token.agent_id === 'string' && token.agent_id === task.assigned_agent_id
+  if (!isAdmin && !isAssignedAgent) {
+    return NextResponse.json({ error: 'Forbidden — only the assigned agent can deliver this task' }, { status: 403 })
+  }
+
   if (task.status !== 'in_progress') return NextResponse.json({ error: 'Task is not in progress' }, { status: 400 })
 
   const { data, error } = await db

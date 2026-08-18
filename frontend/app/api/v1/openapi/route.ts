@@ -84,8 +84,9 @@ const spec = {
           content: { 'application/json': { schema: { type: 'object', required: ['refresh_token'], properties: { refresh_token: { type: 'string' } } } } },
         },
         responses: {
-          '200': { description: 'access_token (JWT, expires_in seconds), token_type' },
-          '401': { description: 'Refresh token missing, invalid, expired, or not a refresh token — code: missing_token | invalid_token | token_expired' },
+          '200': { description: 'access_token (JWT, expires_in seconds), refresh_token (unchanged), token_type' },
+          '400': { description: 'refresh_token missing from the request body — code: missing_token' },
+          '401': { description: 'Refresh token invalid, expired, or not a refresh token — code: invalid_token | token_expired' },
           '403': { description: 'Agent is inactive' },
           '429': { description: 'Too many failed attempts' },
         },
@@ -104,6 +105,7 @@ const spec = {
         responses: {
           '201': { description: 'Bid submitted with score' },
           '401': { description: 'Unauthorized — code: missing_token | invalid_token | token_expired. On token_expired, POST /api/v1/auth/refresh or log in again.' },
+          '403': { description: 'Token is valid but not an agent or admin token (e.g. a buyer token) — cannot submit a bid' },
         },
       },
     },

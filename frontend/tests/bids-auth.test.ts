@@ -47,11 +47,11 @@ vi.mock('@/lib/server/supabase', () => ({
 vi.mock('@/lib/server/audit', () => ({ auditLog: vi.fn(async () => {}) }))
 vi.mock('@/lib/server/email', () => ({ sendNewBid: vi.fn(async () => {}) }))
 
-function bidRequest(bearer: string) {
+function bidRequest(bearer: string, bodyOverrides: Record<string, unknown> = {}) {
   return new NextRequest('http://localhost/api/v1/bids', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
-    body: JSON.stringify({ task_id: TASK_ID, price_eur: 50, delivery_hours: 24, approach_summary: 'test' }),
+    body: JSON.stringify({ task_id: TASK_ID, price_eur: 50, delivery_hours: 24, approach_summary: 'test', ...bodyOverrides }),
   })
 }
 
@@ -86,6 +86,44 @@ describe('POST /api/v1/bids auth', () => {
 
     expect(response.status).toBe(401)
     expect(body.code).toBe('token_expired')
+    expect(bidInserts).toHaveLength(0)
+  })
+
+  it('rejects a buyer token — the reviewed authorization gap — with zero DB writes', async () => {
+    // Same shape POST /api/v1/tasks and the store hire flow issue: a
+    // perfectly valid, non-expired, non-refresh token that just isn't an
+    // agent. Before this fix it fell through to trusting body.agent_id.
+    const buyerToken = await signToken({ role: 'buyer', task_id: TASK_ID, org_id: 'org-1' }, '30d')
+    const response = await POST(bidRequest(buyerToken, { agent_id: AGENT_ID }))
+    const body = await response.json()
+
+    expect(response.status).toBe(403)
+    expect(bidInserts).toHaveLength(0)
+    expect(body.error).toMatch(/agent or admin/i)
+  })
+
+  it('ignores body.agent_id for a genuine agent token — cannot bid as another agent', async () => {
+    const accessToken = await signToken({ agent_id: AGENT_ID, agent_slug: 'test-agent', tier: 1 }, '15m')
+    const response = await POST(bidRequest(accessToken, { agent_id: 'someone-elses-agent-id' }))
+
+    expect(response.status).toBe(201)
+    expect(bidInserts[0]).toMatchObject({ agent_id: AGENT_ID })
+  })
+
+  it('lets an admin token submit a bid on an explicitly named agent_id', async () => {
+    const adminToken = await signToken({ tier: 'admin' }, '12h')
+    const response = await POST(bidRequest(adminToken, { agent_id: AGENT_ID }))
+
+    expect(response.status).toBe(201)
+    expect(bidInserts).toHaveLength(1)
+    expect(bidInserts[0]).toMatchObject({ agent_id: AGENT_ID })
+  })
+
+  it('rejects an admin token with no agent_id in the body as a normal missing-field 400', async () => {
+    const adminToken = await signToken({ tier: 'admin' }, '12h')
+    const response = await POST(bidRequest(adminToken, { agent_id: undefined }))
+
+    expect(response.status).toBe(400)
     expect(bidInserts).toHaveLength(0)
   })
 })
