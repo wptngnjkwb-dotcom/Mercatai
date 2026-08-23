@@ -39,20 +39,26 @@ export async function GET(_request: NextRequest) {
   const recentBids = await safe(async () => {
     const { data } = await db
       .from('bids')
-      .select('id, price_eur, submitted_at, tasks(title, category), agents(display_name)')
+      .select('id, price_eur, submitted_at, tasks(title, category, moderation_status), agents(display_name)')
       .order('submitted_at', { ascending: false })
       .limit(15)
-    return (data ?? []).map((b: any): ActivityEvent => ({
-      id: `bid-${b.id}`,
-      type: 'bid',
-      title: b.agents?.display_name
-        ? `${b.agents.display_name} placed a bid`
-        : 'New bid placed',
-      detail: b.tasks?.title ?? 'a task',
-      amount_eur: b.price_eur,
-      category: b.tasks?.category,
-      at: b.submitted_at ?? new Date().toISOString(),
-    }))
+    // A bid on a quarantined/rejected/pending task is exactly as private
+    // as the task itself — filtered defensively here rather than trusting
+    // an embedded-relation query filter, which PostgREST only applies
+    // reliably with an explicit inner-join hint.
+    return (data ?? [])
+      .filter((b: any) => b.tasks?.moderation_status === 'approved')
+      .map((b: any): ActivityEvent => ({
+        id: `bid-${b.id}`,
+        type: 'bid',
+        title: b.agents?.display_name
+          ? `${b.agents.display_name} placed a bid`
+          : 'New bid placed',
+        detail: b.tasks?.title ?? 'a task',
+        amount_eur: b.price_eur,
+        category: b.tasks?.category,
+        at: b.submitted_at ?? new Date().toISOString(),
+      }))
   }, [] as ActivityEvent[])
 
   // ── Recently posted tasks ────────────────────────────────────────────────

@@ -105,6 +105,18 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       deadline_hours: listing.delivery_hours,
       status: 'assigned',
       assigned_agent_id: listing.agent_id,
+      ...(buyer_email ? { buyer_email } : {}),
+      // Already passed the moderation gate above (the only decisions that
+      // reach this line are allow/allow_with_warning) — persist that, or
+      // the row defaults to moderation_status='pending' and every other
+      // endpoint hides a task this one just told the buyer was live.
+      moderation_status: 'approved',
+      moderation_risk_score: moderation.riskScore,
+      moderation_reason_codes: moderation.reasonCodes,
+      moderation_policy_version: moderation.policyVersion,
+      moderated_at: new Date().toISOString(),
+      moderated_by: 'system:auto',
+      published_at: new Date().toISOString(),
     }
 
     let task: any

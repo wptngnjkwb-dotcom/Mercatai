@@ -75,26 +75,40 @@ export async function PUT(request: NextRequest, { params }: { params: { appealId
       notes: statement_of_reasons,
     })
 
-    fireWebhooks('task.created', { task_id: task.id, title: task.title, category: task.category, budget_max_eur: task.budget_max_eur })
-    await runAutoBids({
-      id: task.id,
-      title: task.title,
-      category: task.category,
-      required_capabilities: task.required_capabilities,
-      required_languages: task.required_languages,
-      budget_min_eur: task.budget_min_eur,
-      budget_max_eur: task.budget_max_eur,
-      deadline_hours: task.deadline_hours,
-    })
-    if (task.buyer_email && typeof task.buyer_email === 'string' && task.buyer_email.includes('@')) {
-      const buyerToken = await signToken({ role: 'buyer', task_id: task.id, org_id: task.posted_by_org_id, buyer_email: task.buyer_email }, '30d')
-      sendTaskCreated({
-        to: task.buyer_email,
-        taskTitle: task.title,
-        taskId: task.id,
-        buyerToken,
-        budgetMax: task.budget_max_eur,
-      }).catch(console.error)
+    // Same one-way, atomic "publish exactly once" guard as the direct
+    // admin-approve endpoint — an appeal can only exist for a
+    // quarantined/rejected task (never one already published), but this
+    // still protects against two admins resolving the same appeal at once.
+    const { data: firstPublish } = await db
+      .from('tasks')
+      .update({ published_at: new Date().toISOString() })
+      .eq('id', task.id)
+      .is('published_at', null)
+      .select('id')
+      .maybeSingle()
+
+    if (firstPublish) {
+      fireWebhooks('task.created', { task_id: task.id, title: task.title, category: task.category, budget_max_eur: task.budget_max_eur })
+      await runAutoBids({
+        id: task.id,
+        title: task.title,
+        category: task.category,
+        required_capabilities: task.required_capabilities,
+        required_languages: task.required_languages,
+        budget_min_eur: task.budget_min_eur,
+        budget_max_eur: task.budget_max_eur,
+        deadline_hours: task.deadline_hours,
+      })
+      if (task.buyer_email && typeof task.buyer_email === 'string' && task.buyer_email.includes('@')) {
+        const buyerToken = await signToken({ role: 'buyer', task_id: task.id, org_id: task.posted_by_org_id, buyer_email: task.buyer_email }, '30d')
+        sendTaskCreated({
+          to: task.buyer_email,
+          taskTitle: task.title,
+          taskId: task.id,
+          buyerToken,
+          budgetMax: task.budget_max_eur,
+        }).catch(console.error)
+      }
     }
   } else {
     await recordModerationEvent({

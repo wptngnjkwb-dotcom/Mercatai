@@ -7,10 +7,12 @@ import { POLICY_VERSION, PUBLIC_EXPLANATIONS } from './policy'
  *
  * KNOWN LIMITS (read before trusting this for anything beyond the MVP it
  * is): this is keyword/pattern matching, not language understanding. It
- * will miss paraphrased, translated, or novel-phrasing violations, and it
- * can be evaded by anyone who knows the trigger phrases. It has no access
- * to the network, so it cannot check whether a linked domain is actually
- * malicious, only whether the URL *looks* suspicious (shortener, bare IP).
+ * will miss paraphrased or novel-phrasing violations, and it can be evaded
+ * by anyone who knows the trigger phrases. Translation coverage is partial
+ * — see rules.ts's module doc for exactly which categories carry cs/de/es
+ * terms and which are still English-only. It has no access to the network,
+ * so it cannot check whether a linked domain is actually malicious, only
+ * whether the URL *looks* suspicious (shortener, bare IP).
  * Its highest-stakes categories (religious hostility, terrorism support,
  * violent extremism, foreign information manipulation) are exactly the
  * ones where a keyword system is weakest at reading intent — which is why

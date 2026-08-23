@@ -20,6 +20,16 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ error: 'Forbidden — only the task buyer can accept bids' }, { status: 403 })
   }
 
+  // A task can be quarantined after bids already exist (e.g. reported
+  // post-publish) — moderation must freeze the whole transaction from
+  // there, not just block new bids. Re-checked here even though POST
+  // /bids already gated submission, since that check was only true at
+  // submission time, not now.
+  const { data: taskModeration } = await db.from('tasks').select('moderation_status').eq('id', bid.task_id).single()
+  if (!taskModeration || taskModeration.moderation_status !== 'approved') {
+    return NextResponse.json({ error: 'This task is not available — it is pending review' }, { status: 409 })
+  }
+
   // SLA deadline guarantee: stamp assignment + hard delivery deadline
   const assignedAt = new Date()
   const deliveryHours = Number(bid.delivery_hours) || 24

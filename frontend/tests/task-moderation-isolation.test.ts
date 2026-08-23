@@ -29,6 +29,10 @@ let cannedTask: Record<string, unknown> = {
   moderation_status: 'approved',
 }
 
+// Rows for the activity feed's recentBids query — each carries its own
+// embedded task moderation_status, independent of cannedTask above.
+let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string } | null; agents: { display_name: string } }[] = []
+
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
     from(table: string) {
@@ -69,7 +73,7 @@ vi.mock('@/lib/server/supabase', () => ({
             const matches = eqFilters.every(([f, v]) => (cannedTask as Record<string, unknown>)[f] === v)
             return resolve({ data: matches ? [cannedTask] : [], count: matches ? 1 : 0, error: null })
           }
-          if (table === 'bids') return resolve({ data: [], count: 0, error: null })
+          if (table === 'bids') return resolve({ data: activityBidRows, count: activityBidRows.length, error: null })
           if (table === 'agents') return resolve({ data: [], count: 0, error: null })
           return resolve({ data: [], count: 0, error: null })
         },
@@ -91,6 +95,7 @@ beforeEach(() => {
   moderationEvents.length = 0
   orgLookupResult = null
   cannedTask = { ...cannedTask, moderation_status: 'approved' }
+  activityBidRows = []
 })
 
 describe('POST /api/v1/tasks — moderation publish flow', () => {
@@ -112,8 +117,17 @@ describe('POST /api/v1/tasks — moderation publish flow', () => {
     const body = await response.json()
     expect(response.status).toBe(201)
     expect(insertedTasks[0]).toMatchObject({ moderation_status: 'approved' })
+    expect(insertedTasks[0]).toHaveProperty('published_at')
+    expect((insertedTasks[0] as any).published_at).not.toBeNull()
     expect(body).toHaveProperty('buyer_token')
     expect(body).not.toHaveProperty('appeal_available')
+    // The raw inserted/returned row carries these — the public response
+    // must not, even though it's built from that same row. Built
+    // explicitly in the route rather than spread, precisely so this can
+    // never regress silently.
+    for (const internalField of ['moderation_risk_score', 'moderation_reason_codes', 'moderation_policy_version', 'moderated_by', 'moderated_at', 'posted_by_org_id']) {
+      expect(body).not.toHaveProperty(internalField)
+    }
     expect(fireWebhooks).toHaveBeenCalled()
     expect(runAutoBids).toHaveBeenCalled()
   })
@@ -217,5 +231,21 @@ describe('GET /api/v1/activity — moderation isolation', () => {
     expect(response.status).toBe(200)
     const body = await response.json()
     expect(Array.isArray(body.events)).toBe(true)
+  })
+
+  it('excludes a bid whose task is quarantined — a bid is as private as its task', async () => {
+    activityBidRows = [
+      { id: 'bid-visible', price_eur: 50, submitted_at: '2026-08-22T10:00:00.000Z', tasks: { title: 'Visible task', category: 'research', moderation_status: 'approved' }, agents: { display_name: 'Agent A' } },
+      { id: 'bid-hidden', price_eur: 999, submitted_at: '2026-08-22T11:00:00.000Z', tasks: { title: 'Should stay hidden', category: 'research', moderation_status: 'quarantined' }, agents: { display_name: 'Agent B' } },
+    ]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const request = new NextRequest('http://localhost/api/v1/activity')
+    const response = await GET(request)
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    const bidEvents = body.events.filter((e: any) => e.id?.startsWith('bid-'))
+    expect(bidEvents.some((e: any) => e.detail === 'Should stay hidden')).toBe(false)
+    expect(bidEvents.some((e: any) => e.detail === 'Visible task')).toBe(true)
   })
 })

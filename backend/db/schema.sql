@@ -87,7 +87,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     moderation_reason_codes TEXT[] DEFAULT '{}',
     moderation_policy_version TEXT,
     moderated_at            TIMESTAMPTZ,
-    moderated_by            TEXT
+    moderated_by            TEXT,
+    -- Set once, the first time a task's moderation_status becomes
+    -- 'approved' — distinct from moderation_status itself so a task that
+    -- goes approved -> quarantined -> approved again never re-fires its
+    -- publish side effects (webhooks, auto-bid, confirmation email).
+    published_at            TIMESTAMPTZ,
+    buyer_email              TEXT
 );
 
 -- ============================================================

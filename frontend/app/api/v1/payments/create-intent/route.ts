@@ -36,6 +36,12 @@ export async function POST(request: NextRequest) {
     // Zkontrolovat že task existuje a má správný stav
     const { data: task } = await db.from('tasks').select('*, agents!assigned_agent_id(id, stripe_account_id, stripe_onboarding_completed, free_tasks_remaining)').eq('id', task_id).single()
     if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+    // Moderation can quarantine a task after bid acceptance (e.g. reported
+    // post-publish) — no new money enters escrow for it from that point,
+    // regardless of workflow status.
+    if (task.moderation_status !== 'approved') {
+      return NextResponse.json({ error: 'This task is not available for payment — it is pending review' }, { status: 409 })
+    }
     if (!['assigned', 'open', 'bidding'].includes(task.status)) {
       return NextResponse.json({ error: `Task status '${task.status}' does not allow payment` }, { status: 400 })
     }

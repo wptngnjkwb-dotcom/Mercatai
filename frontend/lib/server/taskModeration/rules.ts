@@ -13,6 +13,17 @@ import type { RuleSignal } from './types'
  *
  * URLs found in the text are only ever parsed (host/pattern-matched), never
  * fetched — this module makes no network calls.
+ *
+ * Language coverage: Mercatai is en/cs/de/es, and an English-only detector
+ * is trivially bypassed by writing the same content in any other supported
+ * language. The three hard-floor-to-reject-or-quarantine categories most
+ * likely to cause real harm if missed — religious/ethnic hostility,
+ * terrorism & violent extremism, and wallet/credential harvesting — carry
+ * cs/de/es terms alongside the English ones in the lists below. This is
+ * still translated-phrase matching, not real language understanding, and
+ * doesn't cover every conjugation (Czech and German verbs inflect more
+ * than these lists do) or every other category in this file — it narrows
+ * the biggest gap, it doesn't close it.
  */
 
 function norm(s: string): string {
@@ -69,6 +80,116 @@ export function detectSuspiciousLinks(text: string): RuleSignal[] {
   return signals
 }
 
+// ── Spam / bulk solicitation ─────────────────────────────────────────────
+
+const SPAM_TERMS = [
+  'act now', 'limited time offer', 'click here to claim', 'congratulations you have been selected',
+  'no experience necessary unlimited earning', 'work from home unlimited income',
+  'guaranteed income no work', 'make money fast', 'get rich quick', 'earn $$$ daily',
+  // Czech
+  'jednejte nyní', 'časově omezená nabídka', 'klikněte zde a získejte', 'blahopřejeme, byli jste vybráni',
+  'práce z domova neomezený příjem', 'zaručený příjem bez práce', 'vydělejte rychle peníze',
+  // German
+  'jetzt handeln', 'zeitlich begrenztes angebot', 'klicken sie hier', 'herzlichen glückwunsch, sie wurden ausgewählt',
+  'heimarbeit unbegrenztes einkommen', 'garantiertes einkommen ohne arbeit', 'schnell geld verdienen',
+  // Spanish
+  'actúa ahora', 'oferta por tiempo limitado', 'haz clic aquí para reclamar', 'felicidades has sido seleccionado',
+  'trabajo desde casa ingresos ilimitados', 'ingresos garantizados sin trabajar', 'gana dinero rápido',
+]
+
+// A single word or short phrase hammered many times in a row — a concrete,
+// low-false-positive spam signal independent of language or wording.
+const REPEATED_TOKEN_PATTERN = /\b(\w{3,})\b(?:\s+\1\b){4,}/i
+
+export function detectSpam(text: string): RuleSignal[] {
+  const signals: RuleSignal[] = []
+  const hit = includesAny(text, SPAM_TERMS)
+  if (hit) {
+    signals.push({ code: 'SPAM', points: 35, note: `Uses bulk-solicitation spam phrasing ("${hit}").` })
+  }
+  if (REPEATED_TOKEN_PATTERN.test(text)) {
+    signals.push({ code: 'SPAM', points: 30, note: 'The same word is repeated many times in a row.' })
+  }
+  return signals
+}
+
+// ── Phishing ──────────────────────────────────────────────────────────────
+//
+// Distinct from credential harvesting below: credential harvesting asks the
+// *agent* for their own Mercatai/wallet secrets. Phishing is the task
+// itself being (or asking the agent to help run) a lure aimed at a third
+// party — urgency plus an account/identity "verify or lose access" pattern.
+
+const PHISHING_TERMS = [
+  'verify your account', 'confirm your account', 'your account will be suspended',
+  'account has been compromised', 'update your payment details', 'urgent action required',
+  'confirm your identity to avoid suspension', 'click to verify your identity', 'unusual activity on your account',
+  // Czech
+  'ověřte svůj účet', 'potvrďte svůj účet', 'váš účet bude pozastaven', 'váš účet byl napaden',
+  'aktualizujte své platební údaje', 'vyžadována okamžitá akce', 'potvrďte svou identitu',
+  // German
+  'bestätigen sie ihr konto', 'ihr konto wird gesperrt', 'ihr konto wurde kompromittiert',
+  'aktualisieren sie ihre zahlungsdaten', 'dringende maßnahme erforderlich', 'bestätigen sie ihre identität',
+  // Spanish
+  'verifica tu cuenta', 'confirma tu cuenta', 'tu cuenta será suspendida', 'tu cuenta ha sido comprometida',
+  'actualiza tus datos de pago', 'se requiere acción urgente', 'confirma tu identidad',
+]
+
+export function detectPhishing(text: string): RuleSignal[] {
+  const hit = includesAny(text, PHISHING_TERMS)
+  if (!hit) return []
+  return [{ code: 'PHISHING', points: 65, note: `Uses an urgency + account-verification pattern typical of phishing ("${hit}").`, hardFloor: 'quarantine' }]
+}
+
+// ── Privacy violations (doxxing / stalking a named individual) ──────────
+
+const PRIVACY_VIOLATION_TERMS = [
+  'find the home address of', 'find their home address', 'get their phone number and address',
+  'dox this person', 'track down where they live', 'find their personal cell number',
+  'locate this individual\'s home', 'surveil this person', 'find out where she lives', 'find out where he lives',
+  // Czech
+  'najděte domácí adresu', 'zjistěte, kde bydlí', 'najděte jeho osobní telefonní číslo', 'sledujte tuto osobu',
+  // German
+  'finden sie die wohnadresse von', 'finden sie heraus, wo er wohnt', 'finden sie heraus, wo sie wohnt',
+  'diese person überwachen',
+  // Spanish
+  'encuentra la dirección de casa de', 'averigua dónde vive', 'encuentra su número de teléfono personal',
+  'vigilar a esta persona',
+]
+
+export function detectPrivacyViolation(text: string): RuleSignal[] {
+  const hit = includesAny(text, PRIVACY_VIOLATION_TERMS)
+  if (!hit) return []
+  return [{ code: 'PRIVACY_VIOLATION', points: 60, note: `Requests locating or tracking a specific, identifiable person ("${hit}").`, hardFloor: 'quarantine' }]
+}
+
+// ── Illegal services ──────────────────────────────────────────────────────
+//
+// Unambiguous on their own — no legitimate task needs a fake passport or
+// counterfeit currency — so these hard-floor to reject, unlike most other
+// categories in this file which stay ambiguous without a paired verb.
+
+const ILLEGAL_SERVICE_TERMS = [
+  'fake passport', 'forged id', 'forged identity document', 'counterfeit currency', 'fake diploma',
+  'forged diploma', 'buy illegal drugs', 'sell unlicensed firearms', 'fake vaccination certificate',
+  'forged prescription', 'human trafficking',
+  // Czech
+  'falešný pas', 'falešný občanský průkaz', 'padělané peníze', 'falešný diplom', 'nelegální zbraně',
+  'falešný očkovací certifikát', 'obchod s lidmi',
+  // German
+  'gefälschter reisepass', 'gefälschter ausweis', 'falschgeld', 'gefälschtes diplom', 'illegale waffen',
+  'gefälschtes impfzertifikat', 'menschenhandel',
+  // Spanish
+  'pasaporte falso', 'documento de identidad falso', 'moneda falsificada', 'diploma falso', 'armas ilegales',
+  'certificado de vacunación falso', 'trata de personas',
+]
+
+export function detectIllegalService(text: string): RuleSignal[] {
+  const hit = includesAny(text, ILLEGAL_SERVICE_TERMS)
+  if (!hit) return []
+  return [{ code: 'ILLEGAL_SERVICE', points: 90, note: `Requests a service that is not lawful to provide ("${hit}").`, hardFloor: 'reject' }]
+}
+
 // ── Wallet / crypto / credential harvesting ─────────────────────────────
 
 const WALLET_TERMS = [
@@ -76,13 +197,33 @@ const WALLET_TERMS = [
   'wallet address', 'sign a transaction', 'sign transaction', 'sign a message',
   'sign message', 'crypto transfer', 'transfer crypto', 'send crypto',
   'metamask', 'walletconnect',
+  // Czech
+  'připojte peněženku', 'připojte svou peněženku', 'adresa peněženky', 'podepište transakci', 'podepsat transakci',
+  // German
+  'wallet verbinden', 'verbinden sie ihre wallet', 'wallet-adresse', 'transaktion signieren', 'transaktion unterschreiben',
+  // Spanish
+  'conectar cartera', 'conecta tu cartera', 'dirección de la cartera', 'firmar una transacción', 'firma la transacción',
 ]
-const SEED_PHRASE_TERMS = ['seed phrase', 'seed-phrase', 'recovery phrase', 'private key', 'private-key', 'mnemonic phrase']
+const SEED_PHRASE_TERMS = [
+  'seed phrase', 'seed-phrase', 'recovery phrase', 'private key', 'private-key', 'mnemonic phrase',
+  // Czech
+  'seed frázi', 'obnovovací frázi', 'soukromý klíč', 'privátní klíč',
+  // German
+  'seed-phrase', 'wiederherstellungsphrase', 'privater schlüssel', 'privaten schlüssel',
+  // Spanish
+  'frase semilla', 'frase de recuperación', 'clave privada',
+]
 const CREDENTIAL_TERMS = [
   'send your password', 'share your password', 'enter your password',
   'your api key', 'send your api key', 'share your api key',
   'session token', 'access token', 'your login credentials', 'your credentials',
   'kyc document', 'send your id', 'passport photo',
+  // Czech
+  'pošlete své heslo', 'sdílejte své heslo', 'zadejte své heslo', 'váš přístupový token', 'vaše přihlašovací údaje',
+  // German
+  'senden sie ihr passwort', 'teilen sie ihr passwort', 'geben sie ihr passwort ein', 'ihr zugriffstoken', 'ihre anmeldedaten',
+  // Spanish
+  'envía tu contraseña', 'comparte tu contraseña', 'ingresa tu contraseña', 'tu token de acceso', 'tus credenciales de acceso',
 ]
 
 export function detectWalletAndCredentials(text: string): RuleSignal[] {
@@ -176,13 +317,29 @@ export function detectPromptInjection(text: string): RuleSignal[] {
 
 // ── Terrorism, violent extremism, sanctions evasion ──────────────────────
 
-const TERROR_ORG_NAMES = ['hamas', 'isis', 'islamic state', 'al-qaida', 'al-qaeda', 'boko haram', 'hezbollah', 'al-shabaab']
-const NEO_NAZI_TERMS = ['neo-nazi', 'neo nazi', 'national socialist movement', 'white supremacist', 'race war', 'aryan brotherhood']
+// Organisation names are largely stable across languages; "Islamic State"
+// itself is commonly translated, so those variants are listed explicitly.
+const TERROR_ORG_NAMES = [
+  'hamas', 'isis', 'islamic state', 'al-qaida', 'al-qaeda', 'boko haram', 'hezbollah', 'al-shabaab',
+  'islámský stát', 'islamischer staat', 'estado islámico',
+]
+const NEO_NAZI_TERMS = [
+  'neo-nazi', 'neo nazi', 'national socialist movement', 'white supremacist', 'race war', 'aryan brotherhood',
+  'neonacista', 'bílá nadřazenost', 'rasová válka',
+  'neonazi', 'weiße vorherrschaft', 'rassenkrieg',
+  'neonazi', 'supremacía blanca', 'guerra racial',
+]
 
 const RECRUITMENT_OR_SUPPORT_VERBS = [
   'join the cause', 'pledge allegiance', 'swear loyalty', 'recruit', 'recruitment material',
   'fundraise for', 'fundraising for', 'raise funds for', 'donate to support', 'financial support for',
   'praise', 'glorify', 'celebrate the attack', 'justify the attack', 'justifies violence against civilians',
+  // Czech
+  'připojte se k', 'přísahejte věrnost', 'verbovat', 'verbování', 'sbírejte finance pro', 'sbírka na podporu', 'chválit', 'oslavovat útok',
+  // German
+  'schließen sie sich an', 'schwören sie treue', 'rekrutieren', 'spenden sammeln für', 'loben', 'verherrlichen', 'den anschlag feiern',
+  // Spanish
+  'únete a la causa', 'jura lealtad', 'reclutar', 'recaudar fondos para', 'alabar', 'glorificar', 'celebrar el ataque',
 ]
 
 // Framing that indicates the text is *about* the topic, not advocating for
@@ -194,11 +351,26 @@ const ANALYTICAL_CONTEXT_MARKERS = [
   'news report', 'journalism', 'compare', 'comparison', 'critique of', 'criticism of',
   'theological discussion', 'translate', 'translation of', 'summarize the news',
   'explain the history of', 'analyze the ideology of', 'analysis of the ideology',
+  // Czech
+  'akademická analýza', 'akademický výzkum', 'ověření faktů', 'srovnání', 'kritika',
+  'přeložit', 'překlad', 'shrňte zprávy', 'vysvětlete historii', 'analýza ideologie',
+  // German
+  'akademische analyse', 'akademische forschung', 'faktencheck', 'vergleich', 'kritik an',
+  'übersetzen', 'übersetzung von', 'fassen sie die nachrichten zusammen', 'erklären sie die geschichte',
+  // Spanish
+  'análisis académico', 'investigación académica', 'verificación de hechos', 'comparación', 'crítica de',
+  'traducir', 'traducción de', 'resumir las noticias', 'explicar la historia de', 'análisis de la ideología',
 ]
 
 const SANCTIONS_TERMS = [
   'evade sanctions', 'evading sanctions', 'bypass sanctions', 'circumvent sanctions',
   'circumvent export control', 'get around export controls', 'launder money', 'shell company to hide',
+  // Czech
+  'obejít sankce', 'obcházet sankce', 'vyhnout se sankcím', 'obejít vývozní kontroly', 'prát peníze',
+  // German
+  'sanktionen umgehen', 'sanktionen zu umgehen', 'exportkontrollen umgehen', 'geld waschen',
+  // Spanish
+  'evadir sanciones', 'eludir sanciones', 'evitar sanciones', 'eludir controles de exportación', 'lavar dinero',
 ]
 
 export function detectTerrorismAndExtremism(text: string): RuleSignal[] {
@@ -249,11 +421,49 @@ interface FaithGroup {
   terms: string[]
 }
 
+// English, Czech, German, and Spanish terms in one list — includesAny()
+// does plain substring matching regardless of language, so no separate
+// per-language code path is needed. Not full morphological coverage (esp.
+// for the heavily-inflected Czech verb forms below) — see this module's
+// doc comment; this covers the most common declarative-statement forms,
+// not every possible conjugation.
 const FAITH_GROUPS: FaithGroup[] = [
-  { name: 'christianity', terms: ['jesus', 'christ', 'christian', 'christians', 'christianity'] },
-  { name: 'islam', terms: ['muhammad', 'mohammed', 'allah', 'muslim', 'muslims', 'islam'] },
-  { name: 'judaism', terms: ['jewish', 'jews', 'judaism', 'torah'] },
-  { name: 'other_faith', terms: ['hindu', 'hindus', 'buddhist', 'buddhists', 'sikh', 'sikhs'] },
+  {
+    name: 'christianity',
+    terms: [
+      'jesus', 'christ', 'christian', 'christians', 'christianity',
+      'ježíš', 'ježíše', 'ježíšovi', 'kristus', 'křesťan', 'křesťané', 'křesťanů', 'křesťanství',
+      'christus', 'christen', 'christentum',
+      'jesús', 'cristo', 'cristiano', 'cristianos', 'cristianismo',
+    ],
+  },
+  {
+    name: 'islam',
+    terms: [
+      'muhammad', 'mohammed', 'allah', 'muslim', 'muslims', 'islam',
+      'mohamed', 'muslimové', 'muslimů', 'islám',
+      'mohammed', 'muslime', 'islam',
+      'mahoma', 'alá', 'musulmán', 'musulmanes',
+    ],
+  },
+  {
+    name: 'judaism',
+    terms: [
+      'jewish', 'jews', 'judaism', 'torah',
+      'židovský', 'židé', 'židů', 'judaismus', 'tóra',
+      'jüdisch', 'juden', 'judentum', 'tora',
+      'judío', 'judíos', 'judaísmo', 'torá',
+    ],
+  },
+  {
+    name: 'other_faith',
+    terms: [
+      'hindu', 'hindus', 'buddhist', 'buddhists', 'sikh', 'sikhs',
+      'hinduista', 'hinduisté', 'buddhista', 'buddhisté', 'sikhové',
+      'hindus', 'buddhist', 'buddhisten', 'sikhs',
+      'hindú', 'hindúes', 'budista', 'budistas', 'sij', 'sijs',
+    ],
+  },
 ]
 
 // Comparative/hyperbolic hostility ("X will destroy Y") — serious on its
@@ -261,6 +471,12 @@ const FAITH_GROUPS: FaithGroup[] = [
 const DESTRUCTIVE_RHETORIC_VERBS = [
   'will destroy', 'shall destroy', 'will defeat', 'will wipe out', 'will eliminate',
   'will conquer', 'must be destroyed', 'must be eliminated',
+  // Czech: 3rd person sg./pl. future ("X zničí Y"), most common declarative form
+  'zničí', 'zničit', 'musí být zničen', 'musí být zničeni', 'musí být zničena', 'musí být zničeny',
+  // German
+  'wird zerstören', 'muss zerstört werden', 'wird vernichten', 'muss vernichtet werden',
+  // Spanish
+  'destruirá', 'debe ser destruido', 'debe ser destruida', 'deben ser destruidos', 'deben ser destruidas',
 ]
 // Direct incitement to violence/death — severe regardless of whether one
 // group or two are named; "Muslims must be killed" needs no comparison to
@@ -268,6 +484,12 @@ const DESTRUCTIVE_RHETORIC_VERBS = [
 const VIOLENCE_INCITEMENT_VERBS = [
   'must be killed', 'deserve to die', 'should be killed', 'kill all',
   'death to', 'will exterminate', 'must be exterminated', 'will annihilate', 'must be annihilated',
+  // Czech
+  'musí být zabiti', 'musí být zabita', 'musí zemřít', 'zaslouží si zemřít', 'smrt všem', 'smrt křesťanům', 'smrt muslimům', 'smrt židům',
+  // German
+  'müssen getötet werden', 'muss getötet werden', 'verdienen zu sterben', 'tod den', 'tod allen',
+  // Spanish
+  'deben ser asesinados', 'deben ser asesinadas', 'deben morir', 'merecen morir', 'muerte a', 'muerte a todos',
 ]
 const HOSTILE_VERBS = [...DESTRUCTIVE_RHETORIC_VERBS, ...VIOLENCE_INCITEMENT_VERBS]
 
@@ -373,6 +595,10 @@ export function detectUnverifiableDeliverable(text: string, budgetMaxEur: number
 export function runAllRules(input: { title: string; description: string; budgetMaxEur: number }): RuleSignal[] {
   const text = norm(`${input.title}\n${input.description}`)
   return [
+    ...detectSpam(text),
+    ...detectPhishing(text),
+    ...detectPrivacyViolation(text),
+    ...detectIllegalService(text),
     ...detectSuspiciousLinks(text),
     ...detectWalletAndCredentials(text),
     ...detectOffPlatformAndAffiliate(text),

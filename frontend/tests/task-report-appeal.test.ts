@@ -10,10 +10,15 @@ const AGENT_ID = 'agent-report-1'
 let taskRow: Record<string, unknown> = { id: TASK_ID, moderation_status: 'approved' }
 const reportInserts: Record<string, unknown>[] = []
 let existingReportForAgent = false
-let reportCount = 0
+// Simulates the existing task_reports rows for this task (their
+// reporter_agent_id) and each reporter's owner_org_id — the threshold is
+// gated on distinct owner orgs, not raw report count, so tests set both.
+let reporterAgentIds: string[] = []
+let agentOwnerOrgs: Record<string, string | null> = {}
 const taskUpdates: Record<string, unknown>[] = []
 const appealInserts: Record<string, unknown>[] = []
 let existingPendingAppeal: { id: string } | null = null
+let appealInsertError: { code: string } | null = null
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
@@ -22,6 +27,7 @@ vi.mock('@/lib/server/supabase', () => ({
       const builder: Record<string, any> = {
         select: () => builder,
         eq: (field: string, value: unknown) => { eqFilters.push([field, value]); return builder },
+        in: () => builder,
         maybeSingle: async () => {
           if (table === 'task_moderation_appeals') return { data: existingPendingAppeal, error: null }
           return { data: null, error: null }
@@ -39,7 +45,13 @@ vi.mock('@/lib/server/supabase', () => ({
             reportInserts.push(values)
             return { ...builder, then: (resolve: any) => resolve({ data: null, error: null }) }
           }
-          if (table === 'task_moderation_appeals') appealInserts.push(values)
+          if (table === 'task_moderation_appeals') {
+            if (appealInsertError) {
+              const errBuilder: Record<string, any> = { select: () => errBuilder, single: async () => ({ data: null, error: appealInsertError }) }
+              return errBuilder
+            }
+            appealInserts.push(values)
+          }
           return builder
         },
         update: (values: Record<string, unknown>) => {
@@ -47,7 +59,8 @@ vi.mock('@/lib/server/supabase', () => ({
           return builder
         },
         then: (resolve: (v: unknown) => unknown) => {
-          if (table === 'task_reports') return resolve({ data: [], count: reportCount, error: null })
+          if (table === 'task_reports') return resolve({ data: reporterAgentIds.map((id) => ({ reporter_agent_id: id })), error: null })
+          if (table === 'agents') return resolve({ data: reporterAgentIds.map((id) => ({ id, owner_org_id: agentOwnerOrgs[id] ?? null })), error: null })
           return resolve({ data: null, error: null })
         },
       }
@@ -66,10 +79,12 @@ beforeEach(() => {
   taskRow = { id: TASK_ID, moderation_status: 'approved' }
   reportInserts.length = 0
   existingReportForAgent = false
-  reportCount = 0
+  reporterAgentIds = []
+  agentOwnerOrgs = {}
   taskUpdates.length = 0
   appealInserts.length = 0
   existingPendingAppeal = null
+  appealInsertError = null
 })
 
 describe('POST /api/v1/tasks/[id]/report', () => {
@@ -128,8 +143,9 @@ describe('POST /api/v1/tasks/[id]/report', () => {
     expect(response.status).toBe(409)
   })
 
-  it('auto-quarantines an approved task once the report threshold is reached', async () => {
-    reportCount = 3
+  it('auto-quarantines an approved task once 3 distinct owner organizations have reported it', async () => {
+    reporterAgentIds = ['reporter-1', 'reporter-2', 'reporter-3']
+    agentOwnerOrgs = { 'reporter-1': 'org-a', 'reporter-2': 'org-b', 'reporter-3': 'org-c' }
     const { POST } = await import('@/app/api/v1/tasks/[id]/report/route')
     const token = await signToken({ agent_id: AGENT_ID, agent_slug: 'a', tier: 1 }, '15m')
     const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/report`, {
@@ -145,9 +161,31 @@ describe('POST /api/v1/tasks/[id]/report', () => {
     expect(taskUpdates[0]).toMatchObject({ moderation_status: 'quarantined' })
   })
 
+  it('the reported abuse vector: 3 reports from agents under the SAME org do NOT auto-quarantine', async () => {
+    // Agent registration is instant and self-service — before this fix, 3
+    // freshly-registered agents (any owner org) could silently hide any
+    // competitor's task. Same raw report count as the case above, but all
+    // three reporters share one owner_org_id, so this must not trigger.
+    reporterAgentIds = ['sockpuppet-1', 'sockpuppet-2', 'sockpuppet-3']
+    agentOwnerOrgs = { 'sockpuppet-1': 'org-attacker', 'sockpuppet-2': 'org-attacker', 'sockpuppet-3': 'org-attacker' }
+    const { POST } = await import('@/app/api/v1/tasks/[id]/report/route')
+    const token = await signToken({ agent_id: AGENT_ID, agent_slug: 'a', tier: 1 }, '15m')
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ reason_code: 'SPAM' }),
+    })
+    const response = await POST(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(response.status).toBe(201)
+    expect(body.auto_quarantined).toBe(false)
+    expect(taskUpdates).toHaveLength(0)
+  })
+
   it('does not re-quarantine a task that is already quarantined', async () => {
     taskRow = { id: TASK_ID, moderation_status: 'quarantined' }
-    reportCount = 5
+    reporterAgentIds = ['reporter-1', 'reporter-2', 'reporter-3', 'reporter-4', 'reporter-5']
+    agentOwnerOrgs = { 'reporter-1': 'org-a', 'reporter-2': 'org-b', 'reporter-3': 'org-c', 'reporter-4': 'org-d', 'reporter-5': 'org-e' }
     const { POST } = await import('@/app/api/v1/tasks/[id]/report/route')
     const token = await signToken({ agent_id: AGENT_ID, agent_slug: 'a', tier: 1 }, '15m')
     const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/report`, {
@@ -236,5 +274,24 @@ describe('POST /api/v1/tasks/[id]/appeal', () => {
     const response = await POST(request, { params: { id: TASK_ID } })
     expect(response.status).toBe(409)
     expect(appealInserts).toHaveLength(0)
+  })
+
+  it('turns a DB-level unique violation (concurrent submission race) into a clean 409, not a 500', async () => {
+    // The pre-check (existingPendingAppeal) passes for both of two
+    // concurrent requests before either insert commits — the partial
+    // unique index on task_moderation_appeals is what actually prevents
+    // the second one, surfacing here as a 23505 from the insert itself.
+    taskRow = { id: TASK_ID, moderation_status: 'quarantined' }
+    existingPendingAppeal = null
+    appealInsertError = { code: '23505' }
+    const { POST } = await import('@/app/api/v1/tasks/[id]/appeal/route')
+    const buyerToken = await signToken({ role: 'buyer', task_id: TASK_ID, org_id: 'org-1' }, '30d')
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/appeal`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${buyerToken}` },
+      body: JSON.stringify({ message: 'racing the other request' }),
+    })
+    const response = await POST(request, { params: { id: TASK_ID } })
+    expect(response.status).toBe(409)
   })
 })

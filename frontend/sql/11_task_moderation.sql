@@ -6,12 +6,16 @@
 -- 'quarantined' (moderation) simultaneously; only 'approved' tasks are
 -- ever public, biddable, or surfaced in feeds/webhooks/auto-bid.
 --
--- SAFETY: this migration does NOT approve any existing task. Every row
--- currently in `tasks` gets moderation_status = 'pending' by the column
+-- SAFETY: this migration does NOT blanket-approve any existing task. Every
+-- row currently in `tasks` gets moderation_status = 'pending' by the column
 -- default below, which means the public marketplace, task detail, activity
 -- feed and bidding all stop showing them the moment the application code
 -- from this same change is deployed — until they are explicitly reviewed.
--- See docs/self-hosting.md and README.md for the required backfill step.
+-- The ONE exception is a narrow, targeted backfill near the end of this
+-- file that approves only the platform's own seeded sample tasks (matched
+-- by their dedicated seed organization, not by title) — see the comment
+-- there. See docs/self-hosting.md and README.md for the required backfill
+-- step for everything else.
 
 ALTER TABLE tasks
     ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'pending';
@@ -34,7 +38,9 @@ ALTER TABLE tasks
     ADD COLUMN IF NOT EXISTS moderation_reason_codes TEXT[] DEFAULT '{}',
     ADD COLUMN IF NOT EXISTS moderation_policy_version TEXT,
     ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS moderated_by TEXT;
+    ADD COLUMN IF NOT EXISTS moderated_by TEXT,
+    ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS buyer_email TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_tasks_moderation ON tasks(moderation_status);
 
@@ -108,6 +114,13 @@ CREATE INDEX IF NOT EXISTS idx_moderation_events_task    ON task_moderation_even
 CREATE INDEX IF NOT EXISTS idx_moderation_appeals_task   ON task_moderation_appeals(task_id);
 CREATE INDEX IF NOT EXISTS idx_moderation_appeals_status ON task_moderation_appeals(status);
 
+-- Enforce "at most one pending appeal per task" atomically — the
+-- application also checks this before inserting, but that check-then-insert
+-- has a race window; this index closes it. A second concurrent insert gets
+-- a unique-violation (23505), not a silently-created duplicate appeal.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_moderation_appeals_one_pending
+    ON task_moderation_appeals(task_id) WHERE status = 'pending';
+
 ALTER TABLE task_reports            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_moderation_events  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_moderation_appeals ENABLE ROW LEVEL SECURITY;
@@ -125,20 +138,20 @@ CREATE POLICY "service_role_all" ON task_moderation_appeals TO service_role USIN
 -- submissions, so there is nothing to review. On an EXISTING database where
 -- 07_demo_tasks.sql already ran before this migration existed, those rows
 -- default to 'pending' like everything else; the one-off backfill below
--- promotes exactly the known sample titles and nothing else.
+-- promotes them.
+--
+-- Matched by the dedicated seed organization alone, NOT by title text —
+-- an earlier version of this migration also required an exact title match,
+-- which is fragile (a since-edited sample title, a punctuation/glyph
+-- difference) and would silently leave that one sample stuck at 'pending'
+-- forever. 'Mercatai Sample Briefs' is an internal, deliberately
+-- distinctive org name real buyer-posted tasks would not organically use,
+-- so matching on it alone is both sufficient and robust.
 UPDATE tasks
 SET moderation_status = 'approved',
     moderation_policy_version = 'v1',
     moderated_at = NOW(),
+    published_at = NOW(),
     moderated_by = 'system:demo_backfill'
 WHERE moderation_status = 'pending'
-  AND posted_by_org_id IN (SELECT id FROM organizations WHERE name = 'Mercatai Sample Briefs')
-  AND title IN (
-    'Verify 50 supplier invoices against the Czech business register',
-    'Weekly cashflow summary from bank statement export',
-    'Translate a 12-page SaaS onboarding guide EN → DE',
-    'Competitive scan: EU invoicing SaaS pricing',
-    'Extract line items from 30 scanned PDF receipts',
-    'Write 6 product descriptions for an e-shop (CZ)',
-    'Review a 400-line Python payment webhook handler'
-  );
+  AND posted_by_org_id IN (SELECT id FROM organizations WHERE name = 'Mercatai Sample Briefs');

@@ -165,12 +165,14 @@ export async function POST(request: NextRequest) {
         status: 'open',
         bidding_closes_at: biddingClosesAt,
         ...(apiClient ? { referred_by_client_id: apiClient.id } : {}),
+        ...(buyer_email ? { buyer_email } : {}),
         moderation_status: dbModerationStatus,
         moderation_risk_score: moderation.riskScore,
         moderation_reason_codes: moderation.reasonCodes,
         moderation_policy_version: moderation.policyVersion,
         moderated_at: new Date().toISOString(),
         moderated_by: 'system:auto',
+        ...(isPublic ? { published_at: new Date().toISOString() } : {}),
       })
       .select()
       .single()
@@ -247,8 +249,23 @@ export async function POST(request: NextRequest) {
       }).catch(console.error)
     }
 
+    // Built explicitly, not spread from the raw row — that row also carries
+    // moderation_risk_score, moderation_reason_codes and moderated_by,
+    // which are internal-only (see moderateTask.ts's internalExplanation
+    // vs publicExplanation split) and must never reach a public response.
     return NextResponse.json({
-      ...task,
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      category: task.category,
+      required_capabilities: task.required_capabilities,
+      required_languages: task.required_languages,
+      budget_min_eur: task.budget_min_eur,
+      budget_max_eur: task.budget_max_eur,
+      deadline_hours: task.deadline_hours,
+      status: task.status,
+      bidding_closes_at: task.bidding_closes_at,
+      created_at: task.created_at,
       buyer_token: buyerToken,
       buyer_token_note: 'Save this token — required to approve or dispute this task',
       ...(moderation.decision === 'allow_with_warning' ? { moderation_warning: moderation.publicExplanation } : {}),

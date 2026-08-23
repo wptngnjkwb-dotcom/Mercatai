@@ -8,9 +8,14 @@ import { sendModerationAlert } from '@/lib/server/email'
 
 const VALID_REASON_CODES = new Set(Object.keys(PUBLIC_EXPLANATIONS))
 
-// Distinct-agent reports a task can accumulate before it's pulled from
-// public view pending admin review. A placeholder policy knob — tune once
-// there's real report volume to calibrate against.
+// Distinct *owning organizations* behind a task's reports before it's
+// pulled from public view pending admin review — not a raw report count.
+// Agent registration is instant and self-service, so counting agent_ids
+// alone means one actor spins up 3 throwaway agents and silently hides
+// any competitor's task; requiring distinct owner orgs raises that from
+// "free and instant" to "register 3 separate organizations". Still a
+// placeholder policy knob — tune once there's real report volume to
+// calibrate against.
 const REPORT_QUARANTINE_THRESHOLD = 3
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
@@ -67,16 +72,26 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       notes: details || undefined,
     })
 
-    const { count: reportCount } = await db
+    const { data: reportRows } = await db
       .from('task_reports')
-      .select('id', { count: 'exact', head: true })
+      .select('reporter_agent_id')
       .eq('task_id', task.id)
+    const reporterAgentIds = Array.from(new Set((reportRows ?? []).map((r: any) => r.reporter_agent_id).filter(Boolean)))
+
+    let distinctOrgCount = 0
+    if (reporterAgentIds.length > 0) {
+      const { data: reporterAgents } = await db
+        .from('agents')
+        .select('id, owner_org_id')
+        .in('id', reporterAgentIds)
+      distinctOrgCount = new Set((reporterAgents ?? []).map((a: any) => a.owner_org_id).filter(Boolean)).size
+    }
 
     // Only downgrade a task that's currently public — a task already
     // quarantined/rejected/pending stays exactly as it is, so this can
     // never move a decision backwards toward being more visible.
     let autoQuarantined = false
-    if ((reportCount ?? 0) >= REPORT_QUARANTINE_THRESHOLD && task.moderation_status === 'approved') {
+    if (distinctOrgCount >= REPORT_QUARANTINE_THRESHOLD && task.moderation_status === 'approved') {
       await db
         .from('tasks')
         .update({ moderation_status: 'quarantined', moderated_at: new Date().toISOString(), moderated_by: 'system:report_threshold' })
@@ -86,13 +101,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         taskId: task.id,
         eventType: 'report_threshold_quarantine',
         actorType: 'system',
-        notes: `Auto-quarantined after ${reportCount} distinct agent reports reached the review threshold (${REPORT_QUARANTINE_THRESHOLD}).`,
+        notes: `Auto-quarantined after reports from ${distinctOrgCount} distinct owner organizations reached the review threshold (${REPORT_QUARANTINE_THRESHOLD}).`,
       })
 
       autoQuarantined = true
       sendModerationAlert({
         taskId: task.id,
-        reportCount: reportCount ?? 0,
+        reportCount: reporterAgentIds.length,
         reasonCode: reason_code,
       }).catch(console.error)
     }

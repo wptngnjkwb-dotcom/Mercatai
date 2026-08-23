@@ -39,7 +39,6 @@ export async function PUT(request: NextRequest, { params }: { params: { taskId: 
   if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
 
   const newStatus = ACTION_TO_STATUS[action as keyof typeof ACTION_TO_STATUS]
-  const wasApproved = task.moderation_status === 'approved'
 
   const { data: updated, error } = await db
     .from('tasks')
@@ -64,33 +63,48 @@ export async function PUT(request: NextRequest, { params }: { params: { taskId: 
     notes: note || undefined,
   })
 
-  // A task moving into 'approved' for the first time needs the exact same
-  // publish side effects POST /tasks would have fired at creation — it was
-  // withheld from all of them until now.
+  // A task moving into 'approved' needs the exact same publish side effects
+  // POST /tasks would have fired at creation — but only the FIRST time it
+  // is ever published, or approved -> quarantined (e.g. reported) ->
+  // re-approved would re-fire task.created webhooks and re-run auto-bid on
+  // a task agents already saw once. published_at is a separate, one-way
+  // flag from moderation_status specifically to guard this, and the
+  // UPDATE ... WHERE published_at IS NULL below makes "publish exactly
+  // once" atomic even under a concurrent double-approval.
   let published = false
-  if (newStatus === 'approved' && !wasApproved) {
-    fireWebhooks('task.created', { task_id: task.id, title: task.title, category: task.category, budget_max_eur: task.budget_max_eur })
-    await runAutoBids({
-      id: task.id,
-      title: task.title,
-      category: task.category,
-      required_capabilities: task.required_capabilities,
-      required_languages: task.required_languages,
-      budget_min_eur: task.budget_min_eur,
-      budget_max_eur: task.budget_max_eur,
-      deadline_hours: task.deadline_hours,
-    })
-    if (task.buyer_email && typeof task.buyer_email === 'string' && task.buyer_email.includes('@')) {
-      const buyerToken = await signToken({ role: 'buyer', task_id: task.id, org_id: task.posted_by_org_id, buyer_email: task.buyer_email }, '30d')
-      sendTaskCreated({
-        to: task.buyer_email,
-        taskTitle: task.title,
-        taskId: task.id,
-        buyerToken,
-        budgetMax: task.budget_max_eur,
-      }).catch(console.error)
+  if (newStatus === 'approved') {
+    const { data: firstPublish } = await db
+      .from('tasks')
+      .update({ published_at: new Date().toISOString() })
+      .eq('id', params.taskId)
+      .is('published_at', null)
+      .select('id')
+      .maybeSingle()
+
+    if (firstPublish) {
+      fireWebhooks('task.created', { task_id: task.id, title: task.title, category: task.category, budget_max_eur: task.budget_max_eur })
+      await runAutoBids({
+        id: task.id,
+        title: task.title,
+        category: task.category,
+        required_capabilities: task.required_capabilities,
+        required_languages: task.required_languages,
+        budget_min_eur: task.budget_min_eur,
+        budget_max_eur: task.budget_max_eur,
+        deadline_hours: task.deadline_hours,
+      })
+      if (task.buyer_email && typeof task.buyer_email === 'string' && task.buyer_email.includes('@')) {
+        const buyerToken = await signToken({ role: 'buyer', task_id: task.id, org_id: task.posted_by_org_id, buyer_email: task.buyer_email }, '30d')
+        sendTaskCreated({
+          to: task.buyer_email,
+          taskTitle: task.title,
+          taskId: task.id,
+          buyerToken,
+          budgetMax: task.budget_max_eur,
+        }).catch(console.error)
+      }
+      published = true
     }
-    published = true
   }
 
   return NextResponse.json({ ...updated, published })

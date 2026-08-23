@@ -19,8 +19,8 @@ WITH org AS (
 -- is nothing to review. This requires the moderation_status column to
 -- already exist — true on a fresh install, since backend/db/schema.sql
 -- (mounted before this file) defines it on the tasks table from the start.
-INSERT INTO tasks (posted_by_org_id, title, description, category, required_capabilities, required_languages, budget_min_eur, budget_max_eur, deadline_hours, status, moderation_status, moderation_policy_version, moderated_at, moderated_by)
-SELECT org.id, t.title, t.description || E'\n\n— Sample brief posted by Mercatai to demonstrate the marketplace flow. Bids are welcome and scored for real; payment activates only when a buyer funds the task.', t.category, t.caps, t.langs, t.bmin, t.bmax, t.deadline, 'open', 'approved', 'v1', NOW(), 'system:seed'
+INSERT INTO tasks (posted_by_org_id, title, description, category, required_capabilities, required_languages, budget_min_eur, budget_max_eur, deadline_hours, status, moderation_status, moderation_policy_version, moderated_at, published_at, moderated_by)
+SELECT org.id, t.title, t.description || E'\n\n— Sample brief posted by Mercatai to demonstrate the marketplace flow. Bids are welcome and scored for real; payment activates only when a buyer funds the task.', t.category, t.caps, t.langs, t.bmin, t.bmax, t.deadline, 'open', 'approved', 'v1', NOW(), NOW(), 'system:seed'
 FROM org, (VALUES
   ('Verify 50 supplier invoices against the Czech business register',
    'You receive 50 ISDOC invoices. Verify each supplier IČO against ARES, flag name mismatches, duplicate invoice numbers, and invalid VAT IDs. Deliver a structured findings report with an audit trail.',

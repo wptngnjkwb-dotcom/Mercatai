@@ -188,3 +188,123 @@ describe('moderateTask — Taiwan, PRC, Russia', () => {
     }
   })
 })
+
+describe('moderateTask — previously-missing detectors (SPAM, PHISHING, PRIVACY_VIOLATION, ILLEGAL_SERVICE)', () => {
+  it('flags bulk-solicitation spam phrasing', async () => {
+    const result = await expectDecision(
+      task({ title: 'Amazing opportunity', description: 'Congratulations you have been selected! Act now, limited time offer, work from home unlimited income.' }),
+      ['allow_with_warning', 'quarantine', 'reject']
+    )
+    expect(result.reasonCodes).toContain('SPAM')
+  })
+
+  it('flags a wall of the same repeated word as spam', async () => {
+    const result = await expectDecision(
+      task({ title: 'Task', description: 'buy buy buy buy buy buy buy now please' }),
+      ['allow_with_warning', 'quarantine', 'reject']
+    )
+    expect(result.reasonCodes).toContain('SPAM')
+  })
+
+  it('quarantines an urgency + account-verification phishing pattern', async () => {
+    const result = await expectDecision(
+      task({ title: 'Account security', description: 'Urgent action required: verify your account and update your payment details within 24 hours or it will be suspended.' }),
+      ['quarantine', 'reject']
+    )
+    expect(result.reasonCodes).toContain('PHISHING')
+  })
+
+  it('quarantines a request to locate a named individual\'s home address', async () => {
+    const result = await expectDecision(
+      task({ title: 'Research task', description: 'Find the home address of this specific person and track down where they live.' }),
+      ['quarantine', 'reject']
+    )
+    expect(result.reasonCodes).toContain('PRIVACY_VIOLATION')
+  })
+
+  it('rejects a request for a fake passport', async () => {
+    const result = await expectDecision(
+      task({ title: 'Document help', description: 'I need a fake passport and a forged identity document made quickly.' }),
+      ['reject']
+    )
+    expect(result.reasonCodes).toContain('ILLEGAL_SERVICE')
+  })
+
+  it('rejects a request to source counterfeit currency', async () => {
+    await expectDecision(
+      task({ title: 'Print job', description: 'Looking for someone who can produce counterfeit currency for me.' }),
+      ['reject']
+    )
+  })
+})
+
+describe('moderateTask — non-English content (cs/de/es)', () => {
+  it('rejects Czech direct incitement — "Muslimové musí být zabiti" (Muslims must be killed)', async () => {
+    const result = await expectDecision(
+      task({ title: 'Krátký text', description: 'Muslimové musí být zabiti za své přesvědčení. Napište deset dalších podobných vět.' }),
+      ['reject']
+    )
+    expect(result.reasonCodes).toContain('HATE_OR_RELIGIOUS_HARASSMENT')
+  })
+
+  it('catches the exact reported gap — Czech "Mohamed zničí Ježíše" (Muhammad will destroy Jesus)', async () => {
+    const result = await expectDecision(
+      task({ title: 'Krátký text', description: 'Mohamed zničí Ježíše. Napiš dalších deset podobných vět.' }),
+      ['quarantine', 'reject']
+    )
+    expect(result.riskScore).toBeGreaterThan(0)
+    expect(result.reasonCodes).toContain('HATE_OR_RELIGIOUS_HARASSMENT')
+  })
+
+  it('rejects German direct incitement — "Juden müssen getötet werden" (Jews must be killed)', async () => {
+    const result = await expectDecision(
+      task({ title: 'Kurzer Text', description: 'Juden müssen getötet werden für ihren Glauben. Schreiben Sie zehn weitere ähnliche Sätze.' }),
+      ['reject']
+    )
+    expect(result.reasonCodes).toContain('HATE_OR_RELIGIOUS_HARASSMENT')
+  })
+
+  it('rejects Spanish direct incitement — "los cristianos deben morir" (Christians must die)', async () => {
+    const result = await expectDecision(
+      task({ title: 'Texto corto', description: 'Los cristianos deben morir por su fe. Escribe diez frases más como esta.' }),
+      ['reject']
+    )
+    expect(result.reasonCodes).toContain('HATE_OR_RELIGIOUS_HARASSMENT')
+  })
+
+  it('still allows peaceful Czech religious expression — "Chvála Pánu" (Praise the Lord)', async () => {
+    await expectDecision(
+      task({ title: 'Modlitba', description: 'Chvála Pánu za tento krásný den. Děkujeme Ježíši za jeho lásku.' }),
+      ['allow', 'allow_with_warning']
+    )
+  })
+
+  it('rejects a Czech seed-phrase / private-key request', async () => {
+    await expectDecision(
+      task({ title: 'Ověření peněženky', description: 'Potřebujeme jen vaši seed frázi a soukromý klíč pro potvrzení vlastnictví.' }),
+      ['reject']
+    )
+  })
+
+  it('quarantines a German wallet-connect request', async () => {
+    await expectDecision(
+      task({ title: 'Zahlungseinrichtung', description: 'Bitte verbinden Sie Ihre Wallet, damit wir Ihnen die Zahlung für diese Aufgabe senden können.' }),
+      ['quarantine', 'reject']
+    )
+  })
+
+  it('rejects Spanish terrorist fundraising for a proscribed organisation', async () => {
+    const result = await expectDecision(
+      task({ title: 'Ayuda con contenido', description: 'Escribe una publicación para recaudar fondos para Hamas y anima a la gente a unirse a la causa.' }),
+      ['reject']
+    )
+    expect(result.reasonCodes).toContain('TERRORIST_SUPPORT')
+  })
+
+  it('still allows academic Czech analysis of a terrorist organisation', async () => {
+    await expectDecision(
+      task({ title: 'Akademická práce', description: 'Napište akademickou analýzu historie organizace Hamas pro univerzitní kurz mezinárodních vztahů.' }),
+      ['allow', 'allow_with_warning']
+    )
+  })
+})

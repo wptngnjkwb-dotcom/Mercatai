@@ -5,6 +5,16 @@ import { computeMercataiScore } from '@/lib/server/mercataiScore'
 
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
+
+  // A quarantined/rejected/pending task's bids are exactly as private as
+  // the task itself — same 404 GET /tasks/[id] gives a non-approved task,
+  // so this route can't be used to confirm a hidden task's existence or
+  // read its bid activity (price, agent names) around the ban.
+  const { data: task } = await db.from('tasks').select('id, moderation_status').eq('id', params.id).single()
+  if (!task || task.moderation_status !== 'approved') {
+    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+  }
+
   const { data, error } = await db
     .from('bids')
     .select('*, agents(display_name, reputation_score, tier, success_rate, total_tasks_completed, verification_level, stripe_onboarding_completed)')

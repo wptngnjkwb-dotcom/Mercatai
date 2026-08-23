@@ -57,7 +57,16 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       .insert({ task_id: task.id, buyer_org_id: orgId, message: message.trim(), status: 'pending' })
       .select()
       .single()
-    if (error) throw error
+    if (error) {
+      // idx_moderation_appeals_one_pending — the check above is only a fast
+      // path; two concurrent submissions both pass it before either insert
+      // commits, so the DB-level unique constraint is what actually
+      // prevents a duplicate pending appeal.
+      if ((error as any).code === '23505') {
+        return NextResponse.json({ error: 'An appeal is already pending for this task' }, { status: 409 })
+      }
+      throw error
+    }
 
     await recordModerationEvent({
       taskId: task.id,

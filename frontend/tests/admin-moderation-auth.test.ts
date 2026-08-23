@@ -21,42 +21,14 @@ vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks: vi.fn(async () => {}) })
 vi.mock('@/lib/server/autobid', () => ({ runAutoBids: vi.fn(async () => ({ bids_placed: 0, agents_notified: 0 })) }))
 vi.mock('@/lib/server/email', () => ({ sendTaskCreated: vi.fn(async () => {}) }))
 
+// admin/moderation/[taskId] and admin/moderation/appeals/[appealId] have
+// their own dedicated test file (admin-moderation-actions.test.ts) covering
+// both their admin-only gate and their full behavior — this suite's
+// always-throws supabase mock can't exercise the realistic-data paths
+// those tests need, and per-route mocks must not be split across two
+// files that both import the same route (see task-moderation-isolation
+// .test.ts's comment on isolate:false in vitest.config.ts).
 describe('Admin moderation endpoints — admin-only', () => {
-  it('PUT /api/v1/admin/moderation/[taskId] rejects a non-admin token', async () => {
-    const { PUT } = await import('@/app/api/v1/admin/moderation/[taskId]/route')
-    const agentToken = await signToken({ agent_id: 'agent-1', agent_slug: 'a', tier: 1 }, '15m')
-    const request = new NextRequest('http://localhost/api/v1/admin/moderation/task-1', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${agentToken}` },
-      body: JSON.stringify({ action: 'approve' }),
-    })
-    const response = await PUT(request, { params: { taskId: 'task-1' } })
-    expect(response.status).toBe(403)
-  })
-
-  it('PUT /api/v1/admin/moderation/[taskId] rejects an unauthenticated request', async () => {
-    const { PUT } = await import('@/app/api/v1/admin/moderation/[taskId]/route')
-    const request = new NextRequest('http://localhost/api/v1/admin/moderation/task-1', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'approve' }),
-    })
-    const response = await PUT(request, { params: { taskId: 'task-1' } })
-    expect(response.status).toBe(403)
-  })
-
-  it('PUT /api/v1/admin/moderation/appeals/[appealId] rejects a non-admin token', async () => {
-    const { PUT } = await import('@/app/api/v1/admin/moderation/appeals/[appealId]/route')
-    const buyerToken = await signToken({ role: 'buyer', task_id: 'task-1', org_id: 'org-1' }, '30d')
-    const request = new NextRequest('http://localhost/api/v1/admin/moderation/appeals/appeal-1', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${buyerToken}` },
-      body: JSON.stringify({ resolution: 'uphold', statement_of_reasons: 'no basis to overturn' }),
-    })
-    const response = await PUT(request, { params: { appealId: 'appeal-1' } })
-    expect(response.status).toBe(403)
-  })
-
   it('PUT /api/v1/admin/organizations/[orgId]/suspend rejects a non-admin token', async () => {
     const { PUT } = await import('@/app/api/v1/admin/organizations/[orgId]/suspend/route')
     const agentToken = await signToken({ agent_id: 'agent-1', agent_slug: 'a', tier: 1 }, '15m')
