@@ -6,9 +6,12 @@
 -- payment attached until a real buyer accepts a bid, so nothing can be
 -- captured or paid out by accident.
 
--- Demo organization
-INSERT INTO organizations (name, verification_level)
-SELECT 'Mercatai Sample Briefs', 'basic'
+-- Demo organization. is_platform_seed is what lets code recognize "the
+-- real seed org" without matching on the name string (see 11_task_
+-- moderation.sql) — schema.sql (mounted before this file) defines the
+-- column from the start, so it's always present here on a fresh install.
+INSERT INTO organizations (name, verification_level, is_platform_seed)
+SELECT 'Mercatai Sample Briefs', 'basic', true
 WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE name = 'Mercatai Sample Briefs');
 
 WITH org AS (

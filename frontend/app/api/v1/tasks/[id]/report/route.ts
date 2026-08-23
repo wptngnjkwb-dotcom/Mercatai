@@ -8,15 +8,29 @@ import { sendModerationAlert } from '@/lib/server/email'
 
 const VALID_REASON_CODES = new Set(Object.keys(PUBLIC_EXPLANATIONS))
 
-// Distinct *owning organizations* behind a task's reports before it's
-// pulled from public view pending admin review — not a raw report count.
-// Agent registration is instant and self-service, so counting agent_ids
-// alone means one actor spins up 3 throwaway agents and silently hides
-// any competitor's task; requiring distinct owner orgs raises that from
-// "free and instant" to "register 3 separate organizations". Still a
+// Distinct *trusted* reporters behind a task's reports before it's pulled
+// from public view pending admin review — not a raw report count, and not
+// just distinct owner orgs. Both agent registration AND organization
+// creation are instant, free, and self-service (an org is auto-created
+// per agent registration whenever the owner_email doesn't match an
+// existing one), so distinct-org alone still lets one person, within the
+// existing per-IP registration rate limit, spin up 3 agents under 3 fresh
+// orgs with 3 distinct throwaway emails and silently hide any competitor's
+// task. A reporter only counts toward this automatic threshold once it has
+// some track record — see isTrustedReporter below. Untrusted reports are
+// still persisted and still always notify an admin (see sendModerationAlert
+// below); they just don't auto-hide anything on their own. Still a
 // placeholder policy knob — tune once there's real report volume to
 // calibrate against.
 const REPORT_QUARANTINE_THRESHOLD = 3
+const TRUSTED_REPORTER_MIN_AGE_DAYS = 7
+
+function isTrustedReporter(agent: { is_active?: boolean; registered_at?: string | null; total_tasks_completed?: number | null }): boolean {
+  if (!agent.is_active) return false
+  const oldEnough = !!agent.registered_at && Date.now() - new Date(agent.registered_at).getTime() >= TRUSTED_REPORTER_MIN_AGE_DAYS * 24 * 60 * 60 * 1000
+  const hasTrackRecord = (agent.total_tasks_completed ?? 0) > 0
+  return oldEnough || hasTrackRecord
+}
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -37,6 +51,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return NextResponse.json({ error: 'Forbidden — only an agent token can report a task' }, { status: 403 })
     }
 
+    const db = getSupabase()
+
+    const { data: reportingAgent } = await db.from('agents').select('is_active').eq('id', tokenAgentId).maybeSingle()
+    if (!reportingAgent || !reportingAgent.is_active) {
+      return NextResponse.json({ error: 'Forbidden — this agent is not active' }, { status: 403 })
+    }
+
     const body = await request.json().catch(() => ({}))
     const { reason_code, details } = body
     if (!reason_code || typeof reason_code !== 'string' || !VALID_REASON_CODES.has(reason_code)) {
@@ -45,8 +66,6 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (details && (typeof details !== 'string' || details.length > 1000)) {
       return NextResponse.json({ error: 'details must be a string of at most 1000 characters' }, { status: 400 })
     }
-
-    const db = getSupabase()
 
     const { data: task } = await db.from('tasks').select('id, moderation_status').eq('id', params.id).single()
     if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
@@ -78,20 +97,24 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       .eq('task_id', task.id)
     const reporterAgentIds = Array.from(new Set((reportRows ?? []).map((r: any) => r.reporter_agent_id).filter(Boolean)))
 
-    let distinctOrgCount = 0
+    let distinctTrustedOrgCount = 0
     if (reporterAgentIds.length > 0) {
       const { data: reporterAgents } = await db
         .from('agents')
-        .select('id, owner_org_id')
+        .select('id, owner_org_id, is_active, registered_at, total_tasks_completed')
         .in('id', reporterAgentIds)
-      distinctOrgCount = new Set((reporterAgents ?? []).map((a: any) => a.owner_org_id).filter(Boolean)).size
+      const trustedOrgIds = (reporterAgents ?? [])
+        .filter((a: any) => isTrustedReporter(a))
+        .map((a: any) => a.owner_org_id)
+        .filter(Boolean)
+      distinctTrustedOrgCount = new Set(trustedOrgIds).size
     }
 
     // Only downgrade a task that's currently public — a task already
     // quarantined/rejected/pending stays exactly as it is, so this can
     // never move a decision backwards toward being more visible.
     let autoQuarantined = false
-    if (distinctOrgCount >= REPORT_QUARANTINE_THRESHOLD && task.moderation_status === 'approved') {
+    if (distinctTrustedOrgCount >= REPORT_QUARANTINE_THRESHOLD && task.moderation_status === 'approved') {
       await db
         .from('tasks')
         .update({ moderation_status: 'quarantined', moderated_at: new Date().toISOString(), moderated_by: 'system:report_threshold' })
@@ -101,16 +124,20 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         taskId: task.id,
         eventType: 'report_threshold_quarantine',
         actorType: 'system',
-        notes: `Auto-quarantined after reports from ${distinctOrgCount} distinct owner organizations reached the review threshold (${REPORT_QUARANTINE_THRESHOLD}).`,
+        notes: `Auto-quarantined after reports from ${distinctTrustedOrgCount} distinct trusted-reporter organizations reached the review threshold (${REPORT_QUARANTINE_THRESHOLD}).`,
       })
 
       autoQuarantined = true
-      sendModerationAlert({
-        taskId: task.id,
-        reportCount: reporterAgentIds.length,
-        reasonCode: reason_code,
-      }).catch(console.error)
     }
+
+    // Every report notifies an admin, not just the ones that cross the
+    // automatic threshold — see sendModerationAlert's own comment.
+    sendModerationAlert({
+      taskId: task.id,
+      reportCount: reporterAgentIds.length,
+      reasonCode: reason_code,
+      autoQuarantined,
+    }).catch(console.error)
 
     return NextResponse.json({ received: true, auto_quarantined: autoQuarantined }, { status: 201 })
   } catch (err) {

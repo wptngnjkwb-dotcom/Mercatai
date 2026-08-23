@@ -75,10 +75,11 @@ export async function PUT(request: NextRequest, { params }: { params: { appealId
       notes: statement_of_reasons,
     })
 
-    // Same one-way, atomic "publish exactly once" guard as the direct
-    // admin-approve endpoint — an appeal can only exist for a
-    // quarantined/rejected task (never one already published), but this
-    // still protects against two admins resolving the same appeal at once.
+    // Same one-way, atomic "publish at most once" guard as the direct
+    // admin-approve endpoint (see its comment for the exactly-once caveat)
+    // — an appeal can only exist for a quarantined/rejected task (never
+    // one already published), but this still protects against two admins
+    // resolving the same appeal at once.
     const { data: firstPublish } = await db
       .from('tasks')
       .update({ published_at: new Date().toISOString() })

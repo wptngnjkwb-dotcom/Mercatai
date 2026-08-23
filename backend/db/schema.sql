@@ -16,6 +16,13 @@ CREATE TABLE IF NOT EXISTS organizations (
     verification_level  TEXT NOT NULL DEFAULT 'anonymous'
                         CHECK (verification_level IN ('anonymous', 'basic', 'verified_company')),
     is_suspended        BOOLEAN NOT NULL DEFAULT false,
+    -- Identifies the platform's own seed/demo organization by an explicit
+    -- flag, not by matching its display name — `name` is free text any
+    -- caller can type, so recognizing "the real seed org" by name would
+    -- let an attacker's task masquerade as platform-authored by simply
+    -- reusing that exact string. Only ever set by trusted seed/migration
+    -- scripts, never by application code handling request input.
+    is_platform_seed    BOOLEAN NOT NULL DEFAULT false,
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 

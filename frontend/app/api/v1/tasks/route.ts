@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
-import { signToken } from '@/lib/server/auth'
+import { signToken, getTokenFromRequest } from '@/lib/server/auth'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { resolveApiClient } from '@/lib/server/affiliate'
 import { checkQuota, trackApiCall } from '@/lib/server/apiUsage'
 import { sendTaskCreated } from '@/lib/server/email'
 import { runAutoBids } from '@/lib/server/autobid'
 import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
+import { isRateLimited, clientIp } from '@/lib/server/rateLimit'
 import { recordModerationEvent } from '@/lib/server/taskModeration/audit'
 
 // Run in Supabase:
@@ -56,22 +57,15 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Simple in-memory rate limit: max 5 tasks per IP per hour
-const ipTaskCount = new Map<string, { count: number; resetAt: number }>()
-
 export async function POST(request: NextRequest) {
   try {
-    // Rate limiting: 5 tasks per IP per hour
-    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-    const now = Date.now()
-    const entry = ipTaskCount.get(ip)
-    if (entry && now < entry.resetAt) {
-      if (entry.count >= 5) {
-        return NextResponse.json({ error: 'Rate limit exceeded — max 5 tasks per hour per IP' }, { status: 429 })
-      }
-      entry.count++
-    } else {
-      ipTaskCount.set(ip, { count: 1, resetAt: now + 60 * 60 * 1000 })
+    // Rate limiting: 5 tasks per IP per hour. Database-backed (counts
+    // recent 'task_created' audit_logs rows for this IP) — an in-memory
+    // Map does not work across serverless instances, which don't share
+    // memory and each start with an empty one.
+    const ip = clientIp(request)
+    if (await isRateLimited({ action: 'task_created', ip, windowMinutes: 60, maxEvents: 5 })) {
+      return NextResponse.json({ error: 'Rate limit exceeded — max 5 tasks per hour per IP' }, { status: 429 })
     }
 
     const body = await request.json()
@@ -95,18 +89,26 @@ export async function POST(request: NextRequest) {
 
     const db = getSupabase()
 
-    const { data: existingOrg } = await db
-      .from('organizations')
-      .select('id, is_suspended')
-      .eq('name', org_name || 'anonymous')
-      .maybeSingle()
-
-    if (existingOrg?.is_suspended) {
-      return NextResponse.json({ error: 'This organization has been suspended and cannot post new tasks' }, { status: 403 })
-    }
+    // org_name is free text from the request body — never an identity
+    // lookup key, or anyone could type "Mercatai Sample Briefs" (or any
+    // real customer's name) and have their task inherit that organization's
+    // identity, trust, and posting history. The only legitimate way to
+    // post under an existing organization is to already hold that org's
+    // buyer_token from a previous task on it; everyone else — including
+    // every first-time, anonymous buyer — gets a brand new organization
+    // row, even if org_name happens to collide with an existing one.
+    const callerToken = await getTokenFromRequest(request)
+    const returningBuyerOrgId = callerToken?.role === 'buyer' && typeof callerToken.org_id === 'string' ? callerToken.org_id : null
 
     let orgId: string
-    if (existingOrg) {
+    if (returningBuyerOrgId) {
+      const { data: existingOrg } = await db.from('organizations').select('id, is_suspended').eq('id', returningBuyerOrgId).maybeSingle()
+      if (!existingOrg) {
+        return NextResponse.json({ error: 'Invalid buyer token — organization not found' }, { status: 400 })
+      }
+      if (existingOrg.is_suspended) {
+        return NextResponse.json({ error: 'This organization has been suspended and cannot post new tasks' }, { status: 403 })
+      }
       orgId = existingOrg.id
     } else {
       const { data: newOrg, error: orgErr } = await db

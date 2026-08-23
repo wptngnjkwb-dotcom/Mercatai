@@ -69,8 +69,13 @@ export async function PUT(request: NextRequest, { params }: { params: { taskId: 
   // re-approved would re-fire task.created webhooks and re-run auto-bid on
   // a task agents already saw once. published_at is a separate, one-way
   // flag from moderation_status specifically to guard this, and the
-  // UPDATE ... WHERE published_at IS NULL below makes "publish exactly
-  // once" atomic even under a concurrent double-approval.
+  // UPDATE ... WHERE published_at IS NULL below makes marking a task
+  // published atomic even under a concurrent double-approval — but this
+  // is "at most once", not "exactly once": published_at is written before
+  // fireWebhooks/runAutoBids run, so a crash between that write and those
+  // calls permanently skips the publish this one time (never a duplicate,
+  // but this pass's webhook/auto-bid can be silently lost). Correct fix is
+  // an outbox with retry; acceptable to defer past the first pilot.
   let published = false
   if (newStatus === 'approved') {
     const { data: firstPublish } = await db

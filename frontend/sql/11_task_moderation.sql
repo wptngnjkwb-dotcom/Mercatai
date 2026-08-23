@@ -49,7 +49,17 @@ CREATE INDEX IF NOT EXISTS idx_tasks_moderation ON tasks(moderation_status);
 -- POST /store/[listingId]/hire), independent of any single task's own
 -- moderation decision.
 ALTER TABLE organizations
-    ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false;
+    ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS is_platform_seed BOOLEAN NOT NULL DEFAULT false;
+
+-- One-time, trusted backfill: mark the existing seed org (created by
+-- 07_demo_tasks.sql before this column existed) by its known id path —
+-- matching by name here is safe because this is a fixed, developer-authored
+-- migration statement, not application code trusting request input. Fresh
+-- installs get this flag directly from 07_demo_tasks.sql's own insert.
+UPDATE organizations
+SET is_platform_seed = true
+WHERE name = 'Mercatai Sample Briefs' AND is_platform_seed = false;
 
 CREATE TABLE IF NOT EXISTS task_reports (
     id                 UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -140,13 +150,15 @@ CREATE POLICY "service_role_all" ON task_moderation_appeals TO service_role USIN
 -- default to 'pending' like everything else; the one-off backfill below
 -- promotes them.
 --
--- Matched by the dedicated seed organization alone, NOT by title text —
--- an earlier version of this migration also required an exact title match,
--- which is fragile (a since-edited sample title, a punctuation/glyph
--- difference) and would silently leave that one sample stuck at 'pending'
--- forever. 'Mercatai Sample Briefs' is an internal, deliberately
--- distinctive org name real buyer-posted tasks would not organically use,
--- so matching on it alone is both sufficient and robust.
+-- Matched by the dedicated seed organization's is_platform_seed flag, NOT
+-- by title text or org name — an earlier version of this migration matched
+-- exact title strings, which is fragile (a since-edited sample title, a
+-- punctuation/glyph difference) and would silently leave that one sample
+-- stuck at 'pending' forever. A later version matched the org by name,
+-- which a malicious POST /tasks caller could spoof by typing the same
+-- name (see the org-resolution fix in POST /tasks and the hire route) to
+-- make their own task masquerade as platform-authored; is_platform_seed
+-- can only ever be set by this trusted migration script.
 UPDATE tasks
 SET moderation_status = 'approved',
     moderation_policy_version = 'v1',
@@ -154,4 +166,19 @@ SET moderation_status = 'approved',
     published_at = NOW(),
     moderated_by = 'system:demo_backfill'
 WHERE moderation_status = 'pending'
-  AND posted_by_org_id IN (SELECT id FROM organizations WHERE name = 'Mercatai Sample Briefs');
+  AND posted_by_org_id IN (SELECT id FROM organizations WHERE is_platform_seed = true);
+
+-- Historical backfill: every task that already existed before this
+-- migration's cutoff date was, by definition, already live under the
+-- pre-moderation codebase — task.created webhooks and auto-bid already
+-- fired for it at creation time, whatever its current moderation_status
+-- ends up being once reviewed. Recording that here means a later manual
+-- admin approval (see PUT /admin/moderation/[taskId]) correctly treats it
+-- as already-published and does not re-fire those side effects. The fixed
+-- date, not NOW(), is what keeps this migration idempotent: re-running it
+-- after this ships must never backfill a genuinely new, still-unpublished
+-- quarantined task just because it also has published_at IS NULL.
+UPDATE tasks
+SET published_at = created_at
+WHERE published_at IS NULL
+  AND created_at < '2026-08-23T00:00:00Z'::timestamptz;

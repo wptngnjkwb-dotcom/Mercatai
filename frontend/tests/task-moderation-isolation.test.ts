@@ -46,6 +46,7 @@ vi.mock('@/lib/server/supabase', () => ({
         select: () => builder,
         eq: (field: string, value: unknown) => { eqFilters.push([field, value]); return builder },
         in: () => builder,
+        gte: () => builder,
         order: () => builder,
         limit: () => builder,
         maybeSingle: async () => {

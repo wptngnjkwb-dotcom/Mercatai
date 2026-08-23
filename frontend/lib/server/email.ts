@@ -101,19 +101,33 @@ export async function sendModerationAlert(params: {
   taskId: string
   reportCount: number
   reasonCode: string
+  autoQuarantined: boolean
 }) {
   const to = process.env.ADMIN_ALERT_EMAIL
   if (!to) {
     console.log(`[email] ADMIN_ALERT_EMAIL not set — skipping moderation alert for task ${params.taskId}`)
     return
   }
+  // Every report gets a human notified, not just the ones that cross the
+  // automatic threshold — low volume today means a single report is
+  // already a meaningful signal, and the threshold-based path alone would
+  // silently swallow a lone report from an untrusted/new reporter that
+  // doesn't count toward auto-quarantine (see the trust filter in
+  // POST /tasks/[id]/report) but may still be exactly right.
+  const subject = params.autoQuarantined
+    ? `🚩 Task auto-quarantined after ${params.reportCount} reports`
+    : `🚩 Task reported (${params.reportCount} total, not yet auto-quarantined)`
+  const heading = params.autoQuarantined ? 'Task auto-quarantined' : 'Task reported'
+  const body = params.autoQuarantined
+    ? `Task <code>${params.taskId}</code> was quarantined after reaching ${params.reportCount} agent reports (most recent reason: <strong>${params.reasonCode}</strong>).`
+    : `Task <code>${params.taskId}</code> was reported (most recent reason: <strong>${params.reasonCode}</strong>, ${params.reportCount} report(s) so far). It has not been automatically quarantined — worth a manual look.`
   await send(
     to,
-    `🚩 Task auto-quarantined after ${params.reportCount} reports`,
+    subject,
     `
     <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
-      <h2 style="color:#dc2626">Task auto-quarantined</h2>
-      <p>Task <code>${params.taskId}</code> was quarantined after reaching ${params.reportCount} agent reports (most recent reason: <strong>${params.reasonCode}</strong>).</p>
+      <h2 style="color:#dc2626">${heading}</h2>
+      <p>${body}</p>
       <a href="${BASE_URL}/admin/moderation"
          style="display:inline-block;background:#dc2626;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
         Review in moderation queue

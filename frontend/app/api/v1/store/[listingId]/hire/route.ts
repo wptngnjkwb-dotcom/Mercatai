@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
-import { signToken } from '@/lib/server/auth'
+import { signToken, getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { sendTaskCreated } from '@/lib/server/email'
@@ -70,14 +70,24 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       }, { status: moderation.decision === 'quarantine' ? 202 : 422 })
     }
 
-    // Buyer organization (same convention as POST /tasks)
+    // Buyer organization — same identity rule as POST /tasks: org_name is
+    // a free-text display label, never an identity lookup key. Reusing an
+    // existing organization requires that org's own buyer_token; every
+    // other caller gets a brand new organization row, even on a name
+    // collision (see the comment in POST /tasks for why).
     const orgName = org_name || 'anonymous'
-    const { data: existingOrg } = await db.from('organizations').select('id, is_suspended').eq('name', orgName).maybeSingle()
-    if (existingOrg?.is_suspended) {
-      return NextResponse.json({ error: 'This organization has been suspended and cannot instant-hire' }, { status: 403 })
-    }
+    const callerToken = await getTokenFromRequest(request)
+    const returningBuyerOrgId = callerToken?.role === 'buyer' && typeof callerToken.org_id === 'string' ? callerToken.org_id : null
+
     let orgId: string
-    if (existingOrg) {
+    if (returningBuyerOrgId) {
+      const { data: existingOrg } = await db.from('organizations').select('id, is_suspended').eq('id', returningBuyerOrgId).maybeSingle()
+      if (!existingOrg) {
+        return NextResponse.json({ error: 'Invalid buyer token — organization not found' }, { status: 400 })
+      }
+      if (existingOrg.is_suspended) {
+        return NextResponse.json({ error: 'This organization has been suspended and cannot instant-hire' }, { status: 403 })
+      }
       orgId = existingOrg.id
     } else {
       const { data: newOrg, error: orgErr } = await db

@@ -10,11 +10,16 @@ const AGENT_ID = 'agent-report-1'
 let taskRow: Record<string, unknown> = { id: TASK_ID, moderation_status: 'approved' }
 const reportInserts: Record<string, unknown>[] = []
 let existingReportForAgent = false
+let reportingAgentActive = true
 // Simulates the existing task_reports rows for this task (their
-// reporter_agent_id) and each reporter's owner_org_id — the threshold is
-// gated on distinct owner orgs, not raw report count, so tests set both.
+// reporter_agent_id) and each reporter's owner_org_id and trust fields —
+// the threshold is gated on distinct *trusted* owner orgs, not raw count.
+// Defaults every reporter to trusted (old registered_at) so existing tests
+// that only care about org distinctness don't need to also set trust
+// fields; a test that needs an untrusted reporter overrides explicitly.
 let reporterAgentIds: string[] = []
 let agentOwnerOrgs: Record<string, string | null> = {}
+let agentTrustOverrides: Record<string, { is_active?: boolean; registered_at?: string; total_tasks_completed?: number }> = {}
 const taskUpdates: Record<string, unknown>[] = []
 const appealInserts: Record<string, unknown>[] = []
 let existingPendingAppeal: { id: string } | null = null
@@ -30,6 +35,7 @@ vi.mock('@/lib/server/supabase', () => ({
         in: () => builder,
         maybeSingle: async () => {
           if (table === 'task_moderation_appeals') return { data: existingPendingAppeal, error: null }
+          if (table === 'agents') return { data: { is_active: reportingAgentActive }, error: null }
           return { data: null, error: null }
         },
         single: async () => {
@@ -60,7 +66,18 @@ vi.mock('@/lib/server/supabase', () => ({
         },
         then: (resolve: (v: unknown) => unknown) => {
           if (table === 'task_reports') return resolve({ data: reporterAgentIds.map((id) => ({ reporter_agent_id: id })), error: null })
-          if (table === 'agents') return resolve({ data: reporterAgentIds.map((id) => ({ id, owner_org_id: agentOwnerOrgs[id] ?? null })), error: null })
+          if (table === 'agents') {
+            return resolve({
+              data: reporterAgentIds.map((id) => ({
+                id,
+                owner_org_id: agentOwnerOrgs[id] ?? null,
+                is_active: agentTrustOverrides[id]?.is_active ?? true,
+                registered_at: agentTrustOverrides[id]?.registered_at ?? '2020-01-01T00:00:00.000Z',
+                total_tasks_completed: agentTrustOverrides[id]?.total_tasks_completed ?? 0,
+              })),
+              error: null,
+            })
+          }
           return resolve({ data: null, error: null })
         },
       }
@@ -79,8 +96,10 @@ beforeEach(() => {
   taskRow = { id: TASK_ID, moderation_status: 'approved' }
   reportInserts.length = 0
   existingReportForAgent = false
+  reportingAgentActive = true
   reporterAgentIds = []
   agentOwnerOrgs = {}
+  agentTrustOverrides = {}
   taskUpdates.length = 0
   appealInserts.length = 0
   existingPendingAppeal = null
@@ -94,6 +113,20 @@ describe('POST /api/v1/tasks/[id]/report', () => {
     const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/report`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${buyerToken}` },
+      body: JSON.stringify({ reason_code: 'SPAM' }),
+    })
+    const response = await POST(request, { params: { id: TASK_ID } })
+    expect(response.status).toBe(403)
+    expect(reportInserts).toHaveLength(0)
+  })
+
+  it('rejects a report from a deactivated agent', async () => {
+    reportingAgentActive = false
+    const { POST } = await import('@/app/api/v1/tasks/[id]/report/route')
+    const token = await signToken({ agent_id: AGENT_ID, agent_slug: 'a', tier: 1 }, '15m')
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({ reason_code: 'SPAM' }),
     })
     const response = await POST(request, { params: { id: TASK_ID } })
@@ -198,6 +231,76 @@ describe('POST /api/v1/tasks/[id]/report', () => {
     expect(response.status).toBe(201)
     expect(body.auto_quarantined).toBe(false)
     expect(taskUpdates).toHaveLength(0)
+  })
+
+  it('the deeper reported gap: 3 distinct orgs but all freshly-registered agents with no track record do NOT auto-quarantine', async () => {
+    // Org creation is exactly as free and instant as agent registration —
+    // agents/route.ts auto-creates a new org whenever owner_email doesn't
+    // match an existing one, with no email verification. So "3 distinct
+    // orgs" alone is not a real trust bar: one person, one IP, within the
+    // existing 5/hour registration rate limit, registers 3 agents with 3
+    // made-up emails and gets 3 fresh orgs for free. Only reporters with
+    // some track record (old enough, or a completed task) should count.
+    reporterAgentIds = ['fresh-1', 'fresh-2', 'fresh-3']
+    agentOwnerOrgs = { 'fresh-1': 'org-x', 'fresh-2': 'org-y', 'fresh-3': 'org-z' }
+    agentTrustOverrides = {
+      'fresh-1': { registered_at: new Date().toISOString(), total_tasks_completed: 0 },
+      'fresh-2': { registered_at: new Date().toISOString(), total_tasks_completed: 0 },
+      'fresh-3': { registered_at: new Date().toISOString(), total_tasks_completed: 0 },
+    }
+    const { POST } = await import('@/app/api/v1/tasks/[id]/report/route')
+    const token = await signToken({ agent_id: AGENT_ID, agent_slug: 'a', tier: 1 }, '15m')
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ reason_code: 'SPAM' }),
+    })
+    const response = await POST(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(response.status).toBe(201)
+    expect(body.auto_quarantined).toBe(false)
+    expect(taskUpdates).toHaveLength(0)
+  })
+
+  it('a mix of trusted and untrusted reporters only counts the trusted ones toward the threshold', async () => {
+    reporterAgentIds = ['trusted-1', 'trusted-2', 'fresh-1']
+    agentOwnerOrgs = { 'trusted-1': 'org-a', 'trusted-2': 'org-b', 'fresh-1': 'org-c' }
+    agentTrustOverrides = { 'fresh-1': { registered_at: new Date().toISOString(), total_tasks_completed: 0 } }
+    const { POST } = await import('@/app/api/v1/tasks/[id]/report/route')
+    const token = await signToken({ agent_id: AGENT_ID, agent_slug: 'a', tier: 1 }, '15m')
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ reason_code: 'SPAM' }),
+    })
+    const response = await POST(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    // Only 2 of the 3 reporters (trusted-1, trusted-2) are trusted — below
+    // the threshold of 3, so this must not auto-quarantine yet.
+    expect(response.status).toBe(201)
+    expect(body.auto_quarantined).toBe(false)
+    expect(taskUpdates).toHaveLength(0)
+  })
+
+  it('a freshly-registered agent with a completed task IS trusted despite being new', async () => {
+    reporterAgentIds = ['newish-1', 'newish-2', 'newish-3']
+    agentOwnerOrgs = { 'newish-1': 'org-a', 'newish-2': 'org-b', 'newish-3': 'org-c' }
+    agentTrustOverrides = {
+      'newish-1': { registered_at: new Date().toISOString(), total_tasks_completed: 1 },
+      'newish-2': { registered_at: new Date().toISOString(), total_tasks_completed: 5 },
+      'newish-3': { registered_at: new Date().toISOString(), total_tasks_completed: 1 },
+    }
+    const { POST } = await import('@/app/api/v1/tasks/[id]/report/route')
+    const token = await signToken({ agent_id: AGENT_ID, agent_slug: 'a', tier: 1 }, '15m')
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ reason_code: 'SPAM' }),
+    })
+    const response = await POST(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(response.status).toBe(201)
+    expect(body.auto_quarantined).toBe(true)
   })
 })
 
