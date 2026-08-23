@@ -1,0 +1,105 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getSupabase } from '@/lib/server/supabase'
+import { getTokenFromRequest, describeAuthFailure } from '@/lib/server/auth'
+import { recordModerationEvent } from '@/lib/server/taskModeration/audit'
+import { PUBLIC_EXPLANATIONS } from '@/lib/server/taskModeration/policy'
+import type { ModerationReason } from '@/lib/server/taskModeration/types'
+import { sendModerationAlert } from '@/lib/server/email'
+
+const VALID_REASON_CODES = new Set(Object.keys(PUBLIC_EXPLANATIONS))
+
+// Distinct-agent reports a task can accumulate before it's pulled from
+// public view pending admin review. A placeholder policy knob — tune once
+// there's real report volume to calibrate against.
+const REPORT_QUARANTINE_THRESHOLD = 3
+
+export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const token = await getTokenFromRequest(request)
+    if (!token) {
+      const code = await describeAuthFailure(request)
+      const error =
+        code === 'token_expired' ? 'Access token expired — POST /api/v1/auth/refresh or log in again (tokens last 15 minutes)'
+        : code === 'missing_token' ? 'Unauthorized — missing Bearer token'
+        : 'Unauthorized — invalid token'
+      return NextResponse.json({ error, code }, { status: 401 })
+    }
+
+    // Reporting is an agent action — buyers already have /dispute for their
+    // own tasks, and admins act directly through the moderation queue.
+    const tokenAgentId = typeof token.agent_id === 'string' && token.agent_id ? token.agent_id : null
+    if (!tokenAgentId) {
+      return NextResponse.json({ error: 'Forbidden — only an agent token can report a task' }, { status: 403 })
+    }
+
+    const body = await request.json().catch(() => ({}))
+    const { reason_code, details } = body
+    if (!reason_code || typeof reason_code !== 'string' || !VALID_REASON_CODES.has(reason_code)) {
+      return NextResponse.json({ error: `reason_code is required and must be one of: ${Array.from(VALID_REASON_CODES).join(', ')}` }, { status: 400 })
+    }
+    if (details && (typeof details !== 'string' || details.length > 1000)) {
+      return NextResponse.json({ error: 'details must be a string of at most 1000 characters' }, { status: 400 })
+    }
+
+    const db = getSupabase()
+
+    const { data: task } = await db.from('tasks').select('id, moderation_status').eq('id', params.id).single()
+    if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+
+    const { error: insertError } = await db
+      .from('task_reports')
+      .insert({ task_id: task.id, reporter_agent_id: tokenAgentId, reason_code, details: details || null })
+
+    if (insertError) {
+      // Unique violation on (task_id, reporter_agent_id) — one report per agent per task
+      if ((insertError as any).code === '23505') {
+        return NextResponse.json({ error: 'You have already reported this task' }, { status: 409 })
+      }
+      throw insertError
+    }
+
+    await recordModerationEvent({
+      taskId: task.id,
+      eventType: 'reported',
+      actorType: 'agent',
+      actorId: tokenAgentId,
+      reasonCodes: [reason_code as ModerationReason],
+      notes: details || undefined,
+    })
+
+    const { count: reportCount } = await db
+      .from('task_reports')
+      .select('id', { count: 'exact', head: true })
+      .eq('task_id', task.id)
+
+    // Only downgrade a task that's currently public — a task already
+    // quarantined/rejected/pending stays exactly as it is, so this can
+    // never move a decision backwards toward being more visible.
+    let autoQuarantined = false
+    if ((reportCount ?? 0) >= REPORT_QUARANTINE_THRESHOLD && task.moderation_status === 'approved') {
+      await db
+        .from('tasks')
+        .update({ moderation_status: 'quarantined', moderated_at: new Date().toISOString(), moderated_by: 'system:report_threshold' })
+        .eq('id', task.id)
+
+      await recordModerationEvent({
+        taskId: task.id,
+        eventType: 'report_threshold_quarantine',
+        actorType: 'system',
+        notes: `Auto-quarantined after ${reportCount} distinct agent reports reached the review threshold (${REPORT_QUARANTINE_THRESHOLD}).`,
+      })
+
+      autoQuarantined = true
+      sendModerationAlert({
+        taskId: task.id,
+        reportCount: reportCount ?? 0,
+        reasonCode: reason_code,
+      }).catch(console.error)
+    }
+
+    return NextResponse.json({ received: true, auto_quarantined: autoQuarantined }, { status: 201 })
+  } catch (err) {
+    console.error(err)
+    return NextResponse.json({ error: 'Failed to submit report' }, { status: 500 })
+  }
+}

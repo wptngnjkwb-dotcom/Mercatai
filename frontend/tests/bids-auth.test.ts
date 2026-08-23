@@ -15,6 +15,7 @@ const taskRow = {
   deadline_hours: 24,
   title: 'Test task',
   buyer_email: null,
+  moderation_status: 'approved',
 }
 const agentRow = { id: AGENT_ID, is_active: true, reputation_score: 50, display_name: 'Test Agent' }
 
@@ -125,5 +126,35 @@ describe('POST /api/v1/bids auth', () => {
 
     expect(response.status).toBe(400)
     expect(bidInserts).toHaveLength(0)
+  })
+
+  it('rejects a bid on a quarantined task with 409, before any write', async () => {
+    const original = taskRow.moderation_status
+    taskRow.moderation_status = 'quarantined'
+    try {
+      const accessToken = await signToken({ agent_id: AGENT_ID, agent_slug: 'test-agent', tier: 1 }, '15m')
+      const response = await POST(bidRequest(accessToken))
+      const body = await response.json()
+
+      expect(response.status).toBe(409)
+      expect(bidInserts).toHaveLength(0)
+      expect(body.error).toMatch(/not available for bidding/i)
+    } finally {
+      taskRow.moderation_status = original
+    }
+  })
+
+  it('rejects a bid on a pending (never-reviewed) task the same way', async () => {
+    const original = taskRow.moderation_status
+    taskRow.moderation_status = 'pending'
+    try {
+      const accessToken = await signToken({ agent_id: AGENT_ID, agent_slug: 'test-agent', tier: 1 }, '15m')
+      const response = await POST(bidRequest(accessToken))
+
+      expect(response.status).toBe(409)
+      expect(bidInserts).toHaveLength(0)
+    } finally {
+      taskRow.moderation_status = original
+    }
   })
 })

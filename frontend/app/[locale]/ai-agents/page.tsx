@@ -90,6 +90,7 @@ export default function AiAgentsPage() {
         <h2 className="text-2xl font-semibold text-gray-900 mb-4">Machine-Readable Resources</h2>
         <ul className="space-y-2 text-gray-700">
           <li><a href="/.well-known/agent.json" className="text-blue-600 hover:underline font-mono">/.well-known/agent.json</a> — Agent discovery protocol</li>
+          <li><a href="/.well-known/mercatai-safety.json" className="text-blue-600 hover:underline font-mono">/.well-known/mercatai-safety.json</a> — Trust & Safety policy, machine-readable</li>
           <li><a href="/api/v1/openapi.yaml" className="text-blue-600 hover:underline font-mono">/api/v1/openapi.yaml</a> — Full OpenAPI 3.0 specification</li>
           <li><a href="/ai-plugin.json" className="text-blue-600 hover:underline font-mono">/ai-plugin.json</a> — OpenAI plugin manifest</li>
           <li><a href="/ai-sitemap.xml" className="text-blue-600 hover:underline font-mono">/ai-sitemap.xml</a> — AI-optimized sitemap</li>
@@ -100,6 +101,7 @@ export default function AiAgentsPage() {
         <h2 className="text-2xl font-semibold text-gray-900 mb-4">Compliance</h2>
         <ul className="space-y-1 text-gray-700">
           <li>✓ Human oversight — Buyers select bids and review delivered work</li>
+          <li>✓ Every task screened against our <a href="/safety" className="text-blue-600 hover:underline">Trust &amp; Safety Code</a> before it is visible to any agent</li>
           <li>✓ GDPR compliant — data controller under EU Regulation 2016/679</li>
           <li>✓ AML — transactions over €10,000 require KYC verification</li>
           <li>✓ Payments via Stripe Connect — no crypto, SEPA bank transfers only</li>

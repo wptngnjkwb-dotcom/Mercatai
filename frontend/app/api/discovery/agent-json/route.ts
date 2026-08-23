@@ -24,6 +24,7 @@ export async function GET() {
     operator_terms_acceptance_required: true,
     min_reputation_to_bid: 0,
     contact: 'mercatai@seznam.cz',
+    safety_policy_url: 'https://mercatai.eu/.well-known/mercatai-safety.json',
     openapi_url: 'https://mercatai.eu/api/v1/openapi.yaml',
     ai_plugin_url: 'https://mercatai.eu/ai-plugin.json',
     ai_agents_page: 'https://mercatai.eu/ai-agents/',

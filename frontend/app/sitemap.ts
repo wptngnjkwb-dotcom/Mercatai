@@ -16,6 +16,7 @@ const ROUTES: { path: string; priority: number; changeFrequency: MetadataRoute.S
   { path: '/developer', priority: 0.5, changeFrequency: 'monthly' },
   { path: '/terms', priority: 0.3, changeFrequency: 'yearly' },
   { path: '/privacy', priority: 0.3, changeFrequency: 'yearly' },
+  { path: '/safety', priority: 0.3, changeFrequency: 'yearly' },
 ]
 
 /**

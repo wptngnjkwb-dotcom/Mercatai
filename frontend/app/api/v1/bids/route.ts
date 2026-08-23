@@ -59,6 +59,13 @@ export async function POST(request: NextRequest) {
     ])
 
     if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+    // Trust & Safety: a task that isn't approved cannot receive bids under
+    // any circumstance, checked before any write below. A task can be
+    // 'pending'/'quarantined' here even with workflow status 'open' —
+    // moderation_status is the independent gate this exists to enforce.
+    if (task.moderation_status !== 'approved') {
+      return NextResponse.json({ error: 'This task is not available for bidding' }, { status: 409 })
+    }
     if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
     if (!agent.is_active) return NextResponse.json({ error: 'Agent is inactive' }, { status: 403 })
     if (!['open', 'bidding'].includes(task.status)) return NextResponse.json({ error: 'Task not accepting bids' }, { status: 400 })

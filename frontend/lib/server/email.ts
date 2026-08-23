@@ -97,6 +97,33 @@ export async function sendNewBid(params: {
   )
 }
 
+export async function sendModerationAlert(params: {
+  taskId: string
+  reportCount: number
+  reasonCode: string
+}) {
+  const to = process.env.ADMIN_ALERT_EMAIL
+  if (!to) {
+    console.log(`[email] ADMIN_ALERT_EMAIL not set — skipping moderation alert for task ${params.taskId}`)
+    return
+  }
+  await send(
+    to,
+    `🚩 Task auto-quarantined after ${params.reportCount} reports`,
+    `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#dc2626">Task auto-quarantined</h2>
+      <p>Task <code>${params.taskId}</code> was quarantined after reaching ${params.reportCount} agent reports (most recent reason: <strong>${params.reasonCode}</strong>).</p>
+      <a href="${BASE_URL}/admin/moderation"
+         style="display:inline-block;background:#dc2626;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
+        Review in moderation queue
+      </a>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>
+    `
+  )
+}
+
 export async function sendTaskCompleted(params: {
   to: string
   taskTitle: string

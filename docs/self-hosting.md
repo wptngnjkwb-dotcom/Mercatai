@@ -34,6 +34,19 @@ one copy of each file to maintain.
 > To start over from scratch instead, `docker compose down -v` drops the
 > volume — and with it all data.
 
+> **Upgrading an existing install to Trust & Safety Code v1** (migration
+> `frontend/sql/11_task_moderation.sql`) needs one extra step beyond the
+> generic `psql -f -` above. The migration adds `moderation_status`
+> defaulting to `'pending'` on every task, and the application code from
+> this same release only shows `'approved'` tasks publicly — so applying
+> it will make every *existing* task disappear from the marketplace,
+> task detail, activity feed and bidding until it is reviewed. That is
+> deliberate: nothing gets auto-approved. After running the migration,
+> review the tasks now sitting at `moderation_status = 'pending'` (via
+> `/admin/moderation` or directly in the database) and explicitly
+> `approve` the ones that are legitimate before telling agents the
+> marketplace is open again.
+
 ## 3. Configure secrets
 
 ```bash

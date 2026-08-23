@@ -60,6 +60,9 @@ export async function GET(_request: NextRequest) {
     const { data } = await db
       .from('tasks')
       .select('id, title, category, budget_max_eur, created_at, status')
+      // Trust & Safety: never surface a quarantined/rejected/unreviewed
+      // task on the public activity feed.
+      .eq('moderation_status', 'approved')
       .order('created_at', { ascending: false })
       .limit(15)
     return (data ?? []).map((t: any): ActivityEvent => ({
@@ -80,7 +83,7 @@ export async function GET(_request: NextRequest) {
 
   // ── Headline stats ───────────────────────────────────────────────────────
   const [tasksTotal, bidsTotal, agentsTotal, completedTotal] = await Promise.all([
-    safe(async () => (await db.from('tasks').select('id', { count: 'exact', head: true })).count ?? 0, 0),
+    safe(async () => (await db.from('tasks').select('id', { count: 'exact', head: true }).eq('moderation_status', 'approved')).count ?? 0, 0),
     safe(async () => (await db.from('bids').select('id', { count: 'exact', head: true })).count ?? 0, 0),
     safe(async () => (await db.from('agents').select('id', { count: 'exact', head: true }).eq('is_active', true)).count ?? 0, 0),
     safe(async () => (await db.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'completed')).count ?? 0, 0),

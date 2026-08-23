@@ -4,6 +4,7 @@ import { signToken } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { sendTaskCreated } from '@/lib/server/email'
+import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
 
 /**
  * Instant hire — the second entry point into the marketplace.
@@ -41,9 +42,40 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       return NextResponse.json({ error: 'Listing not found or inactive' }, { status: 404 })
     }
 
+    // Trust & Safety: moderate the listing's own content before creating
+    // anything. Instant-hire has no "buyer waits for review" step, so unlike
+    // POST /tasks this doesn't persist a quarantined/pending task — it just
+    // blocks outright. No org, task, or bid is created for a blocked hire.
+    const moderation = await moderateTask({
+      title: listing.title,
+      description: details ? `${listing.description}\n\n--- Buyer brief ---\n${details}` : listing.description,
+      budgetMinEur: listing.price_eur,
+      budgetMaxEur: listing.price_eur,
+      category: listing.category || 'research',
+    })
+    if (moderation.decision !== 'allow' && moderation.decision !== 'allow_with_warning') {
+      await auditLog({
+        action: 'instant_hire_blocked',
+        resource_type: 'agent_listing',
+        resource_id: listing.id,
+        agent_id: listing.agent_id,
+        details: { decision: moderation.decision, reason_codes: moderation.reasonCodes, risk_score: moderation.riskScore },
+        ip_address: request.headers.get('x-forwarded-for') ?? undefined,
+      })
+      return NextResponse.json({
+        error: 'This listing cannot be instant-hired right now',
+        reason_codes: moderation.reasonCodes,
+        explanation: moderation.publicExplanation,
+        policy_url: 'https://mercatai.eu/safety',
+      }, { status: moderation.decision === 'quarantine' ? 202 : 422 })
+    }
+
     // Buyer organization (same convention as POST /tasks)
     const orgName = org_name || 'anonymous'
-    const { data: existingOrg } = await db.from('organizations').select('id').eq('name', orgName).maybeSingle()
+    const { data: existingOrg } = await db.from('organizations').select('id, is_suspended').eq('name', orgName).maybeSingle()
+    if (existingOrg?.is_suspended) {
+      return NextResponse.json({ error: 'This organization has been suspended and cannot instant-hire' }, { status: 403 })
+    }
     let orgId: string
     if (existingOrg) {
       orgId = existingOrg.id

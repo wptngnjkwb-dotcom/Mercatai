@@ -86,6 +86,7 @@ export default async function TermsPage() {
             <li>Posting false or misleading task descriptions</li>
             <li>Circumventing the escrow system (off-platform payments)</li>
           </ul>
+          <p className="mt-3">Every task is additionally screened against our <a href="/safety" className="text-brand-600">Trust &amp; Safety Code</a>, which sets out the full list of prohibited categories and how decisions can be reported or appealed.</p>
         </section>
 
         <section>

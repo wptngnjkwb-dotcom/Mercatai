@@ -7,6 +7,8 @@ import { resolveApiClient } from '@/lib/server/affiliate'
 import { checkQuota, trackApiCall } from '@/lib/server/apiUsage'
 import { sendTaskCreated } from '@/lib/server/email'
 import { runAutoBids } from '@/lib/server/autobid'
+import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
+import { recordModerationEvent } from '@/lib/server/taskModeration/audit'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -34,6 +36,9 @@ export async function GET(request: NextRequest) {
 
     // Exclude embedding (vector field) from public response
     let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at')
+      // Trust & Safety: only ever surface moderated-and-approved tasks
+      // publicly, independent of the workflow status filtering below.
+      .eq('moderation_status', 'approved')
     // Default to both biddable states — a task moves from 'open' to
     // 'bidding' on its first bid, and dropping out of the default listing
     // right when competing bids become possible restricts exactly the
@@ -92,9 +97,13 @@ export async function POST(request: NextRequest) {
 
     const { data: existingOrg } = await db
       .from('organizations')
-      .select('id')
+      .select('id, is_suspended')
       .eq('name', org_name || 'anonymous')
       .maybeSingle()
+
+    if (existingOrg?.is_suspended) {
+      return NextResponse.json({ error: 'This organization has been suspended and cannot post new tasks' }, { status: 403 })
+    }
 
     let orgId: string
     if (existingOrg) {
@@ -124,6 +133,23 @@ export async function POST(request: NextRequest) {
 
     const biddingClosesAt = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
 
+    // Trust & Safety: moderate before this task can ever be seen. The
+    // decision is persisted on the row itself, not just returned — every
+    // downstream reader (GET /tasks, GET /tasks/[id], activity, bids)
+    // filters on moderation_status, so an unreviewed or rejected task
+    // simply doesn't exist from the outside no matter what code path
+    // looks for it.
+    const moderation = await moderateTask({
+      title,
+      description,
+      budgetMinEur: budget_min_eur || 0,
+      budgetMaxEur: budget_max_eur,
+      category: category || 'research',
+      organizationId: orgId,
+    })
+    const isPublic = moderation.decision === 'allow' || moderation.decision === 'allow_with_warning'
+    const dbModerationStatus = isPublic ? 'approved' : moderation.decision === 'quarantine' ? 'quarantined' : 'rejected'
+
     const { data: task, error } = await db
       .from('tasks')
       .insert({
@@ -139,6 +165,12 @@ export async function POST(request: NextRequest) {
         status: 'open',
         bidding_closes_at: biddingClosesAt,
         ...(apiClient ? { referred_by_client_id: apiClient.id } : {}),
+        moderation_status: dbModerationStatus,
+        moderation_risk_score: moderation.riskScore,
+        moderation_reason_codes: moderation.reasonCodes,
+        moderation_policy_version: moderation.policyVersion,
+        moderated_at: new Date().toISOString(),
+        moderated_by: 'system:auto',
       })
       .select()
       .single()
@@ -149,9 +181,44 @@ export async function POST(request: NextRequest) {
       action: 'task_created',
       resource_type: 'task',
       resource_id: task.id,
-      details: { title, budget_max_eur },
+      details: { title, budget_max_eur, moderation_status: dbModerationStatus },
       ip_address: request.headers.get('x-forwarded-for') ?? undefined,
     })
+    await recordModerationEvent({
+      taskId: task.id,
+      eventType: 'auto_moderated',
+      actorType: 'system',
+      decision: moderation.decision,
+      riskScore: moderation.riskScore,
+      reasonCodes: moderation.reasonCodes,
+      policyVersion: moderation.policyVersion,
+      notes: moderation.internalExplanation,
+    })
+
+    const buyerToken = await signToken(
+      {
+        role: 'buyer',
+        task_id: task.id,
+        org_id: orgId,
+        ...(buyer_email ? { buyer_email } : {}),
+      },
+      '30d'  // 30 days — long enough to cover task lifecycle
+    )
+
+    if (!isPublic) {
+      // Quarantined/rejected: persisted for audit and appeal, but never
+      // published — no webhook, no auto-bid, no buyer-facing task object.
+      return NextResponse.json({
+        id: task.id,
+        moderation_status: dbModerationStatus,
+        reason_codes: moderation.reasonCodes,
+        explanation: moderation.publicExplanation,
+        policy_url: 'https://mercatai.eu/safety',
+        appeal_available: true,
+        buyer_token: buyerToken,
+        buyer_token_note: 'Save this token — required to appeal this decision',
+      }, { status: dbModerationStatus === 'quarantined' ? 202 : 422 })
+    }
 
     // Fire webhooks async — do not await
     fireWebhooks('task.created', { task_id: task.id, title, category: task.category, budget_max_eur })
@@ -169,16 +236,6 @@ export async function POST(request: NextRequest) {
       deadline_hours: task.deadline_hours,
     })
 
-    const buyerToken = await signToken(
-      {
-        role: 'buyer',
-        task_id: task.id,
-        org_id: orgId,
-        ...(buyer_email ? { buyer_email } : {}),
-      },
-      '30d'  // 30 days — long enough to cover task lifecycle
-    )
-
     // Send confirmation email if buyer provided their email (fire-and-forget)
     if (buyer_email && typeof buyer_email === 'string' && buyer_email.includes('@')) {
       sendTaskCreated({
@@ -194,6 +251,7 @@ export async function POST(request: NextRequest) {
       ...task,
       buyer_token: buyerToken,
       buyer_token_note: 'Save this token — required to approve or dispute this task',
+      ...(moderation.decision === 'allow_with_warning' ? { moderation_warning: moderation.publicExplanation } : {}),
     }, { status: 201 })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)

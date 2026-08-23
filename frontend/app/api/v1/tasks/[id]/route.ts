@@ -4,12 +4,17 @@ import { getSupabase } from '@/lib/server/supabase'
 // This endpoint is public. Keep both the database projection and the response
 // explicit so contact details, delivered work, embeddings, or future private
 // columns cannot leak when the tasks table changes.
-const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at'
+const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status'
 
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
   const { data: task, error } = await db.from('tasks').select(PUBLIC_TASK_COLUMNS).eq('id', params.id).single()
-  if (error || !task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+  // Trust & Safety: a quarantined/rejected/pending task doesn't exist from
+  // the outside — same 404 as a missing task, so its moderation state
+  // (and the fact it was ever reviewed) isn't leaked to the public.
+  if (error || !task || task.moderation_status !== 'approved') {
+    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+  }
 
   return NextResponse.json({
     id: task.id,

@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Shield, RefreshCw, Power, Check, X } from 'lucide-react'
+import Link from 'next/link'
+import { Shield, ShieldAlert, RefreshCw, Power, Check, X } from 'lucide-react'
 
 interface Overview {
   stats: {
@@ -132,9 +133,14 @@ export default function AdminPage() {
           <Shield className="w-6 h-6 text-brand-700" />
           <h1 className="text-2xl font-bold">Back-office</h1>
         </div>
-        <button className="btn-secondary flex items-center gap-1" onClick={() => load(token)} disabled={busy}>
-          <RefreshCw className="w-4 h-4" /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <Link href="/admin/moderation" className="btn-secondary flex items-center gap-1">
+            <ShieldAlert className="w-4 h-4" /> Moderation queue
+          </Link>
+          <button className="btn-secondary flex items-center gap-1" onClick={() => load(token)} disabled={busy}>
+            <RefreshCw className="w-4 h-4" /> Refresh
+          </button>
+        </div>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}

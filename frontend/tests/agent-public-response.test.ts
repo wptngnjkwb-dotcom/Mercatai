@@ -56,6 +56,7 @@ const rawTask = {
   created_at: '2026-08-13T12:00:00.000Z',
   assigned_at: null,
   delivery_deadline_at: null,
+  moderation_status: 'approved',
   // These fields must remain private even if a query or future schema change
   // accidentally makes them available to the handler.
   buyer_email: 'buyer@example.com',
@@ -150,6 +151,25 @@ describe('GET /api/v1/tasks/[id]', () => {
     ]) {
       expect(body).not.toHaveProperty(privateField)
       expect(selectedTaskColumns.split(',')).not.toContain(privateField)
+    }
+
+    // moderation_status is deliberately selected (the handler needs it to
+    // decide 200 vs 404) but must never appear in the public response body.
+    expect(selectedTaskColumns.split(',')).toContain('moderation_status')
+    expect(body).not.toHaveProperty('moderation_status')
+  })
+
+  it('404s a non-approved task exactly like a missing one', async () => {
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`)
+    const originalStatus = rawTask.moderation_status
+    rawTask.moderation_status = 'quarantined'
+    try {
+      const response = await getTask(request, { params: { id: TASK_ID } })
+      const body = await response.json()
+      expect(response.status).toBe(404)
+      expect(body).toEqual({ error: 'Task not found' })
+    } finally {
+      rawTask.moderation_status = originalStatus
     }
   })
 })

@@ -9,6 +9,7 @@ const nextConfig = {
   async rewrites() {
     return [
       { source: '/.well-known/agent.json', destination: '/api/discovery/agent-json' },
+      { source: '/.well-known/mercatai-safety.json', destination: '/api/discovery/safety-json' },
       { source: '/api/v1/openapi.yaml', destination: '/api/v1/openapi' },
     ]
   },
