@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
-import { signToken, getTokenFromRequest } from '@/lib/server/auth'
+import { signToken } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { sendTaskCreated } from '@/lib/server/email'
@@ -71,33 +71,20 @@ export async function POST(request: NextRequest, { params }: { params: { listing
     }
 
     // Buyer organization — same identity rule as POST /tasks: org_name is
-    // a free-text display label, never an identity lookup key. Reusing an
-    // existing organization requires that org's own buyer_token; every
-    // other caller gets a brand new organization row, even on a name
-    // collision (see the comment in POST /tasks for why).
+    // a free-text display label, never an identity lookup key, and
+    // buyer_token stays scoped to the single task it was issued for (it's
+    // emailed in plain text, so trusting it to authorize posting under the
+    // org more broadly would widen a leaked email's blast radius past what
+    // its holder should expect). Every hire gets a brand new organization
+    // row, even on a name collision — see the comment in POST /tasks.
     const orgName = org_name || 'anonymous'
-    const callerToken = await getTokenFromRequest(request)
-    const returningBuyerOrgId = callerToken?.role === 'buyer' && typeof callerToken.org_id === 'string' ? callerToken.org_id : null
-
-    let orgId: string
-    if (returningBuyerOrgId) {
-      const { data: existingOrg } = await db.from('organizations').select('id, is_suspended').eq('id', returningBuyerOrgId).maybeSingle()
-      if (!existingOrg) {
-        return NextResponse.json({ error: 'Invalid buyer token — organization not found' }, { status: 400 })
-      }
-      if (existingOrg.is_suspended) {
-        return NextResponse.json({ error: 'This organization has been suspended and cannot instant-hire' }, { status: 403 })
-      }
-      orgId = existingOrg.id
-    } else {
-      const { data: newOrg, error: orgErr } = await db
-        .from('organizations')
-        .insert({ name: orgName, verification_level: 'anonymous' })
-        .select('id')
-        .single()
-      if (orgErr) throw orgErr
-      orgId = newOrg.id
-    }
+    const { data: newOrg, error: orgErr } = await db
+      .from('organizations')
+      .insert({ name: orgName, verification_level: 'anonymous' })
+      .select('id')
+      .single()
+    if (orgErr) throw orgErr
+    const orgId: string = newOrg.id
 
     const assignedAt = new Date()
     const deadline = new Date(assignedAt.getTime() + listing.delivery_hours * 60 * 60 * 1000)

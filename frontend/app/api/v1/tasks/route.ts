@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
-import { signToken, getTokenFromRequest } from '@/lib/server/auth'
+import { signToken } from '@/lib/server/auth'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { resolveApiClient } from '@/lib/server/affiliate'
 import { checkQuota, trackApiCall } from '@/lib/server/apiUsage'
@@ -92,33 +92,25 @@ export async function POST(request: NextRequest) {
     // org_name is free text from the request body — never an identity
     // lookup key, or anyone could type "Mercatai Sample Briefs" (or any
     // real customer's name) and have their task inherit that organization's
-    // identity, trust, and posting history. The only legitimate way to
-    // post under an existing organization is to already hold that org's
-    // buyer_token from a previous task on it; everyone else — including
-    // every first-time, anonymous buyer — gets a brand new organization
-    // row, even if org_name happens to collide with an existing one.
-    const callerToken = await getTokenFromRequest(request)
-    const returningBuyerOrgId = callerToken?.role === 'buyer' && typeof callerToken.org_id === 'string' ? callerToken.org_id : null
-
-    let orgId: string
-    if (returningBuyerOrgId) {
-      const { data: existingOrg } = await db.from('organizations').select('id, is_suspended').eq('id', returningBuyerOrgId).maybeSingle()
-      if (!existingOrg) {
-        return NextResponse.json({ error: 'Invalid buyer token — organization not found' }, { status: 400 })
-      }
-      if (existingOrg.is_suspended) {
-        return NextResponse.json({ error: 'This organization has been suspended and cannot post new tasks' }, { status: 403 })
-      }
-      orgId = existingOrg.id
-    } else {
-      const { data: newOrg, error: orgErr } = await db
-        .from('organizations')
-        .insert({ name: org_name || 'anonymous', verification_level: 'anonymous' })
-        .select('id')
-        .single()
-      if (orgErr) throw orgErr
-      orgId = newOrg.id
-    }
+    // identity, trust, and posting history. Every task creation gets a
+    // brand new organization row, even if org_name collides with an
+    // existing one, and even if the caller presents a buyer_token —
+    // buyer_token is scoped to the one task it was issued for (it's a
+    // 30-day token, emailed in plain text, so widening what it authorizes
+    // would widen the blast radius of a single leaked email far past what
+    // its own holder should expect). A returning buyer posting a second
+    // task under the same organization needs a dedicated, narrower
+    // mechanism — not implemented yet; see the equivalent
+    // join_token_lookup_id/join_token_secret_hash design on agent
+    // registration in POST /api/v1/agents for the shape a future
+    // organization-scoped token here should follow.
+    const { data: newOrg, error: orgErr } = await db
+      .from('organizations')
+      .insert({ name: org_name || 'anonymous', verification_level: 'anonymous' })
+      .select('id')
+      .single()
+    if (orgErr) throw orgErr
+    const orgId: string = newOrg.id
 
     // Detect third-party API client for affiliate tracking + metered billing
     const apiClient = await resolveApiClient(request.headers.get('authorization'))

@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { agent_id, display_name, description, capabilities, languages, owner_email, gdpr_consent } = body
+    const { agent_id, display_name, description, capabilities, languages, owner_email, gdpr_consent, organization_join_token } = body
 
     if (!agent_id || !display_name) {
       return NextResponse.json({ error: 'agent_id and display_name are required' }, { status: 400 })
@@ -25,15 +25,33 @@ export async function POST(request: NextRequest) {
 
     const db = getSupabase()
 
-    const { data: existingOrg } = await db
-      .from('organizations')
-      .select('id')
-      .eq('name', owner_email || agent_id)
-      .maybeSingle()
-
+    // owner_email is a contact field, never proof of organization
+    // membership — knowing an email address doesn't mean owning it, so
+    // looking up "or create" an org by it let anyone register an agent
+    // under any existing organization (including another company's) just
+    // by typing their public contact email. Two agents belong to the same
+    // organization only if the second one presents the first one's
+    // organization_join_token, generated once and returned only at the
+    // moment a brand new organization is created (see below) — never
+    // re-derivable from owner_email or anything else guessable.
     let orgId: string
-    if (existingOrg) {
-      orgId = existingOrg.id
+    let organizationJoinToken: string | null = null
+    if (organization_join_token) {
+      const [lookupId, secret] = String(organization_join_token).split('.')
+      const invalid = () => NextResponse.json({ error: 'Invalid organization_join_token' }, { status: 400 })
+      if (!lookupId || !secret) return invalid()
+
+      const { data: joinOrg } = await db
+        .from('organizations')
+        .select('id, is_suspended, join_token_secret_hash')
+        .eq('join_token_lookup_id', lookupId)
+        .maybeSingle()
+      if (!joinOrg || !joinOrg.join_token_secret_hash) return invalid()
+      if (!(await bcrypt.compare(secret, joinOrg.join_token_secret_hash))) return invalid()
+      if (joinOrg.is_suspended) {
+        return NextResponse.json({ error: 'This organization has been suspended and cannot accept new agents' }, { status: 403 })
+      }
+      orgId = joinOrg.id
     } else {
       const { data: newOrg, error: orgErr } = await db
         .from('organizations')
@@ -42,6 +60,22 @@ export async function POST(request: NextRequest) {
         .single()
       if (orgErr) throw orgErr
       orgId = newOrg.id
+
+      // Generated once, for the org's first agent only — shown once in
+      // the response below, only its bcrypt hash is ever stored. Format
+      // "<lookup_id>.<secret>" mirrors agents.api_key_hash's own
+      // lookup-then-compare pattern (see POST /auth/login): lookupId is
+      // plaintext and indexed for a direct query, secret is the only part
+      // that needs a bcrypt compare.
+      const lookupId = randomBytes(16).toString('hex')
+      const secret = randomBytes(16).toString('hex')
+      const secretHash = await bcrypt.hash(secret, 10)
+      const { error: joinTokenErr } = await db
+        .from('organizations')
+        .update({ join_token_lookup_id: lookupId, join_token_secret_hash: secretHash })
+        .eq('id', orgId)
+      if (joinTokenErr) throw joinTokenErr
+      organizationJoinToken = `${lookupId}.${secret}`
     }
 
     const apiKey = randomBytes(32).toString('hex')  // 64-char hex key
@@ -84,7 +118,8 @@ export async function POST(request: NextRequest) {
       ip_address: request.headers.get('x-forwarded-for') ?? undefined,
     })
 
-    // WARNING: api_key is shown only once — the hash is stored, not the key itself
+    // WARNING: api_key (and organization_join_token, if present) are shown
+    // only once — only their hashes are stored, never the values themselves.
     return NextResponse.json({
       id: agent.id,
       agent_id: agent.agent_id,
@@ -92,6 +127,10 @@ export async function POST(request: NextRequest) {
       status: 'active',
       message: 'Agent registered and active — you can log in and start bidding.',
       api_key: apiKey,
+      ...(organizationJoinToken ? {
+        organization_join_token: organizationJoinToken,
+        organization_join_token_note: 'Save this — share it with teammates registering more agents under this same organization. Shown only once.',
+      } : {}),
     }, { status: 201 })
   } catch (err) {
     console.error(err)

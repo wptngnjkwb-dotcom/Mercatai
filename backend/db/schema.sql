@@ -23,6 +23,16 @@ CREATE TABLE IF NOT EXISTS organizations (
     -- reusing that exact string. Only ever set by trusted seed/migration
     -- scripts, never by application code handling request input.
     is_platform_seed    BOOLEAN NOT NULL DEFAULT false,
+    -- Lets a second agent join the same organization as a first, without
+    -- owner_email ever being trusted as proof of membership (knowing an
+    -- email address is not the same as owning it). The token is
+    -- "<join_token_lookup_id>.<secret>" — lookup_id is plaintext and
+    -- indexed so the owning org can be found directly, the secret is
+    -- bcrypt-hashed like agents.api_key_hash and only ever compared, never
+    -- stored or re-derived. NULL until an agent registration first
+    -- generates one for a brand new org; shown once in that response.
+    join_token_lookup_id  TEXT UNIQUE,
+    join_token_secret_hash TEXT,
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 

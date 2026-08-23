@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server'
 process.env.JWT_SECRET_KEY = 'test-secret-for-moderation-isolation-32ch'
 
 const insertedTasks: Record<string, unknown>[] = []
+const insertedOrgs: Record<string, unknown>[] = []
 const moderationEvents: Record<string, unknown>[] = []
 let orgLookupResult: { id: string; is_suspended?: boolean } | null = null
 
@@ -66,6 +67,7 @@ vi.mock('@/lib/server/supabase', () => ({
         insert: (values: Record<string, unknown>) => {
           if (table === 'tasks') { insertedTasks.push(values); insertedRow = values }
           if (table === 'task_moderation_events') moderationEvents.push(values)
+          if (table === 'organizations') insertedOrgs.push(values)
           return builder
         },
         update: () => builder,
@@ -93,6 +95,7 @@ vi.mock('@/lib/server/apiUsage', () => ({ checkQuota: vi.fn(async () => ({ allow
 
 beforeEach(() => {
   insertedTasks.length = 0
+  insertedOrgs.length = 0
   moderationEvents.length = 0
   orgLookupResult = null
   cannedTask = { ...cannedTask, moderation_status: 'approved' }
@@ -200,6 +203,70 @@ describe('POST /api/v1/tasks — moderation publish flow', () => {
     expect(insertedTasks.at(-1)).toMatchObject({ moderation_status: 'quarantined' })
     expect(fireWebhooks).not.toHaveBeenCalled()
     expect(runAutoBids).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/v1/tasks — organization identity (P0 fix)', () => {
+  const benignBody = {
+    title: 'Competitive scan of EU invoicing SaaS pricing',
+    description: 'Research public pricing pages for 8 EU invoicing SaaS products, e.g. https://example.com/pricing, and deliver a comparison table with source links.',
+    budget_max_eur: 200,
+    deadline_hours: 48,
+  }
+
+  it('org_name is never used to look up or attach to an existing organization — the reported spoofing bug', async () => {
+    const { POST } = await import('@/app/api/v1/tasks/route')
+    const request = new NextRequest('http://localhost/api/v1/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // Typing the platform's own seed org name, or any real customer's
+      // name, must never attach this task to that organization's identity.
+      body: JSON.stringify({ ...benignBody, org_name: 'Mercatai Sample Briefs' }),
+    })
+    const response = await POST(request)
+    expect(response.status).toBe(201)
+    // A new org was created (matching the org_name lookup being gone
+    // entirely) — this mock's organizations.insert is only ever reached
+    // on the "always create new" path, never on a "found existing" path.
+    expect(insertedOrgs).toHaveLength(1)
+    expect(insertedOrgs[0]).toMatchObject({ name: 'Mercatai Sample Briefs' })
+  })
+
+  it('a presented buyer_token does not grant reuse of that org for a new task — buyer_token stays task-scoped', async () => {
+    const { POST } = await import('@/app/api/v1/tasks/route')
+    const { signToken } = await import('@/lib/server/auth')
+    // A token bound to some earlier, different task — even though it's
+    // validly signed and carries an org_id, POST /tasks must not honor it
+    // as authorization to post again under that organization.
+    const priorBuyerToken = await signToken({ role: 'buyer', task_id: 'some-earlier-task', org_id: 'org-from-a-previous-task' }, '30d')
+    const request = new NextRequest('http://localhost/api/v1/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${priorBuyerToken}` },
+      body: JSON.stringify(benignBody),
+    })
+    const response = await POST(request)
+    expect(response.status).toBe(201)
+    expect(insertedOrgs).toHaveLength(1)
+    // A fresh org was created (this mock's org insert path returns a
+    // synthetic 'org-new' id) — the task must land under that, never
+    // under the org_id carried by the presented token.
+    expect(insertedTasks[0]).toMatchObject({ posted_by_org_id: 'org-new' })
+    expect(insertedTasks[0]).not.toMatchObject({ posted_by_org_id: 'org-from-a-previous-task' })
+  })
+
+  it('two consecutive anonymous posts with the identical org_name get two distinct organizations', async () => {
+    const { POST } = await import('@/app/api/v1/tasks/route')
+    const mkRequest = () => new NextRequest('http://localhost/api/v1/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...benignBody, org_name: 'Acme Corp' }),
+    })
+    const r1 = await POST(mkRequest())
+    const r2 = await POST(mkRequest())
+    expect(r1.status).toBe(201)
+    expect(r2.status).toBe(201)
+    expect(insertedOrgs).toHaveLength(2)
+    expect(insertedOrgs.every((o) => (o as any).name === 'Acme Corp')).toBe(true)
   })
 })
 

@@ -47,19 +47,47 @@ CREATE INDEX IF NOT EXISTS idx_tasks_moderation ON tasks(moderation_status);
 -- An org whose tasks keep getting flagged can be suspended outright —
 -- blocks new task creation and instant-hire (see POST /tasks and
 -- POST /store/[listingId]/hire), independent of any single task's own
--- moderation decision.
+-- moderation decision. join_token_* lets a second agent join an existing
+-- organization without owner_email ever being trusted as proof of
+-- ownership — see POST /api/v1/agents.
 ALTER TABLE organizations
     ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false,
-    ADD COLUMN IF NOT EXISTS is_platform_seed BOOLEAN NOT NULL DEFAULT false;
+    ADD COLUMN IF NOT EXISTS is_platform_seed BOOLEAN NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS join_token_lookup_id TEXT,
+    ADD COLUMN IF NOT EXISTS join_token_secret_hash TEXT;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'organizations_join_token_lookup_id_key'
+    ) THEN
+        ALTER TABLE organizations
+            ADD CONSTRAINT organizations_join_token_lookup_id_key UNIQUE (join_token_lookup_id);
+    END IF;
+END $$;
 
 -- One-time, trusted backfill: mark the existing seed org (created by
--- 07_demo_tasks.sql before this column existed) by its known id path —
--- matching by name here is safe because this is a fixed, developer-authored
--- migration statement, not application code trusting request input. Fresh
--- installs get this flag directly from 07_demo_tasks.sql's own insert.
-UPDATE organizations
-SET is_platform_seed = true
-WHERE name = 'Mercatai Sample Briefs' AND is_platform_seed = false;
+-- 07_demo_tasks.sql before this column existed) by its known name. Matching
+-- by name here is a fixed, developer-authored migration statement, not
+-- application code trusting request input — but the org-identity bug this
+-- migration exists to close (see POST /tasks) means a row named exactly
+-- "Mercatai Sample Briefs" could, on a database that ran the old
+-- vulnerable code, have been created by an attacker rather than by
+-- 07_demo_tasks.sql. Only auto-flag when the name is unambiguous (exactly
+-- one match); if there's more than one, this is left for manual review
+-- instead of guessing, and NOTICEs loudly so it isn't missed.
+DO $$
+DECLARE
+    match_count INTEGER;
+BEGIN
+    SELECT count(*) INTO match_count FROM organizations WHERE name = 'Mercatai Sample Briefs';
+    IF match_count = 1 THEN
+        UPDATE organizations SET is_platform_seed = true
+        WHERE name = 'Mercatai Sample Briefs' AND is_platform_seed = false;
+    ELSIF match_count > 1 THEN
+        RAISE NOTICE 'Skipping is_platform_seed backfill: % organizations are named "Mercatai Sample Briefs" — resolve manually (identify the real seed org, e.g. by its earliest created_at or its tasks'' content, and run: UPDATE organizations SET is_platform_seed = true WHERE id = ''<real-id>'').', match_count;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS task_reports (
     id                 UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -169,16 +197,22 @@ WHERE moderation_status = 'pending'
   AND posted_by_org_id IN (SELECT id FROM organizations WHERE is_platform_seed = true);
 
 -- Historical backfill: every task that already existed before this
--- migration's cutoff date was, by definition, already live under the
--- pre-moderation codebase — task.created webhooks and auto-bid already
--- fired for it at creation time, whatever its current moderation_status
--- ends up being once reviewed. Recording that here means a later manual
--- admin approval (see PUT /admin/moderation/[taskId]) correctly treats it
--- as already-published and does not re-fire those side effects. The fixed
--- date, not NOW(), is what keeps this migration idempotent: re-running it
--- after this ships must never backfill a genuinely new, still-unpublished
--- quarantined task just because it also has published_at IS NULL.
+-- migration was, by definition, already live under the pre-moderation
+-- codebase — task.created webhooks and auto-bid already fired for it at
+-- creation time, whatever its current moderation_status ends up being
+-- once reviewed. Recording that here means a later manual admin approval
+-- (see PUT /admin/moderation/[taskId]) correctly treats it as
+-- already-published and does not re-fire those side effects.
+--
+-- Discriminated by moderation_policy_version IS NULL, not a fixed cutoff
+-- date/timestamp — a hardcoded date is wrong the moment a legitimate
+-- historical task and this migration's actual deploy land on the same
+-- calendar day, in either order. Every task inserted through the
+-- moderation-aware code (POST /tasks, the hire route) always sets
+-- moderation_policy_version; nothing pre-moderation ever did, so it's
+-- unset on every row this backfill should touch and set on every row it
+-- shouldn't — including on re-runs, which is what keeps this idempotent.
 UPDATE tasks
 SET published_at = created_at
 WHERE published_at IS NULL
-  AND created_at < '2026-08-23T00:00:00Z'::timestamptz;
+  AND moderation_policy_version IS NULL;

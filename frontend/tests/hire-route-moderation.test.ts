@@ -5,6 +5,7 @@ process.env.JWT_SECRET_KEY = 'test-secret-for-hire-moderation-32-chars!'
 
 const insertedTasks: Record<string, unknown>[] = []
 const insertedBids: Record<string, unknown>[] = []
+const insertedOrgs: Record<string, unknown>[] = []
 
 const listingRow = {
   id: 'listing-1',
@@ -40,6 +41,7 @@ vi.mock('@/lib/server/supabase', () => ({
         insert: (values: Record<string, unknown>) => {
           if (table === 'tasks') { insertedTasks.push(values); insertedRow = values }
           if (table === 'bids') insertedBids.push(values)
+          if (table === 'organizations') insertedOrgs.push(values)
           return builder
         },
         then: (resolve: (v: unknown) => unknown) => resolve({ data: null, error: null }),
@@ -56,6 +58,7 @@ vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks: vi.fn(async () => {}) })
 beforeEach(() => {
   insertedTasks.length = 0
   insertedBids.length = 0
+  insertedOrgs.length = 0
 })
 
 describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
@@ -101,5 +104,18 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     } finally {
       Object.assign(listingRow, original)
     }
+  })
+
+  it('org_name is never used to look up or attach to an existing organization', async () => {
+    const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
+    const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ org_name: 'Mercatai Sample Briefs' }),
+    })
+    const response = await POST(request, { params: { listingId: 'listing-1' } })
+    expect(response.status).toBe(201)
+    expect(insertedOrgs).toHaveLength(1)
+    expect(insertedOrgs[0]).toMatchObject({ name: 'Mercatai Sample Briefs' })
   })
 })

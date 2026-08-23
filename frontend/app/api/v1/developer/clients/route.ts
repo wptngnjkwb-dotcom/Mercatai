@@ -33,25 +33,21 @@ export async function POST(request: NextRequest) {
 
     const db = getSupabase()
 
-    // Find or create org
-    const { data: existingOrg } = await db
+    // org_name (or name, as a fallback label) is free text from the
+    // request body — never an identity lookup key. This endpoint is
+    // unauthenticated, so looking up "or create" by name would let anyone
+    // type an existing organization's exact name and have their new API
+    // client attached to it — including seeing that org's other clients
+    // via GET /developer/clients, which is scoped by owner_org_id alone.
+    // Same rule as POST /tasks and the hire route: every registration
+    // gets a brand new organization row, even on a name collision.
+    const { data: newOrg, error: orgErr } = await db
       .from('organizations')
+      .insert({ name: org_name || name, verification_level: 'anonymous' })
       .select('id')
-      .eq('name', org_name || name)
-      .maybeSingle()
-
-    let orgId: string
-    if (existingOrg) {
-      orgId = existingOrg.id
-    } else {
-      const { data: newOrg, error: orgErr } = await db
-        .from('organizations')
-        .insert({ name: org_name || name, verification_level: 'anonymous' })
-        .select('id')
-        .single()
-      if (orgErr) throw orgErr
-      orgId = newOrg.id
-    }
+      .single()
+    if (orgErr) throw orgErr
+    const orgId: string = newOrg.id
 
     // Generate API key
     const apiKey = 'mct_' + randomBytes(32).toString('hex') // 68-char prefixed key
