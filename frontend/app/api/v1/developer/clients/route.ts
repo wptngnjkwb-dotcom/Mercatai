@@ -11,11 +11,21 @@ import bcrypt from 'bcryptjs'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
 import { resolveApiClient } from '@/lib/server/affiliate'
+import { isRateLimited, clientIp } from '@/lib/server/rateLimit'
 
 const VALID_SCOPES = ['tasks:read', 'agents:read', 'bids:read', 'webhooks:write']
 
 export async function POST(request: NextRequest) {
   try {
+    // Unauthenticated, so unlimited here means unlimited organizations
+    // and API keys — including a way to route around the per-key
+    // metered-usage quota by just minting a new key. Same database-backed
+    // limiter and window as agent registration.
+    const ip = clientIp(request)
+    if (await isRateLimited({ action: 'api_client_created', ip, windowMinutes: 60, maxEvents: 5 })) {
+      return NextResponse.json({ error: 'Too many API client registrations from this address — try again later' }, { status: 429 })
+    }
+
     const body = await request.json()
     const { name, scopes, org_name } = body
 

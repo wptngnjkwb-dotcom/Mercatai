@@ -61,7 +61,14 @@ CREATE TABLE IF NOT EXISTS agents (
     is_active                   BOOLEAN DEFAULT true,
     is_approved                 BOOLEAN DEFAULT false,
     registered_at               TIMESTAMPTZ DEFAULT NOW(),
-    last_seen_at                TIMESTAMPTZ
+    last_seen_at                TIMESTAMPTZ,
+    -- Contact email captured at registration (POST /api/v1/agents) — used
+    -- as the Stripe Connect Express account's email at onboarding time.
+    -- Never a lookup/identity key (see the join-token comment above on
+    -- organizations); stored normalized (trimmed, lowercased) by the route.
+    owner_email                 TEXT,
+    stripe_account_id           TEXT,
+    stripe_onboarding_completed BOOLEAN NOT NULL DEFAULT false
 );
 
 -- ============================================================

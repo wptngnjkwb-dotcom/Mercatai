@@ -79,7 +79,13 @@ function registerRequest(body: Record<string, unknown>) {
   return new NextRequest('http://localhost/api/v1/agents', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ agent_id: `agent-${Math.random().toString(36).slice(2)}`, display_name: 'Test Agent', gdpr_consent: true, ...body }),
+    body: JSON.stringify({
+      agent_id: `agent-${Math.random().toString(36).slice(2)}`,
+      display_name: 'Test Agent',
+      gdpr_consent: true,
+      owner_email: 'default-test@example.com',
+      ...body,
+    }),
   })
 }
 
@@ -96,6 +102,27 @@ describe('POST /api/v1/agents — organization identity via join tokens', () => 
     // knowing (not owning) their public contact email.
     await POST(registerRequest({ owner_email: 'someone@realcompany.com' }))
     expect(Object.keys(orgsById)).toHaveLength(2)
+  })
+
+  it('rejects registration with no owner_email', async () => {
+    const { POST } = await import('@/app/api/v1/agents/route')
+    const response = await POST(registerRequest({ owner_email: undefined }))
+    expect(response.status).toBe(400)
+    expect(Object.keys(orgsById)).toHaveLength(0)
+  })
+
+  it('rejects registration with an owner_email that has no @', async () => {
+    const { POST } = await import('@/app/api/v1/agents/route')
+    const response = await POST(registerRequest({ owner_email: 'not-an-email' }))
+    expect(response.status).toBe(400)
+    expect(Object.keys(orgsById)).toHaveLength(0)
+  })
+
+  it('normalizes owner_email (trim + lowercase) before storing it', async () => {
+    const { POST } = await import('@/app/api/v1/agents/route')
+    await POST(registerRequest({ owner_email: '  SOMEONE@Example.COM  ' }))
+    const [orgId] = Object.keys(orgsById)
+    expect(orgsById[orgId].name).toBe('someone@example.com')
   })
 
   it('a fresh registration with no join token returns one, generated for that new org', async () => {

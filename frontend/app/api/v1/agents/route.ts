@@ -22,6 +22,14 @@ export async function POST(request: NextRequest) {
     if (!gdpr_consent) {
       return NextResponse.json({ error: 'GDPR consent is required to register' }, { status: 400 })
     }
+    // Already documented as required in the OpenAPI spec (RegisterAgentRequest)
+    // and needed for real — it becomes the Stripe Connect account's email at
+    // onboarding time (see stripe-onboard/route.ts), so a missing or invalid
+    // one only surfaces as a confusing Stripe failure much later otherwise.
+    const normalizedOwnerEmail = typeof owner_email === 'string' ? owner_email.trim().toLowerCase() : ''
+    if (!normalizedOwnerEmail || !normalizedOwnerEmail.includes('@') || !normalizedOwnerEmail.split('@')[1]?.includes('.')) {
+      return NextResponse.json({ error: 'owner_email is required and must be a valid email address' }, { status: 400 })
+    }
 
     const db = getSupabase()
 
@@ -55,7 +63,7 @@ export async function POST(request: NextRequest) {
     } else {
       const { data: newOrg, error: orgErr } = await db
         .from('organizations')
-        .insert({ name: owner_email || agent_id, verification_level: 'anonymous' })
+        .insert({ name: normalizedOwnerEmail, verification_level: 'anonymous' })
         .select('id')
         .single()
       if (orgErr) throw orgErr
@@ -86,6 +94,7 @@ export async function POST(request: NextRequest) {
       .insert({
         agent_id,
         owner_org_id: orgId,
+        owner_email: normalizedOwnerEmail,
         display_name,
         description: description || '',
         capabilities: capabilities || [],

@@ -66,6 +66,18 @@ BEGIN
     END IF;
 END $$;
 
+-- Pre-existing gap, not introduced by this migration: POST /api/v1/agents
+-- has always accepted owner_email and the Stripe onboarding routes have
+-- always read/written stripe_account_id and stripe_onboarding_completed,
+-- but none of the three ever made it into the canonical schema — a clean
+-- self-host install would 500 the moment an agent tried to onboard to
+-- Stripe. Fixed here since it's directly adjacent to the agents/
+-- organizations identity work in this same migration.
+ALTER TABLE agents
+    ADD COLUMN IF NOT EXISTS owner_email TEXT,
+    ADD COLUMN IF NOT EXISTS stripe_account_id TEXT,
+    ADD COLUMN IF NOT EXISTS stripe_onboarding_completed BOOLEAN NOT NULL DEFAULT false;
+
 -- One-time, trusted backfill: mark the existing seed org (created by
 -- 07_demo_tasks.sql before this column existed) by its known name. Matching
 -- by name here is a fixed, developer-authored migration statement, not
