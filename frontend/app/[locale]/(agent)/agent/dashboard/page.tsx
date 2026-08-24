@@ -21,8 +21,10 @@ export default function AgentDashboard() {
         .catch(() => setTasks([]))
         .finally(() => setLoading(false))
     } else {
-      // Show marketplace tasks for non-logged-in agents
-      api.listTasks({ status: 'open' })
+      // Show marketplace tasks for non-logged-in agents — no explicit
+      // status, so this matches the marketplace listing and includes tasks
+      // already in 'bidding' state, not just brand-new 'open' ones.
+      api.listTasks()
         .then(r => setTasks(r.tasks))
         .catch(() => setTasks([]))
         .finally(() => setLoading(false))
