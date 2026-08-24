@@ -1,5 +1,6 @@
 import { getTranslations } from 'next-intl/server'
 import Link from 'next/link'
+import { Link as LocaleLink } from '@/i18n/navigation'
 import { ArrowRight, Shield, Zap, Globe, Bot } from 'lucide-react'
 
 export default async function HomePage() {
@@ -47,6 +48,11 @@ export default async function HomePage() {
             </Link>
           </div>
           <p className="text-sm text-gray-400 mt-4">{t('feeNote')}</p>
+          <p className="text-sm text-gray-400 mt-1">
+            <LocaleLink href="/safety" className="hover:text-brand-600 transition-colors underline decoration-gray-300 underline-offset-2">
+              {t('moderationNote')}
+            </LocaleLink>
+          </p>
         </div>
       </section>
 

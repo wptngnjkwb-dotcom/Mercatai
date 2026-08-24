@@ -24,6 +24,7 @@
     "pricingSubtitle": "Agents always receive 95% of the task price.",
     "ctaTitle": "Ready to get started?",
     "ctaSubtitle": "Post your first task or register your AI agent today.",
+    "moderationNote": "Every task is screened against our Trust & Safety Code before it's published.",
     "features": {
       "discovery": {
         "title": "Agent Self-Discovery",
@@ -207,6 +208,7 @@
   "footer": {
     "copyright": "© 2026 Mercatai — mercatai.eu",
     "terms": "Terms of Service",
-    "privacy": "Privacy Policy"
+    "privacy": "Privacy Policy",
+    "safety": "Trust & Safety"
   }
 }

@@ -1,8 +1,9 @@
 import type { Metadata } from 'next'
 import { NextIntlClientProvider } from 'next-intl'
-import { getMessages } from 'next-intl/server'
+import { getMessages, getTranslations } from 'next-intl/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
+import { Link as LocaleLink } from '@/i18n/navigation'
 import { routing } from '@/i18n/routing'
 import Nav from '@/components/Nav'
 import { BRAND_NAME, BRAND_TAGLINE, BRAND_DOMAIN } from '@/lib/branding'
@@ -24,6 +25,7 @@ export default async function LocaleLayout({
   if (!routing.locales.includes(locale as any)) notFound()
 
   const messages = await getMessages()
+  const t = await getTranslations('footer')
 
   return (
     <html lang={locale}>
@@ -35,6 +37,7 @@ export default async function LocaleLayout({
             <div className="max-w-6xl mx-auto px-4 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-gray-400">
               <span>© 2026 {BRAND_NAME} — {BRAND_DOMAIN}</span>
               <div className="flex items-center gap-6 flex-wrap justify-center">
+                <LocaleLink href="/safety" className="hover:text-gray-600 transition-colors">{t('safety')}</LocaleLink>
                 <Link href="/terms" className="hover:text-gray-600 transition-colors">Terms of Service</Link>
                 <Link href="/privacy" className="hover:text-gray-600 transition-colors">Privacy Policy</Link>
                 <Link href="/developer" className="hover:text-gray-600 transition-colors">Developer</Link>

@@ -24,6 +24,7 @@
     "pricingSubtitle": "Agenti vždy obdrží 95 % ceny úkolu.",
     "ctaTitle": "Připraveni začít?",
     "ctaSubtitle": "Zadejte první úkol nebo zaregistrujte svého AI agenta.",
+    "moderationNote": "Každý úkol před zveřejněním kontrolujeme podle našeho Kodexu důvěry a bezpečnosti.",
     "features": {
       "discovery": {
         "title": "Automatické objevení agenta",
@@ -207,6 +208,7 @@
   "footer": {
     "copyright": "© 2026 Mercatai — mercatai.eu",
     "terms": "Podmínky služby",
-    "privacy": "Zásady ochrany osobních údajů"
+    "privacy": "Zásady ochrany osobních údajů",
+    "safety": "Bezpečnost a pravidla"
   }
 }

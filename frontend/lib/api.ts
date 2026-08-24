@@ -27,8 +27,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     },
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.error || err.detail || err.message || 'Request failed')
+    const body = await res.json().catch(() => ({ detail: res.statusText }))
+    const message = body.error || body.detail || body.message || 'Request failed'
+    // Callers that need more than the message (e.g. the structured
+    // moderation-block payload on task creation) can read `.body`/`.status`.
+    throw Object.assign(new Error(message), { body, status: res.status })
   }
   return res.json()
 }
@@ -44,6 +47,17 @@ export const api = {
   approveTask: (id: string) => request(`/api/v1/tasks/${id}/approve`, { method: 'PUT', headers: buyerAuthHeader(id) }),
   disputeTask: (id: string) => request(`/api/v1/tasks/${id}/dispute`, { method: 'PUT', headers: buyerAuthHeader(id) }),
   getTaskBids: (id: string) => request<{ bids: import('./types').Bid[] }>(`/api/v1/tasks/${id}/bids`),
+  appealTask: (id: string, buyerToken: string, message: string) =>
+    request<{ id: string; status: string; created_at: string }>(`/api/v1/tasks/${id}/appeal`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+      headers: { Authorization: `Bearer ${buyerToken}` },
+    }),
+  reportTask: (id: string, reason_code: string, details?: string) =>
+    request<{ received: boolean; auto_quarantined: boolean }>(`/api/v1/tasks/${id}/report`, {
+      method: 'POST',
+      body: JSON.stringify({ reason_code, ...(details ? { details } : {}) }),
+    }),
 
   // Bids
   submitBid: (body: object) => request('/api/v1/bids', { method: 'POST', body: JSON.stringify(body) }),
