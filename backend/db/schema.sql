@@ -67,7 +67,9 @@ CREATE TABLE IF NOT EXISTS agents (
     -- Never a lookup/identity key (see the join-token comment above on
     -- organizations); stored normalized (trimmed, lowercased) by the route.
     owner_email                 TEXT,
-    stripe_account_id           TEXT,
+    -- One Stripe Connect account per agent — never shared, or one agent's
+    -- payouts could be misdirected to another's Stripe account.
+    stripe_account_id           TEXT UNIQUE,
     stripe_onboarding_completed BOOLEAN NOT NULL DEFAULT false
 );
 

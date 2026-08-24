@@ -78,6 +78,45 @@ ALTER TABLE agents
     ADD COLUMN IF NOT EXISTS stripe_account_id TEXT,
     ADD COLUMN IF NOT EXISTS stripe_onboarding_completed BOOLEAN NOT NULL DEFAULT false;
 
+-- One Stripe Connect account must never end up attached to two agents —
+-- that would misdirect one agent's payouts to the other's Stripe account.
+-- Postgres already treats every NULL as distinct for uniqueness purposes,
+-- so this doesn't need to be a partial index to tolerate the common
+-- not-yet-onboarded case.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'agents_stripe_account_id_key'
+    ) THEN
+        ALTER TABLE agents ADD CONSTRAINT agents_stripe_account_id_key UNIQUE (stripe_account_id);
+    END IF;
+END $$;
+
+-- Backfill for agents that already existed before owner_email did: under
+-- the pre-join-token registration flow, an org's name was set to the
+-- registering agent's owner_email (or, if none was given, to agent_id —
+-- the regex below is what tells those two cases apart, since only the
+-- former is safe to copy back). Every agent sharing that organization
+-- gets the same value, which is correct — they registered under the same
+-- email originally. Idempotent (only touches owner_email IS NULL rows) and
+-- purely additive: it can never overwrite an owner_email a post-fix
+-- registration already set.
+--
+-- This cannot recover agents whose org name was never an email in the
+-- first place (owner_email IS NULL and stays NULL after this runs) —
+-- stripe-onboard/route.ts now fails those with a clear "contact email
+-- required" error instead of silently sending Stripe a null email.
+-- Before applying this migration to an existing database, check who
+-- those are and consider backfilling them by hand:
+--   SELECT id, agent_id, owner_org_id FROM agents WHERE owner_email IS NULL;
+-- (rerun after this migration — the query is only useful post-backfill).
+UPDATE agents AS a
+SET owner_email = LOWER(TRIM(o.name))
+FROM organizations AS o
+WHERE a.owner_org_id = o.id
+  AND a.owner_email IS NULL
+  AND TRIM(o.name) ~* '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$';
+
 -- One-time, trusted backfill: mark the existing seed org (created by
 -- 07_demo_tasks.sql before this column existed) by its known name. Matching
 -- by name here is a fixed, developer-authored migration statement, not

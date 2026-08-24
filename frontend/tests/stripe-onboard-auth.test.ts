@@ -111,6 +111,26 @@ describe('POST /api/v1/agents/[id]/stripe-onboard auth', () => {
     expect(response.status).toBe(200)
     expect(accountsCreate).toHaveBeenCalledTimes(1)
   })
+
+  it('fails clearly, before calling Stripe, when the agent has no owner_email on file', async () => {
+    // Reachable for an agent that pre-dates owner_email being required and
+    // whose organization name was never itself an email (the migration
+    // backfill has nothing to copy from) — must not silently pass a null
+    // email through to Stripe's account-creation call.
+    const original = agentRow.owner_email
+    ;(agentRow as any).owner_email = null
+    try {
+      const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+      const response = await POST(request(token), { params: { id: OWN_AGENT_ID } })
+      const body = await response.json()
+
+      expect(response.status).toBe(400)
+      expect(body.error).toMatch(/contact email/i)
+      expect(accountsCreate).not.toHaveBeenCalled()
+    } finally {
+      ;(agentRow as any).owner_email = original
+    }
+  })
 })
 
 describe('GET /api/v1/agents/[id]/stripe-onboard auth', () => {

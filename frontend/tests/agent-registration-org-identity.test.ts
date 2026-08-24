@@ -118,6 +118,13 @@ describe('POST /api/v1/agents — organization identity via join tokens', () => 
     expect(Object.keys(orgsById)).toHaveLength(0)
   })
 
+  it('rejects an owner_email with two @ signs — a looser .includes() check would let this through', async () => {
+    const { POST } = await import('@/app/api/v1/agents/route')
+    const response = await POST(registerRequest({ owner_email: 'a@b.c@d.com' }))
+    expect(response.status).toBe(400)
+    expect(Object.keys(orgsById)).toHaveLength(0)
+  })
+
   it('normalizes owner_email (trim + lowercase) before storing it', async () => {
     const { POST } = await import('@/app/api/v1/agents/route')
     await POST(registerRequest({ owner_email: '  SOMEONE@Example.COM  ' }))

@@ -26,8 +26,12 @@ export async function POST(request: NextRequest) {
     // and needed for real — it becomes the Stripe Connect account's email at
     // onboarding time (see stripe-onboard/route.ts), so a missing or invalid
     // one only surfaces as a confusing Stripe failure much later otherwise.
+    // Same shape as the ~* regex in 11_task_moderation.sql's owner_email
+    // backfill — a looser check (e.g. just two .includes() calls) lets
+    // something like "a@b.c@d.com" through, since the substring after the
+    // first '@' still contains a '.'.
     const normalizedOwnerEmail = typeof owner_email === 'string' ? owner_email.trim().toLowerCase() : ''
-    if (!normalizedOwnerEmail || !normalizedOwnerEmail.includes('@') || !normalizedOwnerEmail.split('@')[1]?.includes('.')) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedOwnerEmail)) {
       return NextResponse.json({ error: 'owner_email is required and must be a valid email address' }, { status: 400 })
     }
 

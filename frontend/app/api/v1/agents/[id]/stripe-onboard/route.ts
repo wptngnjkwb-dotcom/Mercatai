@@ -35,6 +35,19 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ message: 'Stripe onboarding already completed', stripe_account_id: agent.stripe_account_id })
   }
 
+  // Registration has required and stored owner_email since this was added,
+  // and the migration backfills it for pre-existing agents wherever their
+  // organization's historical name was itself a valid email — but an agent
+  // whose org name was never an email (it fell back to agent_id) has no
+  // value to backfill from, and stays NULL. Fail with a clear, actionable
+  // error here rather than send Stripe a null email and get back an
+  // opaque failure from their side instead.
+  if (!agent.owner_email) {
+    return NextResponse.json({
+      error: 'This agent has no contact email on file, which Stripe onboarding requires. Contact mercatai@seznam.cz to have it added.',
+    }, { status: 400 })
+  }
+
   const Stripe = (await import('stripe')).default
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
