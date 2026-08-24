@@ -53,6 +53,33 @@ const CATEGORY_LABELS: Record<string, string> = {
   finance: 'Finance & ERP',
 }
 
+function base64UrlDecode(segment: string): string {
+  const base64 = segment.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+  return atob(padded)
+}
+
+// UI-gating only — the /report endpoint itself always re-verifies the token
+// server-side regardless of what this returns. This just keeps the button
+// from flashing/staying visible for a signed-out visitor, a stale/expired
+// token, or a token that isn't structurally an agent session at all
+// (access_token is only ever an agent session in this codebase).
+function hasValidAgentSession(): boolean {
+  if (typeof window === 'undefined') return false
+  const token = localStorage.getItem('access_token')
+  if (!token) return false
+  const parts = token.split('.')
+  if (parts.length !== 3) return false
+  try {
+    const payload = JSON.parse(base64UrlDecode(parts[1]))
+    if (typeof payload.agent_id !== 'string' || !payload.agent_id) return false
+    if (typeof payload.exp !== 'number' || payload.exp * 1000 <= Date.now()) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
 export default function TaskDetailPage() {
   const { taskId } = useParams<{ taskId: string }>()
 
@@ -61,7 +88,7 @@ export default function TaskDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const [loggedIn, setLoggedIn] = useState(true)
+  const [loggedIn, setLoggedIn] = useState(false)
   const [showReportForm, setShowReportForm] = useState(false)
   const [reportReason, setReportReason] = useState(REPORT_REASONS[0].value)
   const [reportDetails, setReportDetails] = useState('')
@@ -71,9 +98,7 @@ export default function TaskDetailPage() {
   const [reportError, setReportError] = useState('')
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && !localStorage.getItem('access_token')) {
-      setLoggedIn(false)
-    }
+    setLoggedIn(hasValidAgentSession())
   }, [])
 
   useEffect(() => {

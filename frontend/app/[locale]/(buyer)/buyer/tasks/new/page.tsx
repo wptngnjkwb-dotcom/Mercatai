@@ -250,6 +250,12 @@ export default function NewTaskPage() {
 
         {result?.buyer_token && !result?.moderation_status && (
           <div className="mt-4 bg-blue-50 border border-blue-300 rounded-lg p-4 text-left">
+            {result.moderation_warning && (
+              <div className="mb-3 bg-amber-50 border border-amber-300 rounded p-3">
+                <p className="text-xs font-semibold text-amber-800 mb-1">⚠️ Published with a warning</p>
+                <p className="text-sm text-amber-800">{result.moderation_warning}</p>
+              </div>
+            )}
             <p className="text-sm font-semibold text-blue-800 mb-2">🔑 Your buyer token — save it to approve or dispute this task</p>
             <code className="block text-xs font-mono bg-white border border-blue-200 rounded p-3 break-all select-all">
               {result.buyer_token}
