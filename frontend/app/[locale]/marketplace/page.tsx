@@ -34,7 +34,11 @@ export default function MarketplacePage() {
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      api.listTasks({ status: 'open', ...(category ? { category } : {}) }),
+      // No explicit status here — the backend defaults to ['open', 'bidding']
+      // together (see GET /api/v1/tasks), since a task keeps accepting bids
+      // after its first one. Passing status: 'open' would drop every task
+      // the moment it gets a bid, right when competing bids are most useful.
+      api.listTasks({ ...(category ? { category } : {}) }),
       api.listTasks({ status: 'completed', ...(category ? { category } : {}) }),
     ])
       .then(([open, done]) => {
