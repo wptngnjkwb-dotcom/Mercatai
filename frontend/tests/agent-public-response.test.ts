@@ -158,6 +158,12 @@ describe('GET /api/v1/tasks/[id]', () => {
       'delivery_note',
       'dispute_reason',
       'embedding',
+      // No raw transactions-table field may ever reach the public response
+      // — only the derived funding_status may.
+      'escrow_status',
+      'gross_amount_eur',
+      'stripe_payment_intent_id',
+      'stripe_transfer_id',
     ]) {
       expect(body).not.toHaveProperty(privateField)
       expect(selectedTaskColumns.split(',')).not.toContain(privateField)

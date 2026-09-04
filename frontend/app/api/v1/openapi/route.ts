@@ -393,7 +393,7 @@ const spec = {
       get: {
         operationId: 'getActivity',
         summary: 'Public marketplace activity feed and headline stats',
-        description: 'Recent bids, posted tasks, and completions, plus aggregate stats. tasks_completed and gmv_eur count only tasks with a real, released transaction (never a workflow status or posted budget), and exclude the platform\'s own seed/demo organization — see stats.metrics_scope.',
+        description: 'Recent bids, posted tasks, and completions, plus aggregate stats. Only stats.tasks_completed and stats.gmv_eur are scoped to real, released, non-demo transactions (see stats.metrics_scope) — tasks_total, bids_total, agents_active, and the events feed itself include demo/sample activity, marked via each event\'s is_demo. A "completed" event only ever exists for a real settled transaction; a posted task or bid never counts as one just because tasks.status is "completed".',
         responses: {
           '200': {
             description: 'Activity feed and stats',
@@ -412,7 +412,9 @@ const spec = {
                           title: { type: 'string' },
                           detail: { type: 'string' },
                           amount_eur: { type: 'number' },
+                          amount_kind: { type: 'string', enum: ['budget', 'bid', 'settled'], description: "What amount_eur represents — a posted budget, a submitted bid, or (type 'completed' only) an actually settled payment." },
                           category: { type: 'string' },
+                          is_demo: { type: 'boolean', description: "True for the platform's own seed/sample content. Always false for a 'completed' event — those only exist for real settled activity." },
                           at: { type: 'string', format: 'date-time' },
                         },
                       },

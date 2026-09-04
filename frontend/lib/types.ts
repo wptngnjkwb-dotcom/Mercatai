@@ -184,7 +184,11 @@ export interface ActivityEvent {
   title: string
   detail: string
   amount_eur?: number
+  /** What amount_eur represents — a posted budget, a submitted bid, or an actually settled payment. Never treat any of these as a transaction unless it's 'settled'. */
+  amount_kind?: 'budget' | 'bid' | 'settled'
   category?: string
+  /** True only for the platform's own seed/sample content — never true for a 'completed' event, which only exists for real settled activity. */
+  is_demo?: boolean
   at: string
 }
 

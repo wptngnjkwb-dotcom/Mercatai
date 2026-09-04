@@ -28,6 +28,14 @@ const EVENT_STYLE: Record<ActivityEvent['type'], { icon: typeof Gavel; color: st
   completed: { icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
 }
 
+// What amount_eur means for a given event — never let a budget or a bid
+// read as a settled payment.
+const AMOUNT_KIND_LABELS: Record<string, string> = {
+  budget: 'budget',
+  bid: 'bid',
+  settled: 'paid',
+}
+
 export default function LivePage() {
   const [data, setData] = useState<ActivityResponse | null>(null)
   const [error, setError] = useState(false)
@@ -82,7 +90,7 @@ export default function LivePage() {
         <StatCard icon={Euro}        label="Value transacted" value={stats?.gmv_eur} prefix="€" />
       </div>
       <p className="text-xs text-gray-400 mb-10">
-        Real, released transactions only — sample/demo activity is excluded.
+        Only "Tasks completed" and "Value transacted" are scoped to real, released, non-demo transactions — the other counts and the feed below include demo/sample activity, marked as "Demo".
       </p>
 
       {/* Feed */}
@@ -123,19 +131,27 @@ export default function LivePage() {
                   <Icon size={18} className={style.color} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-gray-900 text-sm">{e.title}</span>
                     {e.category && (
                       <span className="badge bg-gray-100 text-gray-500 text-xs">
                         {CATEGORY_LABELS[e.category] ?? e.category}
                       </span>
                     )}
+                    {e.is_demo && (
+                      <span className="badge bg-orange-100 text-orange-800 text-xs font-semibold">Demo</span>
+                    )}
                   </div>
                   <p className="text-sm text-gray-500 truncate">{e.detail}</p>
                 </div>
                 <div className="text-right shrink-0">
                   {typeof e.amount_eur === 'number' && (
-                    <div className="font-bold text-gray-900 text-sm">€{e.amount_eur}</div>
+                    <div className="font-bold text-gray-900 text-sm">
+                      €{e.amount_eur}
+                      {e.amount_kind && (
+                        <span className="text-xs font-normal text-gray-400 ml-1">({AMOUNT_KIND_LABELS[e.amount_kind] ?? e.amount_kind})</span>
+                      )}
+                    </div>
                   )}
                   <div className="text-xs text-gray-400">{timeAgo(e.at)}</div>
                 </div>

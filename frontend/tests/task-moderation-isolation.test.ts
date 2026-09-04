@@ -31,8 +31,9 @@ let cannedTask: Record<string, unknown> = {
 }
 
 // Rows for the activity feed's recentBids query — each carries its own
-// embedded task moderation_status, independent of cannedTask above.
-let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string } | null; agents: { display_name: string } }[] = []
+// embedded task moderation_status/posted_by_org_id, independent of
+// cannedTask above.
+let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string; posted_by_org_id?: string } | null; agents: { display_name: string } }[] = []
 
 // Seedable transactions/organizations rows for is_demo + funding_status +
 // settled-GMV coverage. The shared `tasks` dispatch below only ever returns
@@ -52,13 +53,15 @@ vi.mock('@/lib/server/supabase', () => ({
       // assumed it would.
       const eqFilters: [string, unknown][] = []
       let insertedRow: Record<string, unknown> | null = null
+      let selectedColumns: string | null = null
       const builder: Record<string, any> = {
-        select: () => builder,
+        select: (columns?: string) => { if (columns) selectedColumns = columns; return builder },
         eq: (field: string, value: unknown) => { eqFilters.push([field, value]); return builder },
         in: () => builder,
         gte: () => builder,
         order: () => builder,
         limit: () => builder,
+        range: () => builder,
         maybeSingle: async () => {
           if (table === 'organizations') return { data: orgLookupResult, error: null }
           return { data: null, error: null }
@@ -83,7 +86,17 @@ vi.mock('@/lib/server/supabase', () => ({
         then: (resolve: (v: unknown) => unknown) => {
           if (table === 'tasks') {
             const matches = eqFilters.every(([f, v]) => (cannedTask as Record<string, unknown>)[f] === v)
-            return resolve({ data: matches ? [cannedTask] : [], count: matches ? 1 : 0, error: null })
+            // Project down to the actually-selected columns, same as a real
+            // Postgres/PostgREST query would — a column used only in .eq()
+            // (like moderation_status here) is never returned unless it was
+            // also named in .select(...). Without this, a generic spread
+            // helper like attachPublicTaskFields could look safe against
+            // this mock while actually leaking an unselected column.
+            const project = (row: Record<string, unknown>) =>
+              selectedColumns
+                ? Object.fromEntries(selectedColumns.split(',').map((c) => c.trim()).map((c) => [c, row[c]]))
+                : row
+            return resolve({ data: matches ? [project(cannedTask)] : [], count: matches ? 1 : 0, error: null })
           }
           if (table === 'bids') return resolve({ data: activityBidRows, count: activityBidRows.length, error: null })
           if (table === 'agents') return resolve({ data: [], count: 0, error: null })
@@ -322,6 +335,29 @@ describe('GET /api/v1/tasks — is_demo and funding_status', () => {
     const body = await response.json()
     expect(body.tasks[0]).toMatchObject({ is_demo: false, funding_status: 'unfunded' })
   })
+
+  it('never returns posted_by_org_id, internal moderation fields, or raw transaction fields — only the derived funding_status', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: true }]
+    activityTransactionRows = [{ task_id: 'task-1', escrow_status: 'held' }]
+    const request = new NextRequest('http://localhost/api/v1/tasks')
+    const response = await GET(request)
+    const body = await response.json()
+    const task = body.tasks[0]
+    for (const internalField of [
+      'posted_by_org_id',
+      'moderation_status',
+      'moderation_risk_score',
+      'moderation_reason_codes',
+      'moderated_by',
+      'escrow_status',
+      'gross_amount_eur',
+      'stripe_payment_intent_id',
+    ]) {
+      expect(task).not.toHaveProperty(internalField)
+    }
+    expect(task.funding_status).toBe('funded')
+  })
 })
 
 // GET /api/v1/tasks/[id] and POST /api/v1/bids moderation-gate coverage
@@ -414,5 +450,61 @@ describe('GET /api/v1/activity — settled metrics (real tasks_completed / gmv_e
     const body = await response.json()
     expect(body.stats.tasks_completed).toBe(1)
     expect(body.stats.gmv_eur).toBe(60)
+  })
+})
+
+describe('GET /api/v1/activity — events feed: demo marking and real completions', () => {
+  it('marks a bid event as is_demo when its task belongs to the seed organization', async () => {
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: true }]
+    activityBidRows = [{
+      id: 'bid-1', price_eur: 15, submitted_at: '2026-08-22T10:00:00.000Z',
+      tasks: { title: 'Seed task', category: 'research', moderation_status: 'approved', posted_by_org_id: 'org-1' },
+      agents: { display_name: 'Agent A' },
+    }]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    const bidEvent = body.events.find((e: any) => e.id === 'bid-bid-1')
+    expect(bidEvent).toMatchObject({ is_demo: true, amount_kind: 'bid' })
+  })
+
+  it('marks a "New task posted" event as is_demo when the task belongs to the seed organization, and labels its amount as a budget', async () => {
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: true }]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    const taskEvent = body.events.find((e: any) => e.id === 'task-task-1')
+    expect(taskEvent).toMatchObject({ is_demo: true, amount_kind: 'budget', type: 'task' })
+  })
+
+  it('a task with workflow status "completed" but no released transaction produces no "completed" event', async () => {
+    cannedTask = { ...cannedTask, status: 'completed' }
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: false }]
+    activityTransactionRows = [] // no released transaction anywhere
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(body.events.some((e: any) => e.type === 'completed')).toBe(false)
+  })
+
+  it('a "completed" event, when it exists, uses the transaction amount and released_at — never the task budget or creation time', async () => {
+    // cannedTask.budget_max_eur is 100 and created_at is 2026-08-20 — the
+    // event must reflect the transaction's own 55 / released_at instead.
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: false }]
+    activityTransactionRows = [{ task_id: 'task-1', escrow_status: 'released', gross_amount_eur: 55, released_at: '2026-08-25T18:00:00.000Z' }]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    const completedEvent = body.events.find((e: any) => e.type === 'completed')
+    expect(completedEvent).toMatchObject({ amount_eur: 55, amount_kind: 'settled', is_demo: false, at: '2026-08-25T18:00:00.000Z' })
+  })
+
+  it('a demo task never produces a "completed" event, even with a released transaction', async () => {
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: true }]
+    activityTransactionRows = [{ task_id: 'task-1', escrow_status: 'released', gross_amount_eur: 500, released_at: '2026-08-25T18:00:00.000Z' }]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(body.events.some((e: any) => e.type === 'completed')).toBe(false)
   })
 })
