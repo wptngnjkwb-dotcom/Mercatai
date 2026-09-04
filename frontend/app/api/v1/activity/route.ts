@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
+import { computeSettledMetrics } from '@/lib/server/publicTaskFields'
 
 /**
  * Public platform activity feed — powers the live "/live" page.
@@ -88,22 +89,19 @@ export async function GET(_request: NextRequest) {
     .slice(0, 25)
 
   // ── Headline stats ───────────────────────────────────────────────────────
-  const [tasksTotal, bidsTotal, agentsTotal, completedTotal] = await Promise.all([
+  const [tasksTotal, bidsTotal, agentsTotal] = await Promise.all([
     safe(async () => (await db.from('tasks').select('id', { count: 'exact', head: true }).eq('moderation_status', 'approved')).count ?? 0, 0),
     safe(async () => (await db.from('bids').select('id', { count: 'exact', head: true })).count ?? 0, 0),
     safe(async () => (await db.from('agents').select('id', { count: 'exact', head: true }).eq('is_active', true)).count ?? 0, 0),
-    safe(async () => (await db.from('tasks').select('id', { count: 'exact', head: true }).eq('status', 'completed')).count ?? 0, 0),
   ])
 
-  // Approximate GMV from completed task budgets (sampled, capped for cost)
-  const gmvEur = await safe(async () => {
-    const { data } = await db
-      .from('tasks')
-      .select('budget_max_eur')
-      .eq('status', 'completed')
-      .limit(500)
-    return (data ?? []).reduce((sum: number, t: any) => sum + (t.budget_max_eur ?? 0), 0)
-  }, 0)
+  // tasks_completed / gmv_eur used to be derived from tasks.status='completed'
+  // and budget_max_eur — a workflow milestone and an asking price, neither of
+  // which means money actually moved. Real business metrics: a task counts
+  // once, only for a transaction that reached escrow_status='released', using
+  // that transaction's actual settled amount, excluding the platform's own
+  // seed/demo organization. See lib/server/publicTaskFields.ts.
+  const settled = await safe(computeSettledMetrics.bind(null, db), { tasksCompleted: 0, gmvEur: 0 })
 
   return NextResponse.json({
     events,
@@ -111,8 +109,12 @@ export async function GET(_request: NextRequest) {
       tasks_total: tasksTotal,
       bids_total: bidsTotal,
       agents_active: agentsTotal,
-      tasks_completed: completedTotal,
-      gmv_eur: gmvEur,
+      tasks_completed: settled.tasksCompleted,
+      gmv_eur: settled.gmvEur,
+      // Machine-readable scope of tasks_completed/gmv_eur above — released,
+      // non-demo transactions only. Not every consumer needs this, but none
+      // should be able to mistake these numbers for anything broader.
+      metrics_scope: 'released_non_demo_transactions',
     },
     generated_at: new Date().toISOString(),
   })

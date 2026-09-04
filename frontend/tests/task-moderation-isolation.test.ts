@@ -34,6 +34,15 @@ let cannedTask: Record<string, unknown> = {
 // embedded task moderation_status, independent of cannedTask above.
 let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string } | null; agents: { display_name: string } }[] = []
 
+// Seedable transactions/organizations rows for is_demo + funding_status +
+// settled-GMV coverage. The shared `tasks` dispatch below only ever returns
+// cannedTask (id 'task-1', posted_by_org_id 'org-1') for any .in('id', …)
+// lookup with no .eq() filters — see computeSettledMetrics' task_id →
+// posted_by_org_id lookup — so every transaction row seeded here uses
+// task_id: 'task-1' to stay consistent with what that lookup will resolve to.
+let activityTransactionRows: { task_id: string; escrow_status: string; gross_amount_eur?: number; released_at?: string | null; created_at?: string }[] = []
+let activityOrganizationRows: { id: string; is_platform_seed: boolean }[] = []
+
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
     from(table: string) {
@@ -78,6 +87,13 @@ vi.mock('@/lib/server/supabase', () => ({
           }
           if (table === 'bids') return resolve({ data: activityBidRows, count: activityBidRows.length, error: null })
           if (table === 'agents') return resolve({ data: [], count: 0, error: null })
+          if (table === 'transactions') {
+            const matches = activityTransactionRows.filter((row) =>
+              eqFilters.every(([f, v]) => (row as Record<string, unknown>)[f] === v)
+            )
+            return resolve({ data: matches, count: matches.length, error: null })
+          }
+          if (table === 'organizations') return resolve({ data: activityOrganizationRows, count: activityOrganizationRows.length, error: null })
           return resolve({ data: [], count: 0, error: null })
         },
       }
@@ -100,6 +116,8 @@ beforeEach(() => {
   orgLookupResult = null
   cannedTask = { ...cannedTask, moderation_status: 'approved' }
   activityBidRows = []
+  activityTransactionRows = []
+  activityOrganizationRows = []
 })
 
 describe('POST /api/v1/tasks — moderation publish flow', () => {
@@ -284,6 +302,28 @@ describe('GET /api/v1/tasks — moderation isolation', () => {
   })
 })
 
+describe('GET /api/v1/tasks — is_demo and funding_status', () => {
+  it('marks a task from the seed organization as is_demo, with the correct funding_status from its transaction', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: true }]
+    activityTransactionRows = [{ task_id: 'task-1', escrow_status: 'released' }]
+    const request = new NextRequest('http://localhost/api/v1/tasks')
+    const response = await GET(request)
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.tasks[0]).toMatchObject({ is_demo: true, funding_status: 'released' })
+  })
+
+  it('a non-seed task with no transaction is not demo and is unfunded', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: false }]
+    const request = new NextRequest('http://localhost/api/v1/tasks')
+    const response = await GET(request)
+    const body = await response.json()
+    expect(body.tasks[0]).toMatchObject({ is_demo: false, funding_status: 'unfunded' })
+  })
+})
+
 // GET /api/v1/tasks/[id] and POST /api/v1/bids moderation-gate coverage
 // lives in agent-public-response.test.ts and bids-auth.test.ts respectively
 // — those files already import and mock those exact routes, and this suite
@@ -315,5 +355,64 @@ describe('GET /api/v1/activity — moderation isolation', () => {
     const bidEvents = body.events.filter((e: any) => e.id?.startsWith('bid-'))
     expect(bidEvents.some((e: any) => e.detail === 'Should stay hidden')).toBe(false)
     expect(bidEvents.some((e: any) => e.detail === 'Visible task')).toBe(true)
+  })
+})
+
+describe('GET /api/v1/activity — settled metrics (real tasks_completed / gmv_eur)', () => {
+  it('a completed task with no transaction at all contributes nothing', async () => {
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(body.stats.tasks_completed).toBe(0)
+    expect(body.stats.gmv_eur).toBe(0)
+    expect(body.stats.metrics_scope).toBe('released_non_demo_transactions')
+  })
+
+  it.each(['pending', 'failed', 'held', 'refunded'])(
+    'a transaction with escrow_status %s is never counted as settled',
+    async (escrowStatus) => {
+      activityOrganizationRows = [{ id: 'org-1', is_platform_seed: false }]
+      activityTransactionRows = [{ task_id: 'task-1', escrow_status: escrowStatus, gross_amount_eur: 999 }]
+      const { GET } = await import('@/app/api/v1/activity/route')
+      const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+      const body = await response.json()
+      expect(body.stats.tasks_completed).toBe(0)
+      expect(body.stats.gmv_eur).toBe(0)
+    }
+  )
+
+  it('a non-demo task with a released transaction counts exactly once, using the transaction amount, not the task budget', async () => {
+    // cannedTask.budget_max_eur is 100 — the transaction amount (77) must
+    // win, proving GMV is not silently falling back to the posted budget.
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: false }]
+    activityTransactionRows = [{ task_id: 'task-1', escrow_status: 'released', gross_amount_eur: 77, released_at: '2026-08-20T12:00:00.000Z' }]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(body.stats.tasks_completed).toBe(1)
+    expect(body.stats.gmv_eur).toBe(77)
+  })
+
+  it('a demo (seed-organization) task with a released transaction is excluded from real GMV', async () => {
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: true }]
+    activityTransactionRows = [{ task_id: 'task-1', escrow_status: 'released', gross_amount_eur: 500, released_at: '2026-08-20T12:00:00.000Z' }]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(body.stats.tasks_completed).toBe(0)
+    expect(body.stats.gmv_eur).toBe(0)
+  })
+
+  it('two released transactions for the same task_id count once, not twice — the more recently released one wins', async () => {
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: false }]
+    activityTransactionRows = [
+      { task_id: 'task-1', escrow_status: 'released', gross_amount_eur: 40, released_at: '2026-08-19T08:00:00.000Z' },
+      { task_id: 'task-1', escrow_status: 'released', gross_amount_eur: 60, released_at: '2026-08-20T09:00:00.000Z' },
+    ]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(body.stats.tasks_completed).toBe(1)
+    expect(body.stats.gmv_eur).toBe(60)
   })
 })

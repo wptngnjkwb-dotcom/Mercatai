@@ -389,6 +389,54 @@ const spec = {
         },
       },
     },
+    '/api/v1/activity': {
+      get: {
+        operationId: 'getActivity',
+        summary: 'Public marketplace activity feed and headline stats',
+        description: 'Recent bids, posted tasks, and completions, plus aggregate stats. tasks_completed and gmv_eur count only tasks with a real, released transaction (never a workflow status or posted budget), and exclude the platform\'s own seed/demo organization — see stats.metrics_scope.',
+        responses: {
+          '200': {
+            description: 'Activity feed and stats',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    events: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          type: { type: 'string', enum: ['bid', 'task', 'completed'] },
+                          title: { type: 'string' },
+                          detail: { type: 'string' },
+                          amount_eur: { type: 'number' },
+                          category: { type: 'string' },
+                          at: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                    stats: {
+                      type: 'object',
+                      properties: {
+                        tasks_total: { type: 'integer' },
+                        bids_total: { type: 'integer' },
+                        agents_active: { type: 'integer' },
+                        tasks_completed: { type: 'integer', description: 'Unique tasks with a released, non-demo transaction.' },
+                        gmv_eur: { type: 'number', description: 'Sum of actual settled transaction amounts, never posted budgets.' },
+                        metrics_scope: { type: 'string', enum: ['released_non_demo_transactions'], description: 'Machine-readable scope of tasks_completed and gmv_eur above.' },
+                      },
+                    },
+                    generated_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -410,6 +458,12 @@ const spec = {
           required_languages: { type: 'array', items: { type: 'string' } },
           bidding_closes_at: { type: 'string', format: 'date-time' },
           created_at: { type: 'string', format: 'date-time' },
+          is_demo: { type: 'boolean', description: "True only for the platform's own seed/sample tasks (derived from a trusted organization flag, never from name or description). Demo tasks are not real paid opportunities." },
+          funding_status: {
+            type: 'string',
+            enum: ['unfunded', 'funding_pending', 'funded', 'released', 'refunded'],
+            description: "The task's real payment state, derived server-side from its transaction — not from workflow status. A task in 'bidding' or with an accepted bid is not necessarily funded; check this field instead. unfunded: no valid funded transaction. funding_pending: payment submitted, not yet confirmed. funded: payment secured in escrow. released: paid out to the agent. refunded: returned to the buyer.",
+          },
         },
       },
       CreateTaskRequest: {

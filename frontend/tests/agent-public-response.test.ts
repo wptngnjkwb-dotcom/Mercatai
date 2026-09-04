@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import { GET as getAgent } from '@/app/api/v1/agents/[id]/route'
 import { GET as getTask } from '@/app/api/v1/tasks/[id]/route'
@@ -38,6 +38,13 @@ const rawAgent = {
 
 let selectedAgentColumns = ''
 let selectedTaskColumns = ''
+let rawOrganizations: { id: string; is_platform_seed: boolean }[] = []
+let rawTransactions: { task_id: string; escrow_status: string }[] = []
+
+beforeEach(() => {
+  rawOrganizations = []
+  rawTransactions = []
+})
 
 const rawTask = {
   id: TASK_ID,
@@ -69,11 +76,12 @@ const rawTask = {
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
     from(table: string) {
-      const result = table === 'agents'
-        ? { data: rawAgent, error: null }
-        : table === 'tasks'
-          ? { data: rawTask, error: null }
-          : { data: [{ rating: 5 }], error: null }
+      const result =
+        table === 'agents' ? { data: rawAgent, error: null }
+        : table === 'tasks' ? { data: rawTask, error: null }
+        : table === 'organizations' ? { data: rawOrganizations, error: null }
+        : table === 'transactions' ? { data: rawTransactions, error: null }
+        : { data: [{ rating: 5 }], error: null }
 
       const builder: Record<string, any> = {
         select(columns: string) {
@@ -82,6 +90,7 @@ vi.mock('@/lib/server/supabase', () => ({
           return builder
         },
         eq: () => builder,
+        in: () => builder,
         single: async () => result,
         then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
           Promise.resolve(result).then(resolve, reject),
@@ -138,13 +147,14 @@ describe('GET /api/v1/tasks/[id]', () => {
       title: 'Analyse a B2B dataset',
       status: 'open',
       delivery_deadline_at: null,
+      is_demo: false,
+      funding_status: 'unfunded',
     })
     expect(selectedTaskColumns).not.toBe('*')
 
     for (const privateField of [
       'buyer_email',
       'buyer_token',
-      'posted_by_org_id',
       'delivery_note',
       'dispute_reason',
       'embedding',
@@ -153,10 +163,13 @@ describe('GET /api/v1/tasks/[id]', () => {
       expect(selectedTaskColumns.split(',')).not.toContain(privateField)
     }
 
-    // moderation_status is deliberately selected (the handler needs it to
-    // decide 200 vs 404) but must never appear in the public response body.
-    expect(selectedTaskColumns.split(',')).toContain('moderation_status')
-    expect(body).not.toHaveProperty('moderation_status')
+    // moderation_status and posted_by_org_id are deliberately selected (the
+    // handler needs them to decide 200 vs 404, and to derive is_demo below)
+    // but neither may ever appear in the public response body itself.
+    for (const internalOnlyField of ['moderation_status', 'posted_by_org_id']) {
+      expect(selectedTaskColumns.split(',')).toContain(internalOnlyField)
+      expect(body).not.toHaveProperty(internalOnlyField)
+    }
   })
 
   it('404s a non-approved task exactly like a missing one', async () => {
@@ -171,5 +184,50 @@ describe('GET /api/v1/tasks/[id]', () => {
     } finally {
       rawTask.moderation_status = originalStatus
     }
+  })
+})
+
+describe('GET /api/v1/tasks/[id] — is_demo and funding_status', () => {
+  it('is_demo is true only when the task\'s organization is flagged is_platform_seed', async () => {
+    rawOrganizations = [{ id: rawTask.posted_by_org_id, is_platform_seed: true }]
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`)
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(body.is_demo).toBe(true)
+  })
+
+  it('is_demo is false when the organization exists but is not seed-flagged', async () => {
+    rawOrganizations = [{ id: rawTask.posted_by_org_id, is_platform_seed: false }]
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`)
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(body.is_demo).toBe(false)
+  })
+
+  it('a client cannot spoof is_demo — GET /tasks/[id] takes no body, and a query param or header naming it is ignored', async () => {
+    rawOrganizations = [{ id: rawTask.posted_by_org_id, is_platform_seed: false }]
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}?is_demo=true`, {
+      headers: { 'x-is-demo': 'true' },
+    })
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(body.is_demo).toBe(false)
+  })
+
+  it('maps a released transaction to funding_status "released"', async () => {
+    rawTransactions = [{ task_id: TASK_ID, escrow_status: 'released' }]
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`)
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(body.funding_status).toBe('released')
+  })
+
+  it('maps a held transaction to funding_status "funded" — independent of the unrelated workflow status field', async () => {
+    rawTransactions = [{ task_id: TASK_ID, escrow_status: 'held' }]
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`)
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(body.funding_status).toBe('funded')
+    expect(body.status).toBe('open')
   })
 })

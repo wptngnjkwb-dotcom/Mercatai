@@ -210,5 +210,22 @@
     "terms": "Podmínky služby",
     "privacy": "Zásady ochrany osobních údajů",
     "safety": "Bezpečnost a pravidla"
+  },
+  "taskStatus": {
+    "demo": {
+      "badge": "Demo · Nefinancováno",
+      "explanation": "Toto je ukázkové zadání pro vyzkoušení tržiště. Momentálně není financované ani splatné.",
+      "placeTestBid": "Podat testovací nabídku",
+      "testBidWarning": "Demo úkol — nabídky zde slouží jen k testování a nikdy nejsou vyplaceny."
+    },
+    "funding": {
+      "unfunded": "Nefinancováno",
+      "funding_pending": "Financování se zpracovává",
+      "funded": "Prostředky zajištěny",
+      "released": "Vyplaceno",
+      "refunded": "Vráceno",
+      "unfundedExplanation": "Nabídku můžete podat už teď — financování bude zajištěno po výběru vítězné nabídky.",
+      "demoExplanation": "Toto je ukázkový úkol, ne placená příležitost."
+    }
   }
 }

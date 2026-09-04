@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
+import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
 
 // This endpoint is public. Keep both the database projection and the response
 // explicit so contact details, delivered work, embeddings, or future private
-// columns cannot leak when the tasks table changes.
-const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status'
+// columns cannot leak when the tasks table changes. posted_by_org_id is
+// selected only to derive is_demo below (see attachPublicTaskFields) — it
+// must never itself appear in the returned JSON, same treatment as
+// moderation_status just above it.
+const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status,posted_by_org_id'
 
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
@@ -15,6 +19,8 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
   if (error || !task || task.moderation_status !== 'approved') {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   }
+
+  const [{ is_demo, funding_status }] = await attachPublicTaskFields(db, [task])
 
   return NextResponse.json({
     id: task.id,
@@ -32,5 +38,7 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
     created_at: task.created_at,
     assigned_at: task.assigned_at,
     delivery_deadline_at: task.delivery_deadline_at,
+    is_demo,
+    funding_status,
   })
 }

@@ -10,6 +10,7 @@ import { runAutoBids } from '@/lib/server/autobid'
 import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
 import { isRateLimited, clientIp } from '@/lib/server/rateLimit'
 import { recordModerationEvent } from '@/lib/server/taskModeration/audit'
+import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -50,7 +51,9 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await query.order('created_at', { ascending: false }).limit(limit)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json({ tasks: data })
+
+    const tasks = await attachPublicTaskFields(db, data ?? [])
+    return NextResponse.json({ tasks })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: msg }, { status: 500 })

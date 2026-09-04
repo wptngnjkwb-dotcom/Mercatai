@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { Link } from '@/i18n/navigation'
 import { ArrowLeft, Clock, Euro, Users, Globe, Wrench, Flag } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -53,6 +54,22 @@ const CATEGORY_LABELS: Record<string, string> = {
   finance: 'Finance & ERP',
 }
 
+const FUNDING_BANNER_COLORS: Record<string, string> = {
+  unfunded: 'bg-gray-50 border-gray-200',
+  funding_pending: 'bg-amber-50 border-amber-200',
+  funded: 'bg-cyan-50 border-cyan-200',
+  released: 'bg-green-50 border-green-200',
+  refunded: 'bg-slate-50 border-slate-200',
+}
+
+const FUNDING_TEXT_COLORS: Record<string, string> = {
+  unfunded: 'text-gray-700',
+  funding_pending: 'text-amber-800',
+  funded: 'text-cyan-800',
+  released: 'text-green-800',
+  refunded: 'text-slate-700',
+}
+
 function base64UrlDecode(segment: string): string {
   const base64 = segment.replace(/-/g, '+').replace(/_/g, '/')
   const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
@@ -81,6 +98,7 @@ function hasValidAgentSession(): boolean {
 }
 
 export default function TaskDetailPage() {
+  const t = useTranslations('taskStatus')
   const { taskId } = useParams<{ taskId: string }>()
 
   const [task, setTask] = useState<Task | null>(null)
@@ -149,13 +167,18 @@ export default function TaskDetailPage() {
       </Link>
 
       <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="badge bg-gray-100 text-gray-600 text-xs">
             {CATEGORY_LABELS[task.category] ?? task.category}
           </span>
           <span className={`badge ${STATUS_COLORS[task.status] ?? 'bg-gray-100 text-gray-600'}`}>
             {task.status.replace('_', ' ')}
           </span>
+          {task.is_demo && (
+            <span className="badge bg-orange-100 text-orange-800 text-xs font-semibold">
+              {t('demo.badge')}
+            </span>
+          )}
         </div>
         {loggedIn && !reportSubmitted && (
           <button
@@ -228,6 +251,26 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
+      {/* Funding is a separate axis from workflow status above — a task in
+          'bidding', or even with an accepted bid, is not necessarily funded. */}
+      <div className={`card p-4 mb-6 border ${task.is_demo ? 'bg-orange-50 border-orange-200' : FUNDING_BANNER_COLORS[task.funding_status] ?? 'bg-gray-50 border-gray-200'}`}>
+        {task.is_demo ? (
+          <>
+            <p className="text-sm font-semibold text-orange-800 mb-1">{t('demo.badge')}</p>
+            <p className="text-sm text-orange-700">{t('demo.explanation')}</p>
+          </>
+        ) : (
+          <>
+            <p className={`text-sm font-semibold mb-1 ${FUNDING_TEXT_COLORS[task.funding_status] ?? 'text-gray-700'}`}>
+              {t(`funding.${task.funding_status}`)}
+            </p>
+            {task.funding_status === 'unfunded' && (
+              <p className="text-sm text-gray-600">{t('funding.unfundedExplanation')}</p>
+            )}
+          </>
+        )}
+      </div>
+
       <section className="mb-6">
         <h2 className="font-semibold text-gray-900 mb-2">Brief</h2>
         <p className="text-gray-600 whitespace-pre-wrap">{task.description}</p>
@@ -264,8 +307,13 @@ export default function TaskDetailPage() {
           <div>
             <p className="font-semibold text-gray-900">Can your agent do this?</p>
             <p className="text-sm text-gray-500">Submit a price and delivery time — the buyer picks a bid.</p>
+            {task.is_demo && (
+              <p className="text-xs text-orange-700 mt-1 font-medium">{t('demo.testBidWarning')}</p>
+            )}
           </div>
-          <Link href={`/agent/bid/${task.id}`} className="btn-primary">Place a bid</Link>
+          <Link href={`/agent/bid/${task.id}`} className="btn-primary">
+            {task.is_demo ? t('demo.placeTestBid') : 'Place a bid'}
+          </Link>
         </div>
       )}
 

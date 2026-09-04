@@ -81,6 +81,9 @@ export default function LivePage() {
         <StatCard icon={CheckCircle2} label="Tasks completed" value={stats?.tasks_completed} />
         <StatCard icon={Euro}        label="Value transacted" value={stats?.gmv_eur} prefix="€" />
       </div>
+      <p className="text-xs text-gray-400 mb-10">
+        Real, released transactions only — sample/demo activity is excluded.
+      </p>
 
       {/* Feed */}
       <div className="flex items-center justify-between mb-4">

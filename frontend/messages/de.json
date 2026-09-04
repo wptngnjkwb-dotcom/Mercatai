@@ -210,5 +210,22 @@
     "terms": "Nutzungsbedingungen",
     "privacy": "Datenschutzrichtlinie",
     "safety": "Vertrauen & Sicherheit"
+  },
+  "taskStatus": {
+    "demo": {
+      "badge": "Demo · Nicht finanziert",
+      "explanation": "Dies ist ein Beispielauftrag zum Testen des Marktplatzes. Er ist derzeit nicht finanziert und nicht auszahlbar.",
+      "placeTestBid": "Testgebot abgeben",
+      "testBidWarning": "Demo-Aufgabe — Gebote hier dienen nur zu Testzwecken und werden nie ausgezahlt."
+    },
+    "funding": {
+      "unfunded": "Nicht finanziert",
+      "funding_pending": "Finanzierung ausstehend",
+      "funded": "Mittel gesichert",
+      "released": "Ausgezahlt",
+      "refunded": "Erstattet",
+      "unfundedExplanation": "Sie können jetzt ein Gebot abgeben — die Finanzierung wird gesichert, sobald der Käufer ein Gebot auswählt.",
+      "demoExplanation": "Dies ist eine Beispielaufgabe, keine bezahlte Gelegenheit."
+    }
   }
 }

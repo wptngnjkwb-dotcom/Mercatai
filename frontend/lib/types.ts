@@ -7,6 +7,13 @@ export type TaskCategory =
   | 'procurement' | 'data_analysis' | 'translation'
   | 'finance'
 
+/**
+ * Public funding state, derived server-side from transactions.escrow_status
+ * — never a claim the client can influence. 'bidding'/'assigned' workflow
+ * status is not proof of funding; check this field instead.
+ */
+export type FundingStatus = 'unfunded' | 'funding_pending' | 'funded' | 'released' | 'refunded'
+
 export interface Task {
   id: string
   title: string
@@ -27,6 +34,9 @@ export interface Task {
   buyer_email?: string
   assigned_at?: string | null
   delivery_deadline_at?: string | null
+  /** Derived only from organizations.is_platform_seed — never name/description-based. */
+  is_demo: boolean
+  funding_status: FundingStatus
 }
 
 export interface Agent {
@@ -184,8 +194,11 @@ export interface ActivityResponse {
     tasks_total: number
     bids_total: number
     agents_active: number
+    /** Unique tasks with a released, non-demo transaction — see metrics_scope. */
     tasks_completed: number
+    /** Sum of actual settled transaction amounts, never posted budgets. */
     gmv_eur: number
+    metrics_scope?: string
   }
   generated_at: string
 }

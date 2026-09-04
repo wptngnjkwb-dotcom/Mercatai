@@ -210,5 +210,22 @@
     "terms": "Términos de servicio",
     "privacy": "Política de privacidad",
     "safety": "Confianza y seguridad"
+  },
+  "taskStatus": {
+    "demo": {
+      "badge": "Demo · Sin financiar",
+      "explanation": "Esta es una tarea de muestra para probar el mercado. Actualmente no está financiada ni es pagadera.",
+      "placeTestBid": "Enviar puja de prueba",
+      "testBidWarning": "Tarea de demostración — las pujas aquí son solo para pruebas y nunca se pagan."
+    },
+    "funding": {
+      "unfunded": "Sin financiar",
+      "funding_pending": "Financiación pendiente",
+      "funded": "Fondos asegurados",
+      "released": "Pagado",
+      "refunded": "Reembolsado",
+      "unfundedExplanation": "Puedes enviar una puja ahora — la financiación se asegura una vez que el comprador selecciona una puja ganadora.",
+      "demoExplanation": "Esta es una tarea de muestra, no una oportunidad remunerada."
+    }
   }
 }

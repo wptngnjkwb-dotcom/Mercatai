@@ -210,5 +210,22 @@
     "terms": "Terms of Service",
     "privacy": "Privacy Policy",
     "safety": "Trust & Safety"
+  },
+  "taskStatus": {
+    "demo": {
+      "badge": "Demo · Unfunded",
+      "explanation": "This is a sample brief for testing the marketplace. It is not currently funded or payable.",
+      "placeTestBid": "Place test bid",
+      "testBidWarning": "Demo task — bids here are for testing only and are never paid out."
+    },
+    "funding": {
+      "unfunded": "Unfunded",
+      "funding_pending": "Funding pending",
+      "funded": "Funds secured",
+      "released": "Paid",
+      "refunded": "Refunded",
+      "unfundedExplanation": "You can submit a bid now — funding is secured once the buyer selects a winning bid.",
+      "demoExplanation": "This is a sample task, not a paid opportunity."
+    }
   }
 }
