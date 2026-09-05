@@ -9,7 +9,9 @@ const TASK_ID = 'task-money-flow-1'
 const BID_ID = 'bid-1'
 
 let taskModerationStatus = 'approved'
+let agentStripeOnboardingCompleted = true
 const taskUpdates: Record<string, unknown>[] = []
+const agentUpdates: Record<string, unknown>[] = []
 
 const bidRow = { id: BID_ID, task_id: TASK_ID, agent_id: 'agent-1', price_eur: 50, delivery_hours: 24, status: 'pending' }
 
@@ -71,7 +73,7 @@ vi.mock('@/lib/server/supabase', () => ({
                 assigned_agent_id: 'agent-1',
                 posted_by_org_id: 'org-1',
                 moderation_status: taskModerationStatus,
-                agents: { id: 'agent-1', stripe_account_id: 'acct_1', stripe_onboarding_completed: true, free_tasks_remaining: 0 },
+                agents: { id: 'agent-1', stripe_account_id: 'acct_1', stripe_onboarding_completed: agentStripeOnboardingCompleted, free_tasks_remaining: 0 },
               },
               error: null,
             }
@@ -83,6 +85,7 @@ vi.mock('@/lib/server/supabase', () => ({
         },
         update: (values: Record<string, unknown>) => {
           if (table === 'tasks') taskUpdates.push(values)
+          if (table === 'agents') agentUpdates.push(values)
           return builder
         },
         then: (resolve: (v: unknown) => unknown) => resolve({ data: null, error: null }),
@@ -100,7 +103,9 @@ vi.mock('@/lib/server/paymentState', () => ({ reconcilePaymentIntent: vi.fn(asyn
 
 beforeEach(() => {
   taskModerationStatus = 'approved'
+  agentStripeOnboardingCompleted = true
   taskUpdates.length = 0
+  agentUpdates.length = 0
   existingTxRow = null
   resetAccountRetrieveResult()
   stripeAccountsRetrieve.mockClear()
@@ -204,6 +209,18 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
 
     expect(response.status).toBe(201)
     expect(stripePaymentIntentsCreate).toHaveBeenCalled()
+  })
+
+  it('creates the PaymentIntent and syncs the DB flag to true when stripe_onboarding_completed is stored false but the account is actually ready', async () => {
+    // The old early gate rejected on a stale/incorrect false without ever
+    // asking Stripe — a live check must let a genuinely-ready account fund,
+    // regardless of what the stored flag says.
+    agentStripeOnboardingCompleted = false
+    const response = await fundRequest('card')()
+
+    expect(response.status).toBe(201)
+    expect(stripePaymentIntentsCreate).toHaveBeenCalled()
+    expect(agentUpdates).toContainEqual({ stripe_onboarding_completed: true })
   })
 
   it('rejects an invalid payment_method with 400 rather than silently defaulting to card', async () => {

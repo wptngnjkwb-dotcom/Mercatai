@@ -38,7 +38,8 @@ vi.mock('@/lib/server/supabase', () => ({
   }),
 }))
 
-vi.mock('@/lib/server/audit', () => ({ auditLog: vi.fn(async () => {}) }))
+const { auditLog } = vi.hoisted(() => ({ auditLog: vi.fn(async () => {}) }))
+vi.mock('@/lib/server/audit', () => ({ auditLog }))
 
 // A financially dangerous route — this asserts real Stripe API calls are
 // simply never reached for a forbidden request, not just that the HTTP
@@ -251,6 +252,8 @@ describe('GET /api/v1/agents/[id]/stripe-onboard — onboarding completeness der
   beforeEach(() => {
     agentUpdates.length = 0
     accountsRetrieve.mockClear()
+    auditLog.mockClear()
+    dbAgentUpdateError = null
     ;(agentRow as any).stripe_account_id = 'acct_existing'
   })
 
@@ -336,6 +339,24 @@ describe('GET /api/v1/agents/[id]/stripe-onboard — onboarding completeness der
     expect(response.status).toBe(200)
     expect(agentUpdates).toHaveLength(0)
   })
+
+  it('fails closed — never audit-logs a completion/restriction claim when the database write itself fails', async () => {
+    ;(agentRow as any).stripe_onboarding_completed = false
+    accountsRetrieve.mockResolvedValueOnce({
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    })
+    dbAgentUpdateError = { message: 'connection reset' }
+    try {
+      await expect(getStatus()).rejects.toThrow(/failed to sync/i)
+      expect(auditLog).not.toHaveBeenCalled()
+    } finally {
+      dbAgentUpdateError = null
+    }
+  })
 })
 
 describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediation', () => {
@@ -417,6 +438,46 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
     expect(body.message).toMatch(/already completed/i)
     expect(accountsUpdate).not.toHaveBeenCalled()
     expect(accountLinksCreate).not.toHaveBeenCalled()
+  })
+
+  it('does not report "already completed" when payouts_enabled is false, even with every capability active — and does not call accounts.update with nothing to request', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: false,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.message).toBeUndefined()
+    expect(body.onboarding_url).toBeTruthy()
+    expect(accountsUpdate).not.toHaveBeenCalled()
+    expect(accountLinksCreate).toHaveBeenCalled()
+  })
+
+  it('does not report "already completed" when details_submitted is false, even with every capability active', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: false,
+      requirements: { currently_due: ['individual.id_number'] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.message).toBeUndefined()
+    expect(body.onboarding_url).toBeTruthy()
+    expect(accountsUpdate).not.toHaveBeenCalled()
+    expect(accountLinksCreate).toHaveBeenCalled()
   })
 })
 

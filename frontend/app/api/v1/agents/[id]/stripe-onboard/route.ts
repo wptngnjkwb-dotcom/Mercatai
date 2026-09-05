@@ -128,36 +128,45 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       }, { status: 409 })
     }
 
-    // Deliberately a stricter bar than readiness.onboardingComplete (which
-    // only requires identity + payouts + AT LEAST ONE payment method, and
-    // gates create-intent). Here, any capability short of fully active is
-    // worth requesting — otherwise a legacy account that already satisfies
+    // Checking "any capability short of active" is deliberately a stricter
+    // bar than readiness.onboardingComplete on its own (which only requires
+    // identity + payouts + AT LEAST ONE payment method, and gates
+    // create-intent) — otherwise a legacy account that already satisfies
     // onboardingComplete via SEPA alone (created before card_payments was
     // added to the capabilities requested at account creation, below) would
-    // never have card_payments requested for it, since it would always
-    // short-circuit as "already completed" first.
+    // never have card_payments requested for it. But "already completed"
+    // itself must require BOTH: no capability is missing, AND
+    // onboardingComplete is actually true — a capability can be active
+    // while identity details, outstanding requirements, or payouts_enabled
+    // still leave the account genuinely not ready, and reporting completion
+    // then would be a false confirmation.
     const missingCapabilities: Record<string, { requested: true }> = {}
     if (readiness.cardPaymentsStatus !== 'active') missingCapabilities.card_payments = { requested: true }
     if (readiness.sepaDebitPaymentsStatus !== 'active') missingCapabilities.sepa_debit_payments = { requested: true }
     if (readiness.transfersStatus !== 'active') missingCapabilities.transfers = { requested: true }
+    const hasMissingCapabilities = Object.keys(missingCapabilities).length > 0
 
-    if (Object.keys(missingCapabilities).length === 0) {
+    if (readiness.onboardingComplete && !hasMissingCapabilities) {
       return NextResponse.json({ message: 'Stripe onboarding already completed', stripe_account_id: stripeAccountId })
     }
 
-    try {
-      await stripe.accounts.update(stripeAccountId, { capabilities: missingCapabilities })
-    } catch (stripeErr) {
-      const message = stripeErr instanceof Error ? stripeErr.message : 'Could not request the missing capabilities'
-      return NextResponse.json({
-        error: `Could not request this account's missing capabilities: ${message}. This may need manual review in the Stripe Dashboard.`,
-        stripe_account_id: stripeAccountId,
-        action_required: 'manual_stripe_dashboard_review',
-      }, { status: 409 })
+    if (hasMissingCapabilities) {
+      try {
+        await stripe.accounts.update(stripeAccountId, { capabilities: missingCapabilities })
+      } catch (stripeErr) {
+        const message = stripeErr instanceof Error ? stripeErr.message : 'Could not request the missing capabilities'
+        return NextResponse.json({
+          error: `Could not request this account's missing capabilities: ${message}. This may need manual review in the Stripe Dashboard.`,
+          stripe_account_id: stripeAccountId,
+          action_required: 'manual_stripe_dashboard_review',
+        }, { status: 409 })
+      }
     }
-    // Fall through to issue a fresh account link below — the newly-requested
-    // capabilities (and any outstanding requirements) are resolved through
-    // Stripe's own hosted onboarding, not by this route directly.
+    // Fall through to issue a fresh account link below — whether because a
+    // capability was just requested, or because something else (identity
+    // details, outstanding requirements, payouts_enabled) still needs
+    // resolving through Stripe's own hosted onboarding, with nothing left
+    // here for accounts.update to request.
   } else {
     try {
       const account = await stripe.accounts.create({

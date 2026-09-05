@@ -84,12 +84,17 @@ export async function POST(request: NextRequest) {
       }, { status: 403 })
     }
 
-    // Zkontrolovat že agent má dokončený Stripe Connect onboarding
+    // Only a missing Stripe account at all is rejected here without a live
+    // check — whether an existing account is actually ready is decided
+    // below, from Stripe's own current data, not from the stored
+    // stripe_onboarding_completed flag (which can be stale in either
+    // direction: false when the account is actually ready, just as easily
+    // as true when Stripe has since restricted it).
     const agentStripeAccount = (task.agents as any)?.stripe_account_id
     const agentOnboardingDone = (task.agents as any)?.stripe_onboarding_completed
-    if (!agentStripeAccount || !agentOnboardingDone) {
+    if (!agentStripeAccount) {
       return NextResponse.json({
-        error: 'Agent has not completed Stripe Connect onboarding. Payment cannot be created until the agent links their payout account.',
+        error: 'Agent has not started Stripe Connect onboarding. Payment cannot be created until the agent links their payout account.',
         stripe_onboarding_required: true,
       }, { status: 402 })
     }
