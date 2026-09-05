@@ -1,3 +1,10 @@
+# NOT the production API — see the notice at the top of backend/main.py.
+# fee_percent, payment_method, and the SEPA-escrow language below are stale
+# and disagree with the live product (frontend/), which this service is not
+# deployed alongside. Do not fix these numbers in isolation without also
+# resolving whether this service should be deployed at all — right now it
+# is dead code, not a second source of truth to keep in sync.
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, PlainTextResponse
 

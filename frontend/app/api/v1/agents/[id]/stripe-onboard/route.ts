@@ -2,27 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
-
-// Full ISO 3166-1 alpha-2 country code set. Used only to reject malformed
-// input (e.g. 'XX', 'ZZ', a truncated string) before ever calling Stripe —
-// it is not a claim that Stripe supports every one of these countries as a
-// platform or connected-account country. Stripe's own accounts.create call
-// remains the authority on that; an unsupported-but-well-formed code is
-// rejected by Stripe itself and surfaced below as a clear 4xx.
-const ISO_3166_1_ALPHA_2 = new Set(
-  ('AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ '
-    + 'CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR '
-    + 'GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP '
-    + 'KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ '
-    + 'NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW '
-    + 'SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ '
-    + 'UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW').split(' ')
-)
+import { SUPPORTED_ONBOARDING_COUNTRIES, isSupportedOnboardingCountry } from '@/lib/onboardingCountries'
+import { computeStripeAccountReadiness } from '@/lib/server/stripeAccountReadiness'
 
 // Stripe's legal-entity structures for a connected account. Left unset by
-// default so Stripe's hosted onboarding asks the agent directly — see
-// docs/stripe-norway-onboarding.md for why this must not be hardcoded to
-// 'company'.
+// default so Stripe's hosted onboarding asks the account holder directly —
+// see docs/stripe-norway-onboarding.md for why business_type must not be
+// hardcoded, and must not be inferred from country either (e.g. 'individual'
+// is *an available* legal form for a Norwegian account, not the one Mercatai
+// should assume for every Norwegian agent).
 const ALLOWED_BUSINESS_TYPES = new Set(['individual', 'company', 'non_profit', 'government_entity'])
 
 // POST /api/v1/agents/:id/stripe-onboard
@@ -42,16 +30,23 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
   const body = await request.json().catch(() => ({}))
 
-  // country: ISO 3166-1 alpha-2, e.g. 'CZ', 'NO' — defaults to 'CZ'. Must be
-  // a real country code, not just any two characters, so a typo or garbage
-  // value is rejected here rather than silently truncated and sent to
-  // Stripe. Stripe itself remains the authority on whether this specific
-  // country is actually supported for a platform or connected account.
+  // country: ISO 3166-1 alpha-2, e.g. 'CZ', 'NO'. Required — no default. A
+  // connected account's country is difficult to change after creation, so
+  // silently defaulting a foreign agent to 'CZ' risks creating a Stripe
+  // account that agent can never actually use. The caller must supply the
+  // country explicitly, and it must match the actual country of the person
+  // or business that will hold this payout account.
   const rawCountry = typeof body.country === 'string' ? body.country.trim().toUpperCase() : ''
-  const country = rawCountry || 'CZ'
-  if (!ISO_3166_1_ALPHA_2.has(country)) {
-    return NextResponse.json({ error: `'${rawCountry || body.country}' is not a valid ISO 3166-1 alpha-2 country code.` }, { status: 400 })
+  if (!rawCountry) {
+    return NextResponse.json({
+      error: 'country is required (ISO 3166-1 alpha-2, e.g. "CZ" or "NO") — it must match the actual holder of the payout account.',
+    }, { status: 400 })
   }
+  if (!isSupportedOnboardingCountry(rawCountry)) {
+    const supported = SUPPORTED_ONBOARDING_COUNTRIES.map((c) => c.code).join(', ')
+    return NextResponse.json({ error: `'${rawCountry}' is not currently supported for onboarding. Supported countries: ${supported}.` }, { status: 400 })
+  }
+  const country = rawCountry
 
   // business_type: the connected account's legal form, e.g. 'individual' for
   // a sole proprietor or 'company' for an incorporated business. Optional —
@@ -184,24 +179,37 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
   const account = await stripe.accounts.retrieve(agent.stripe_account_id)
 
-  const completed = account.details_submitted && !account.requirements?.currently_due?.length
+  const readiness = computeStripeAccountReadiness(account)
+  const completed = readiness.onboardingComplete
 
-  if (completed && !agent.stripe_onboarding_completed) {
+  // Recomputed from live Stripe data on every call, in both directions — a
+  // capability Stripe later restricts (e.g. after its own compliance
+  // review) must be able to flip this back to false. The old check
+  // (details_submitted && no currently_due items) only ever moved this flag
+  // from false to true and never looked at capabilities, payouts_enabled,
+  // or a later restriction at all.
+  if (completed !== agent.stripe_onboarding_completed) {
     await db.from('agents')
-      .update({ stripe_onboarding_completed: true })
+      .update({ stripe_onboarding_completed: completed })
       .eq('id', params.id)
 
     await auditLog({
-      action: 'stripe_connect_onboard_completed',
+      action: completed ? 'stripe_connect_onboard_completed' : 'stripe_connect_onboard_restricted',
       resource_type: 'agent',
       resource_id: params.id,
-      details: { stripe_account_id: agent.stripe_account_id },
+      details: { stripe_account_id: agent.stripe_account_id, ...readiness },
     })
   }
 
   return NextResponse.json({
     onboarding_completed: completed,
     stripe_account_id: agent.stripe_account_id,
+    payout_ready: readiness.payoutReady,
+    card_ready: readiness.cardReady,
+    sepa_debit_ready: readiness.sepaDebitReady,
+    card_payments_status: readiness.cardPaymentsStatus,
+    sepa_debit_payments_status: readiness.sepaDebitPaymentsStatus,
+    transfers_status: readiness.transfersStatus,
     charges_enabled: account.charges_enabled,
     payouts_enabled: account.payouts_enabled,
     requirements: account.requirements?.currently_due ?? [],

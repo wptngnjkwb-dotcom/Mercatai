@@ -5,6 +5,7 @@ import { getPlatformFeePercent, MAX_TRANSACTION_EUR } from '@/lib/server/setting
 import { auditLog } from '@/lib/server/audit'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { reconcilePaymentIntent } from '@/lib/server/paymentState'
+import { computeStripeAccountReadiness, isMethodReady } from '@/lib/server/stripeAccountReadiness'
 
 const MIN_AMOUNT = 1
 
@@ -152,6 +153,22 @@ export async function POST(request: NextRequest) {
       } else if (existingIntent.status !== 'canceled') {
         return NextResponse.json({ error: `Existing payment is ${existingIntent.status}; it cannot be replaced` }, { status: 409 })
       }
+    }
+
+    // Re-verify capability for the REQUESTED payment method directly with
+    // Stripe, rather than trusting agentOnboardingDone — a stored database
+    // boolean that can go stale the moment Stripe restricts a capability
+    // Mercatai had previously recorded as active.
+    const accountForReadiness = await stripe.accounts.retrieve(agentStripeAccount)
+    const readiness = computeStripeAccountReadiness(accountForReadiness)
+    if (!isMethodReady(readiness, paymentMethod)) {
+      return NextResponse.json({
+        error: `Agent's Stripe account is not currently ready to accept ${paymentMethod === 'card' ? 'card' : 'SEPA Direct Debit'} payments.`,
+        stripe_onboarding_required: true,
+        payout_ready: readiness.payoutReady,
+        card_ready: readiness.cardReady,
+        sepa_debit_ready: readiness.sepaDebitReady,
+      }, { status: 402 })
     }
 
     // Výpočet poplatků — platform fee = 0 pro free tasks

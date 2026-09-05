@@ -1,35 +1,46 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import { readFileSync, readdirSync, statSync } from 'fs'
+import { join, extname } from 'path'
 
-const ROOT = join(__dirname, '..', '..')
+const REPO_ROOT = join(__dirname, '..', '..')
 
-// Every file this repo's fee/KYC/escrow accuracy pass touched. Extend this
-// list whenever a new public-facing surface (page, API response, discovery
-// doc, translation) makes a fee, KYC, or payment-state claim — a retired
-// false phrase creeping back into an untracked file would not be caught
-// otherwise.
-const PUBLIC_TEXT_FILES = [
-  'frontend/app/[locale]/page.tsx',
-  'frontend/app/[locale]/terms/page.tsx',
-  'frontend/app/[locale]/ai-agents/page.tsx',
-  'frontend/app/[locale]/admin/page.tsx',
-  'frontend/app/[locale]/(agent)/agent/stripe-onboard/page.tsx',
-  'frontend/app/api/v1/openapi/route.ts',
-  'frontend/app/api/discovery/agent-json/route.ts',
-  'frontend/app/api/v1/payments/create-intent/route.ts',
-  'frontend/app/api/v1/tasks/route.ts',
-  'frontend/app/api/v1/tasks/[id]/approve/route.ts',
-  'frontend/public/ai-plugin.json',
-  'frontend/messages/en.json',
-  'frontend/messages/cs.json',
-  'frontend/messages/de.json',
-  'frontend/messages/es.json',
-  'README.md',
-  'docs/compliance-payment-flow.md',
-]
+// A prior version of this test scanned a hand-picked list of files — which
+// is exactly how "EU AI Act compliant" / "GDPR compliant" survived in
+// frontend/app/[locale]/privacy/page.tsx, layout.tsx, and elsewhere despite
+// an earlier fee/KYC/escrow pass. This version walks the actual repo tree
+// instead, so a stale claim in a file nobody thought to list can't hide.
+const EXCLUDED_DIRS = new Set([
+  'node_modules', '.git', '.next', 'dist', 'build', 'coverage', '.turbo', '.vercel', '.claude',
+  '__pycache__', '.venv', 'venv',
+  // Test directories: these legitimately contain the forbidden phrases
+  // themselves (as strings being asserted against), including this file.
+  'tests', 'test', '__tests__',
+  // backend/ is confirmed dead/undeployed code (see the notice at the top
+  // of backend/main.py) — it is deliberately left un-rewritten rather than
+  // kept in sync with the live product, so it is out of scope for this
+  // live-surface sweep rather than silently exempt.
+  'backend',
+])
+const INCLUDED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.md', '.mdx', '.json', '.yml', '.yaml', '.sql'])
+const EXCLUDED_FILES = new Set(['package-lock.json'])
+const MAX_FILE_SIZE = 2_000_000 // skip oversized (generated/lockfile-like) files defensively
 
-// Case-insensitive substrings that must never appear in public-facing copy.
+function walk(dir: string, files: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    if (EXCLUDED_FILES.has(entry)) continue
+    const full = join(dir, entry)
+    const stat = statSync(full)
+    if (stat.isDirectory()) {
+      if (!EXCLUDED_DIRS.has(entry)) walk(full, files)
+    } else if (INCLUDED_EXTENSIONS.has(extname(entry)) && stat.size <= MAX_FILE_SIZE) {
+      files.push(full)
+    }
+  }
+  return files
+}
+
+// Case-insensitive substrings that must never appear in live, public-facing
+// copy (or in code comments/docs that describe it).
 const FORBIDDEN_PHRASES = [
   'passed through at cost',
   'without kyc',
@@ -41,15 +52,36 @@ const FORBIDDEN_PHRASES = [
   'sepa bank transfers only',
   'mercatai never holds your funds',
   'mercatai never holds client funds',
+  'mercatai never holds your money',
+  'sepa_bank_transfer',
+  'first 10 tasks free',
+  'first 10 tasks are free',
+  'tasks free for every agent',
+  'eu ai act compliant',
+  'eu ai act compliance',
+  'gdpr compliant',
+  'ki-act-konform',
+  'conforme al reglamento de ia',
+  'in compliance with the eu ai act',
 ]
 
-describe('Public-facing fee/KYC/escrow copy — no retired false claims', () => {
-  for (const file of PUBLIC_TEXT_FILES) {
-    it(`${file} contains none of the retired false claims`, () => {
-      const contents = readFileSync(join(ROOT, file), 'utf-8').toLowerCase()
-      for (const phrase of FORBIDDEN_PHRASES) {
-        expect(contents, `found forbidden phrase "${phrase}" in ${file}`).not.toContain(phrase)
+const files = walk(REPO_ROOT)
+
+describe('Whole-repo sweep — no retired false fee/KYC/escrow/compliance claims', () => {
+  // A misconfigured exclude/include list could silently make the sweep
+  // below vacuously pass over almost nothing — this guards against that.
+  it('scans a realistic number of files across the repo', () => {
+    expect(files.length).toBeGreaterThan(50)
+  })
+
+  for (const phrase of FORBIDDEN_PHRASES) {
+    it(`no file in the repo contains "${phrase}"`, () => {
+      const offenders: string[] = []
+      for (const file of files) {
+        const contents = readFileSync(file, 'utf-8').toLowerCase()
+        if (contents.includes(phrase)) offenders.push(file.replace(REPO_ROOT + '/', ''))
       }
+      expect(offenders, `files containing "${phrase}": ${offenders.join(', ')}`).toEqual([])
     })
   }
 })

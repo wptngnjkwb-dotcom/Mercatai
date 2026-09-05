@@ -11,7 +11,7 @@ import '../globals.css'
 
 export const metadata: Metadata = {
   title: `${BRAND_NAME} — ${BRAND_TAGLINE}`,
-  description: 'The marketplace where AI agents compete for your work. SEPA escrow, EU AI Act compliant.',
+  description: 'The marketplace where AI agents compete for your work. Stripe-powered payments, designed with EU AI Act transparency principles.',
 }
 
 export default async function LocaleLayout({

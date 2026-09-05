@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { CheckCircle, AlertCircle, Loader2, ExternalLink } from 'lucide-react'
 import { api } from '@/lib/api'
+import { SUPPORTED_ONBOARDING_COUNTRIES } from '@/lib/onboardingCountries'
 
 export default function StripeOnboardPage() {
   const searchParams = useSearchParams()
@@ -15,6 +16,7 @@ export default function StripeOnboardPage() {
   const [onboardingUrl, setOnboardingUrl] = useState('')
   const [error, setError] = useState('')
   const [stripeStatus, setStripeStatus] = useState<any>(null)
+  const [country, setCountry] = useState('')
 
   useEffect(() => {
     if (success && agentDbId) {
@@ -44,12 +46,17 @@ export default function StripeOnboardPage() {
       setError('Agent DB ID not found. Please log in again.')
       return
     }
+    if (!country) {
+      setError('Please select your country before connecting with Stripe.')
+      return
+    }
     setStatus('loading')
     try {
       const token = localStorage.getItem('mercatai_token')
       const res = await fetch(`/api/v1/agents/${agentId}/stripe-onboard`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ country }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
@@ -94,12 +101,31 @@ export default function StripeOnboardPage() {
       <h1 className="text-3xl font-bold text-gray-900 mb-2">Connect Your Payout Account</h1>
       <p className="text-gray-500 mb-8">
         To receive payments for completed tasks, you must link your bank account via Stripe Connect.
-        Stripe verifies your identity during onboarding. Card payments are authorized when a buyer accepts
-        your bid and captured only after approval; SEPA Direct Debit payments settle automatically. Mercatai
-        is not a bank and does not itself hold your funds outside of Stripe&apos;s processing.
+        Stripe verifies your identity during onboarding. Card payments are authorized once the buyer
+        completes the payment step for your accepted bid (not merely by accepting it) and captured only
+        after approval; SEPA Direct Debit payments settle automatically. Mercatai is not a bank and does
+        not itself hold your funds outside of Stripe&apos;s processing.
       </p>
 
       <div className="card p-6 space-y-5">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Country of your business or residence</label>
+          <select
+            className="input w-full"
+            value={country}
+            onChange={(e) => setCountry(e.target.value)}
+          >
+            <option value="">Select a country…</option>
+            {SUPPORTED_ONBOARDING_COUNTRIES.map((c) => (
+              <option key={c.code} value={c.code}>{c.label}</option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-400 mt-1">
+            Must match the actual country of the person or business that will hold this Stripe payout
+            account — it is difficult to change once the account is created.
+          </p>
+        </div>
+
         <div className="space-y-3 text-sm text-gray-600">
           <div className="flex items-start gap-3">
             <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">1</span>
@@ -119,7 +145,8 @@ export default function StripeOnboardPage() {
           <p><strong>Fee structure:</strong> your payout = gross task price − payment-processing deduction
           (0.8% of gross, capped at €5) − marketplace fee (0% on your first 10 paid tasks, 4.2% after that).</p>
           <p>Example: a €100 task in your first 10 tasks pays out €99.20; a €1,000 task pays out €995.00
-          (deduction capped at €5). The exact amount is always shown before a task is funded.</p>
+          (deduction capped at €5). The buyer sees the exact amount before funding your task; you can
+          always compute your own payout from the formula above.</p>
         </div>
 
         {error && (
@@ -131,7 +158,7 @@ export default function StripeOnboardPage() {
 
         <button
           onClick={startOnboarding}
-          disabled={status === 'loading'}
+          disabled={status === 'loading' || !country}
           className="btn-primary justify-center py-3 w-full"
         >
           {status === 'loading' ? (

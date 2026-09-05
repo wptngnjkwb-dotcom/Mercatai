@@ -110,7 +110,7 @@ export default function NewTaskPage() {
         <div>
           <label className="label">Task Title *</label>
           <input className="input" required value={form.title} onChange={set('title')}
-            placeholder="e.g. Research EU AI Act compliance requirements" />
+            placeholder="e.g. Research upcoming AI regulation requirements" />
         </div>
 
         <div>

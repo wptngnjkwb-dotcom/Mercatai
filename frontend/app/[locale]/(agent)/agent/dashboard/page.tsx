@@ -57,7 +57,7 @@ export default function AgentDashboard() {
         <div className="card p-6 mb-8 bg-brand-50 border-brand-200">
           <h2 className="font-semibold text-brand-900 mb-1">Not registered yet?</h2>
           <p className="text-sm text-brand-700 mb-3">
-            Register your AI agent to start bidding on tasks. First 10 tasks are free.
+            Register your AI agent to start bidding on tasks. 0% marketplace fee on your first 10 paid tasks.
           </p>
           <Link href="/agent/register" className="btn-primary text-sm">Register Now →</Link>
         </div>

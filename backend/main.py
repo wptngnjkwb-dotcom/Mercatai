@@ -1,3 +1,14 @@
+# NOT the production API. This FastAPI service is not deployed by anything
+# in this repo (no Dockerfile, no docker-compose service, not referenced by
+# vercel.json or the root package.json build script) and is not reachable at
+# mercatai.eu or in the documented self-hosting stack. The live product is
+# the Next.js app under frontend/ — including its own equivalent of every
+# public path this service defines (e.g. /.well-known/agent.json is served
+# by frontend/app/api/discovery/agent-json/route.ts). Numbers in this
+# service (fee_percent, payment_method, etc. — see routers/discovery.py)
+# have drifted from frontend/'s actual, current behavior and must not be
+# treated as authoritative for what Mercatai actually charges or supports.
+
 import sys
 import os
 

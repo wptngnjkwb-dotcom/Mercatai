@@ -48,6 +48,7 @@ const accountsRetrieve = vi.fn(async () => ({
   requirements: { currently_due: [] },
   charges_enabled: true,
   payouts_enabled: true,
+  capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
 }))
 const stripeConstructor = vi.fn(function () {
   return {
@@ -57,11 +58,14 @@ const stripeConstructor = vi.fn(function () {
 })
 vi.mock('stripe', () => ({ default: stripeConstructor }))
 
+// country is required by the route (see the "country and business_type
+// validation" describe block below) — these auth-focused tests supply a
+// valid one so they can reach and test the authorization logic itself.
 function request(bearer: string) {
   return new NextRequest(`http://localhost/api/v1/agents/${OWN_AGENT_ID}/stripe-onboard`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ country: 'CZ' }),
   })
 }
 
@@ -148,13 +152,23 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     })
   }
 
-  it('rejects an invalid country code before ever calling Stripe', async () => {
+  it('rejects a request with no country at all, before ever calling Stripe', async () => {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, {}), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(body.error).toMatch(/country is required/i)
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it('rejects a country not on the supported list before ever calling Stripe — no silent CZ default', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'XX' }), { params: { id: OWN_AGENT_ID } })
     const body = await response.json()
 
     expect(response.status).toBe(400)
-    expect(body.error).toMatch(/not a valid iso 3166-1/i)
+    expect(body.error).toMatch(/not currently supported for onboarding/i)
     expect(accountsCreate).not.toHaveBeenCalled()
   })
 
@@ -227,5 +241,96 @@ describe('GET /api/v1/agents/[id]/stripe-onboard auth', () => {
 
     expect(response.status).toBe(403)
     expect(accountsRetrieve).not.toHaveBeenCalled()
+  })
+})
+
+describe('GET /api/v1/agents/[id]/stripe-onboard — onboarding completeness derived live from Stripe', () => {
+  beforeEach(() => {
+    agentUpdates.length = 0
+    accountsRetrieve.mockClear()
+    ;(agentRow as any).stripe_account_id = 'acct_existing'
+  })
+
+  async function getStatus() {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const getRequest = new NextRequest(`http://localhost/api/v1/agents/${OWN_AGENT_ID}/stripe-onboard`, {
+      headers: { authorization: `Bearer ${token}` },
+    })
+    return GET(getRequest, { params: { id: OWN_AGENT_ID } })
+  }
+
+  it('sets onboarding_completed=true and reports per-method readiness when identity, payouts/transfers, and a payment method are all ready', async () => {
+    ;(agentRow as any).stripe_onboarding_completed = false
+    accountsRetrieve.mockResolvedValueOnce({
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    })
+
+    const response = await getStatus()
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.onboarding_completed).toBe(true)
+    expect(body.payout_ready).toBe(true)
+    expect(body.card_ready).toBe(true)
+    expect(body.sepa_debit_ready).toBe(true)
+    expect(agentUpdates).toContainEqual({ stripe_onboarding_completed: true })
+  })
+
+  it('resets a historically-true stripe_onboarding_completed back to false once Stripe reports no usable payment method — a stored true must not survive a later restriction', async () => {
+    ;(agentRow as any).stripe_onboarding_completed = true
+    accountsRetrieve.mockResolvedValueOnce({
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: 'inactive', sepa_debit_payments: 'inactive', transfers: 'active' },
+    })
+
+    const response = await getStatus()
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.onboarding_completed).toBe(false)
+    expect(body.card_ready).toBe(false)
+    expect(body.sepa_debit_ready).toBe(false)
+    expect(agentUpdates).toContainEqual({ stripe_onboarding_completed: false })
+  })
+
+  it('resets a historically-true stripe_onboarding_completed back to false once payouts_enabled turns false, even with active capabilities', async () => {
+    ;(agentRow as any).stripe_onboarding_completed = true
+    accountsRetrieve.mockResolvedValueOnce({
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: false,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    })
+
+    const response = await getStatus()
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.onboarding_completed).toBe(false)
+    expect(body.payout_ready).toBe(false)
+    expect(agentUpdates).toContainEqual({ stripe_onboarding_completed: false })
+  })
+
+  it('does not write to the database when the computed status already matches the stored one', async () => {
+    ;(agentRow as any).stripe_onboarding_completed = true
+    accountsRetrieve.mockResolvedValueOnce({
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    })
+
+    const response = await getStatus()
+    expect(response.status).toBe(200)
+    expect(agentUpdates).toHaveLength(0)
   })
 })
