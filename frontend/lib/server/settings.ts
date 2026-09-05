@@ -9,6 +9,13 @@ import { getSupabase } from './supabase'
 
 export const DEFAULT_PLATFORM_FEE_PERCENT = 4.2
 
+// Mercatai's own product limit on a single transaction — not a KYC/AML
+// exemption threshold. Stripe Connect onboarding and identity verification
+// must already be complete before any payment or payout can be created,
+// regardless of amount; this cap only bounds how large a single Mercatai
+// transaction can be today.
+export const MAX_TRANSACTION_EUR = 10_000
+
 export async function getPlatformFeePercent(): Promise<number> {
   try {
     const db = getSupabase()

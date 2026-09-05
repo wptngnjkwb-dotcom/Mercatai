@@ -133,6 +133,86 @@ describe('POST /api/v1/agents/[id]/stripe-onboard auth', () => {
   })
 })
 
+describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type validation', () => {
+  beforeEach(() => {
+    agentUpdates.length = 0
+    accountsCreate.mockClear()
+    accountLinksCreate.mockClear()
+  })
+
+  function requestWithBody(bearer: string, body: Record<string, unknown>) {
+    return new NextRequest(`http://localhost/api/v1/agents/${OWN_AGENT_ID}/stripe-onboard`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
+      body: JSON.stringify(body),
+    })
+  }
+
+  it('rejects an invalid country code before ever calling Stripe', async () => {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'XX' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(body.error).toMatch(/not a valid iso 3166-1/i)
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it('rejects a non-alphabetic, garbage country value before ever calling Stripe', async () => {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: '12' }), { params: { id: OWN_AGENT_ID } })
+
+    expect(response.status).toBe(400)
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it('accepts the Norwegian country code NO and passes it through to Stripe', async () => {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'no' }), { params: { id: OWN_AGENT_ID } })
+
+    expect(response.status).toBe(200)
+    expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({ country: 'NO' }))
+  })
+
+  it('does not hardcode business_type — omits it from the Stripe call when the caller does not supply one', async () => {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'NO' }), { params: { id: OWN_AGENT_ID } })
+
+    expect(response.status).toBe(200)
+    const createArgs = (accountsCreate as any).mock.calls[0][0]
+    expect(createArgs).not.toHaveProperty('business_type')
+  })
+
+  it('passes through an explicit, valid business_type (e.g. individual, for a sole proprietor)', async () => {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'NO', business_type: 'individual' }), { params: { id: OWN_AGENT_ID } })
+
+    expect(response.status).toBe(200)
+    expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({ business_type: 'individual' }))
+  })
+
+  it('rejects an invalid business_type before ever calling Stripe', async () => {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ', business_type: 'sole_trader' }), { params: { id: OWN_AGENT_ID } })
+
+    expect(response.status).toBe(400)
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it('requests card_payments alongside sepa_debit_payments and transfers, so on_behalf_of destination charges work for both methods', async () => {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+
+    expect(response.status).toBe(200)
+    const createArgs = (accountsCreate as any).mock.calls[0][0]
+    expect(createArgs.capabilities).toMatchObject({
+      card_payments: { requested: true },
+      sepa_debit_payments: { requested: true },
+      transfers: { requested: true },
+    })
+  })
+})
+
 describe('GET /api/v1/agents/[id]/stripe-onboard auth', () => {
   beforeEach(() => {
     accountsRetrieve.mockClear()

@@ -96,33 +96,50 @@ export default async function HomePage() {
       {/* Fee table */}
       <section className="max-w-6xl mx-auto px-4 py-20">
         <h2 className="text-3xl font-bold text-center text-gray-900 mb-3">{t('pricingTitle')}</h2>
-        <p className="text-center text-gray-500 mb-10">{t('pricingSubtitle')}</p>
+        <p className="text-center text-gray-500 mb-10 max-w-xl mx-auto">{t('pricingSubtitle')}</p>
         <div className="max-w-2xl mx-auto card overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-6 py-3 font-medium text-gray-500">Payment type</th>
-                <th className="text-right px-6 py-3 font-medium text-gray-500">Stripe fee</th>
-                <th className="text-right px-6 py-3 font-medium text-gray-500">Platform fee</th>
+                <th className="text-left px-6 py-3 font-medium text-gray-500">Gross task price</th>
+                <th className="text-right px-6 py-3 font-medium text-gray-500">Processing deduction</th>
+                <th className="text-right px-6 py-3 font-medium text-gray-500">Marketplace fee</th>
                 <th className="text-right px-6 py-3 font-medium text-gray-500 text-brand-700">Agent receives</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               <tr className="bg-brand-50/30">
-                <td className="px-6 py-4 font-medium">SEPA EU</td>
-                <td className="px-6 py-4 text-right text-gray-500">0.8% (max €5)</td>
-                <td className="px-6 py-4 text-right text-gray-500">4.2%</td>
-                <td className="px-6 py-4 text-right font-bold text-brand-700">95%</td>
+                <td className="px-6 py-4 font-medium">€100 <span className="text-xs text-gray-400">(first 10 tasks)</span></td>
+                <td className="px-6 py-4 text-right text-gray-500">€0.80</td>
+                <td className="px-6 py-4 text-right text-gray-500">€0 (0%)</td>
+                <td className="px-6 py-4 text-right font-bold text-brand-700">€99.20</td>
               </tr>
               <tr>
-                <td className="px-6 py-4 font-medium">Card (Visa / Mastercard)</td>
-                <td className="px-6 py-4 text-right text-gray-500">1.5% + €0.25</td>
-                <td className="px-6 py-4 text-right text-gray-500">~3.5%</td>
-                <td className="px-6 py-4 text-right font-bold text-brand-700">95%</td>
+                <td className="px-6 py-4 font-medium">€100 <span className="text-xs text-gray-400">(after first 10)</span></td>
+                <td className="px-6 py-4 text-right text-gray-500">€0.80</td>
+                <td className="px-6 py-4 text-right text-gray-500">€4.20 (4.2%)</td>
+                <td className="px-6 py-4 text-right font-bold text-brand-700">€95.00</td>
+              </tr>
+              <tr className="bg-brand-50/30">
+                <td className="px-6 py-4 font-medium">€1,000 <span className="text-xs text-gray-400">(first 10 tasks)</span></td>
+                <td className="px-6 py-4 text-right text-gray-500">€5.00 <span className="text-xs">(capped)</span></td>
+                <td className="px-6 py-4 text-right text-gray-500">€0 (0%)</td>
+                <td className="px-6 py-4 text-right font-bold text-brand-700">€995.00</td>
+              </tr>
+              <tr>
+                <td className="px-6 py-4 font-medium">€1,000 <span className="text-xs text-gray-400">(after first 10)</span></td>
+                <td className="px-6 py-4 text-right text-gray-500">€5.00 <span className="text-xs">(capped)</span></td>
+                <td className="px-6 py-4 text-right text-gray-500">€42.00 (4.2%)</td>
+                <td className="px-6 py-4 text-right font-bold text-brand-700">€953.00</td>
               </tr>
             </tbody>
           </table>
         </div>
+        <p className="text-xs text-gray-400 max-w-2xl mx-auto mt-3 text-center">
+          The processing deduction (0.8% of the gross amount, capped at €5) is set by Mercatai — it is not an itemized
+          Stripe invoice, and Mercatai currently absorbs Stripe&apos;s own processing cost. It applies identically to
+          card and SEPA Direct Debit payments. Bank, currency-conversion, or optional instant-payout fees may apply separately.
+        </p>
       </section>
 
       {/* CTA */}

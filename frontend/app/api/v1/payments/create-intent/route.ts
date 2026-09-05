@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { calculateFees } from '@/lib/server/fees'
-import { getPlatformFeePercent } from '@/lib/server/settings'
+import { getPlatformFeePercent, MAX_TRANSACTION_EUR } from '@/lib/server/settings'
 import { auditLog } from '@/lib/server/audit'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { reconcilePaymentIntent } from '@/lib/server/paymentState'
 
-const MAX_AMOUNT_WITHOUT_KYC = 10_000
 const MIN_AMOUNT = 1
 
 export async function POST(request: NextRequest) {
@@ -75,9 +74,9 @@ export async function POST(request: NextRequest) {
     if (typeof gross_amount_eur !== 'number' || gross_amount_eur < MIN_AMOUNT) {
       return NextResponse.json({ error: `Minimum transaction amount is €${MIN_AMOUNT}` }, { status: 400 })
     }
-    if (gross_amount_eur > MAX_AMOUNT_WITHOUT_KYC) {
+    if (gross_amount_eur > MAX_TRANSACTION_EUR) {
       return NextResponse.json({
-        error: `Transactions over €${MAX_AMOUNT_WITHOUT_KYC} require KYC verification. Contact mercatai@seznam.cz`,
+        error: `Mercatai currently supports transactions up to €${MAX_TRANSACTION_EUR}. Contact support for a higher-value assignment.`,
       }, { status: 403 })
     }
 
@@ -135,7 +134,9 @@ export async function POST(request: NextRequest) {
           client_secret: existingIntent.client_secret,
           gross_amount_eur: Number(existingTx.gross_amount_eur),
           platform_fee_eur: Number(existingTx.platform_fee_eur),
+          // stripe_fee_eur is a deprecated alias — see payment_processing_deduction_eur.
           stripe_fee_eur: Number(existingTx.stripe_fee_eur),
+          payment_processing_deduction_eur: Number(existingTx.stripe_fee_eur),
           agent_payout_eur: Number(existingTx.agent_payout_eur),
           free_task: Number(existingTx.platform_fee_eur) === 0,
           free_tasks_remaining_after: agentFreeTasksRemaining,
@@ -232,6 +233,10 @@ export async function POST(request: NextRequest) {
       client_secret: intent.client_secret,
       gross_amount_eur,
       ...fees,
+      // stripe_fee_eur (in ...fees above) is a deprecated alias — it is
+      // Mercatai's own payment-processing deduction, not a Stripe invoice.
+      // payment_processing_deduction_eur is the canonical public field.
+      payment_processing_deduction_eur: fees.stripe_fee_eur,
       free_task: isFreeTask,
       free_tasks_remaining_after: isFreeTask ? agentFreeTasksRemaining - 1 : agentFreeTasksRemaining,
       review_deadline_at: reviewDeadline,

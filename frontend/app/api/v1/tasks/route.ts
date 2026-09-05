@@ -11,6 +11,7 @@ import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
 import { isRateLimited, clientIp } from '@/lib/server/rateLimit'
 import { recordModerationEvent } from '@/lib/server/taskModeration/audit'
 import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
+import { MAX_TRANSACTION_EUR } from '@/lib/server/settings'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -83,8 +84,10 @@ export async function POST(request: NextRequest) {
     if (typeof budget_max_eur !== 'number' || budget_max_eur < 1) {
       return NextResponse.json({ error: 'budget_max_eur must be at least €1' }, { status: 400 })
     }
-    if (budget_max_eur > 10_000) {
-      return NextResponse.json({ error: 'budget_max_eur cannot exceed €10,000 without KYC' }, { status: 400 })
+    if (budget_max_eur > MAX_TRANSACTION_EUR) {
+      return NextResponse.json({
+        error: `Mercatai currently supports transactions up to €${MAX_TRANSACTION_EUR}. Contact support for a higher-value assignment.`,
+      }, { status: 400 })
     }
     if (typeof deadline_hours !== 'number' || deadline_hours < 1 || deadline_hours > 8760) {
       return NextResponse.json({ error: 'deadline_hours must be between 1 and 8760 (1 year)' }, { status: 400 })

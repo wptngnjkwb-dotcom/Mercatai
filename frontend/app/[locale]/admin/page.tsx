@@ -236,7 +236,7 @@ export default function AdminPage() {
               </div>
               <button className="btn-primary">Save</button>
             </form>
-            <p className="text-xs text-gray-400 mt-2">Applies to new payments only; the Stripe fee (~0.8%) is added on top. Free-task allowance is unaffected.</p>
+            <p className="text-xs text-gray-400 mt-2">Applies to new payments only; the payment-processing deduction (0.8% of gross, capped at €5 — set by Mercatai, not an itemized Stripe invoice) is added on top. Free-task allowance is unaffected.</p>
           </section>
 
           {/* Audit tail */}

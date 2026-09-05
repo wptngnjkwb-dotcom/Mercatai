@@ -212,6 +212,11 @@ export interface Transaction {
   task_id: string
   gross_amount_eur: number
   platform_fee_eur: number
+  /**
+   * @deprecated Despite the name, this is not an itemized Stripe invoice —
+   * it is Mercatai's own payment-processing deduction (0.8% of the gross
+   * amount, capped at €5). Kept for database/API compatibility.
+   */
   stripe_fee_eur: number
   agent_payout_eur: number
   escrow_status: 'pending' | 'held' | 'released' | 'refunded' | 'disputed' | 'failed'
@@ -224,7 +229,21 @@ export interface PaymentIntentResponse {
   client_secret: string
   gross_amount_eur: number
   platform_fee_eur: number
+  /**
+   * @deprecated Use payment_processing_deduction_eur instead. Despite the
+   * name, this is not an itemized Stripe invoice — it is Mercatai's own
+   * deduction (0.8% of the gross amount, capped at €5). Kept as an alias
+   * for API compatibility; same value as payment_processing_deduction_eur.
+   */
   stripe_fee_eur: number
+  /**
+   * Mercatai's payment-processing deduction: 0.8% of gross_amount_eur,
+   * capped at €5. Set by Mercatai, not an itemized Stripe invoice — under
+   * the current destination-charge model Mercatai (not the agent) bears
+   * Stripe's real processing cost. The canonical public field; same value
+   * as the deprecated stripe_fee_eur.
+   */
+  payment_processing_deduction_eur: number
   agent_payout_eur: number
   free_task: boolean
   free_tasks_remaining_after: number

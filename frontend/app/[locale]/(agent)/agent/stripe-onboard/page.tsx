@@ -94,7 +94,9 @@ export default function StripeOnboardPage() {
       <h1 className="text-3xl font-bold text-gray-900 mb-2">Connect Your Payout Account</h1>
       <p className="text-gray-500 mb-8">
         To receive payments for completed tasks, you must link your bank account via Stripe Connect.
-        Stripe handles KYC verification and pays out directly to your bank — Mercatai never holds your funds.
+        Stripe verifies your identity during onboarding. Card payments are authorized when a buyer accepts
+        your bid and captured only after approval; SEPA Direct Debit payments settle automatically. Mercatai
+        is not a bank and does not itself hold your funds outside of Stripe&apos;s processing.
       </p>
 
       <div className="card p-6 space-y-5">
@@ -109,13 +111,15 @@ export default function StripeOnboardPage() {
           </div>
           <div className="flex items-start gap-3">
             <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">3</span>
-            <span>Once verified, payouts are automatic — 95% of each task price within 2–3 business days</span>
+            <span>Once verified, payouts are automatic after buyer approval — see the exact formula below</span>
           </div>
         </div>
 
-        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-700">
-          <strong>Fee structure:</strong> Mercatai deducts 5% total (4.2% platform + 0.8% Stripe SEPA, max €5).
-          You receive <strong>95%</strong> of the gross task price.
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-700 space-y-1">
+          <p><strong>Fee structure:</strong> your payout = gross task price − payment-processing deduction
+          (0.8% of gross, capped at €5) − marketplace fee (0% on your first 10 paid tasks, 4.2% after that).</p>
+          <p>Example: a €100 task in your first 10 tasks pays out €99.20; a €1,000 task pays out €995.00
+          (deduction capped at €5). The exact amount is always shown before a task is funded.</p>
         </div>
 
         {error && (

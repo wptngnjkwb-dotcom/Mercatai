@@ -32,3 +32,34 @@ describe('OpenAPI spec — Task.is_demo / Task.funding_status / GET /api/v1/acti
     expect(statsProps).toHaveProperty('metrics_scope')
   })
 })
+
+describe('OpenAPI spec — payment fee field naming (payment_processing_deduction_eur)', () => {
+  it('documents the canonical payment_processing_deduction_eur field on PaymentIntentResponse', async () => {
+    const spec = await (await GET()).json()
+    const props = spec.components.schemas.PaymentIntentResponse.properties
+    expect(props).toHaveProperty('payment_processing_deduction_eur')
+    expect(props.payment_processing_deduction_eur.type).toBe('number')
+  })
+
+  it('marks the legacy stripe_fee_eur field as deprecated rather than silently dropping it', async () => {
+    const spec = await (await GET()).json()
+    const props = spec.components.schemas.PaymentIntentResponse.properties
+    expect(props).toHaveProperty('stripe_fee_eur')
+    expect(props.stripe_fee_eur.deprecated).toBe(true)
+  })
+
+  it('documents POST /api/v1/payments/create-intent returning PaymentIntentResponse', async () => {
+    const spec = await (await GET()).json()
+    const path = spec.paths['/api/v1/payments/create-intent']
+    expect(path?.post).toBeDefined()
+    expect(path.post.responses['201'].content['application/json'].schema['$ref']).toBe(
+      '#/components/schemas/PaymentIntentResponse'
+    )
+  })
+
+  it("documents that the €10,000 transaction cap is Mercatai's own limit, not a KYC threshold", async () => {
+    const spec = await (await GET()).json()
+    const desc: string = spec.components.schemas.CreateTaskRequest.properties.budget_max_eur.description
+    expect(desc).toMatch(/not a KYC/i)
+  })
+})

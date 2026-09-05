@@ -6,8 +6,6 @@ import { applyReputationEvent } from '@/lib/server/reputation'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { recordAffiliateEarning } from '@/lib/server/affiliate'
 
-const MAX_AMOUNT_WITHOUT_KYC = 10_000
-
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   // 1. Autentizace — buyer token for this task, or admin token
   const token = await getTokenFromRequest(request)

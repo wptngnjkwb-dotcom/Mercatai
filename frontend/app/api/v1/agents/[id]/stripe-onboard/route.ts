@@ -3,9 +3,32 @@ import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 
+// Full ISO 3166-1 alpha-2 country code set. Used only to reject malformed
+// input (e.g. 'XX', 'ZZ', a truncated string) before ever calling Stripe —
+// it is not a claim that Stripe supports every one of these countries as a
+// platform or connected-account country. Stripe's own accounts.create call
+// remains the authority on that; an unsupported-but-well-formed code is
+// rejected by Stripe itself and surfaced below as a clear 4xx.
+const ISO_3166_1_ALPHA_2 = new Set(
+  ('AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ '
+    + 'CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR '
+    + 'GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP '
+    + 'KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ '
+    + 'NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW '
+    + 'SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ '
+    + 'UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW').split(' ')
+)
+
+// Stripe's legal-entity structures for a connected account. Left unset by
+// default so Stripe's hosted onboarding asks the agent directly — see
+// docs/stripe-norway-onboarding.md for why this must not be hardcoded to
+// 'company'.
+const ALLOWED_BUSINESS_TYPES = new Set(['individual', 'company', 'non_profit', 'government_entity'])
+
 // POST /api/v1/agents/:id/stripe-onboard
 // Creates or retrieves a Stripe Connect Express account for the agent,
-// then returns an onboarding URL for the agent to complete KYC.
+// then returns an onboarding URL for the agent to complete identity
+// verification (KYC) directly with Stripe.
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const token = await getTokenFromRequest(request)
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -18,8 +41,27 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   }
 
   const body = await request.json().catch(() => ({}))
-  // country: ISO 3166-1 alpha-2, e.g. 'CZ', 'DE', 'ES', 'PL' — defaults to 'CZ'
-  const country: string = (body.country ?? 'CZ').toUpperCase().slice(0, 2)
+
+  // country: ISO 3166-1 alpha-2, e.g. 'CZ', 'NO' — defaults to 'CZ'. Must be
+  // a real country code, not just any two characters, so a typo or garbage
+  // value is rejected here rather than silently truncated and sent to
+  // Stripe. Stripe itself remains the authority on whether this specific
+  // country is actually supported for a platform or connected account.
+  const rawCountry = typeof body.country === 'string' ? body.country.trim().toUpperCase() : ''
+  const country = rawCountry || 'CZ'
+  if (!ISO_3166_1_ALPHA_2.has(country)) {
+    return NextResponse.json({ error: `'${rawCountry || body.country}' is not a valid ISO 3166-1 alpha-2 country code.` }, { status: 400 })
+  }
+
+  // business_type: the connected account's legal form, e.g. 'individual' for
+  // a sole proprietor or 'company' for an incorporated business. Optional —
+  // when omitted, Stripe's hosted onboarding asks the agent to select it
+  // directly instead of Mercatai assuming 'company' for every agent
+  // regardless of country or legal form.
+  const rawBusinessType = typeof body.business_type === 'string' ? body.business_type.trim().toLowerCase() : ''
+  if (rawBusinessType && !ALLOWED_BUSINESS_TYPES.has(rawBusinessType)) {
+    return NextResponse.json({ error: `business_type must be one of: ${Array.from(ALLOWED_BUSINESS_TYPES).join(', ')}` }, { status: 400 })
+  }
 
   const db = getSupabase()
 
@@ -57,21 +99,33 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
   // Vytvoř Stripe Connect Express účet pokud ještě neexistuje
   if (!stripeAccountId) {
-    const account = await stripe.accounts.create({
-      type: 'express',
-      country,
-      email: agent.owner_email,
-      capabilities: {
-        sepa_debit_payments: { requested: true },
-        transfers: { requested: true },
-      },
-      business_type: 'company',
-      metadata: {
-        mercatai_agent_id: agent.agent_id,
-        mercatai_db_id: agent.id,
-      },
-    })
-    stripeAccountId = account.id
+    try {
+      const account = await stripe.accounts.create({
+        type: 'express',
+        country,
+        email: agent.owner_email,
+        capabilities: {
+          // card_payments must be requested alongside transfers for a
+          // connected account to actually receive card-funded destination
+          // charges made with on_behalf_of (as create-intent/route.ts does)
+          // — requesting only sepa_debit_payments left card payouts
+          // incompletely provisioned.
+          card_payments: { requested: true },
+          sepa_debit_payments: { requested: true },
+          transfers: { requested: true },
+        },
+        ...(rawBusinessType ? { business_type: rawBusinessType as any } : {}),
+        metadata: {
+          mercatai_agent_id: agent.agent_id,
+          mercatai_db_id: agent.id,
+        },
+      })
+      stripeAccountId = account.id
+    } catch (stripeErr) {
+      console.error('Stripe account creation failed:', stripeErr)
+      const message = stripeErr instanceof Error ? stripeErr.message : 'Stripe account creation failed'
+      return NextResponse.json({ error: message }, { status: 502 })
+    }
 
     await db.from('agents')
       .update({ stripe_account_id: stripeAccountId })
