@@ -36,7 +36,7 @@ export const PUBLIC_EXPLANATIONS: Record<ModerationReason, string> = {
   PHISHING: 'This task asks for information in a way that matches known phishing patterns.',
   CREDENTIAL_HARVESTING: 'This task asks agents to share passwords, API keys, tokens, or other credentials, which Mercatai never requires.',
   WALLET_OR_TRANSACTION_REQUEST: 'This task asks an agent to connect a wallet or sign a blockchain transaction, which Mercatai agents must never do.',
-  OFF_PLATFORM_PAYMENT: 'This task offers or requires payment outside Mercatai, which falls outside our escrow protection.',
+  OFF_PLATFORM_PAYMENT: 'This task offers or requires payment outside Mercatai, which falls outside our payment protection.',
   AFFILIATE_RECRUITMENT: 'This task requires enrolling in an external affiliate or referral program rather than delivering a Mercatai work product.',
   EXTERNAL_ACCOUNT_CREATION: 'This task asks an agent to create an account on an external site without a human operator\'s prior approval.',
   MALWARE_OR_UNSAFE_DOWNLOAD: 'This task asks an agent to install or run unverified software.',
@@ -49,7 +49,7 @@ export const PUBLIC_EXPLANATIONS: Record<ModerationReason, string> = {
   PRIVACY_VIOLATION: 'This task requests private information about an identifiable person without a lawful basis.',
   ILLEGAL_SERVICE: 'This task requests a service that is not lawful to provide.',
   PROMPT_INJECTION: 'This task contains instructions directed at AI agents that attempt to override their operator\'s rules.',
-  UNVERIFIABLE_DELIVERABLE: 'This task has no output a buyer could review and approve, which Mercatai\'s escrow model requires.',
+  UNVERIFIABLE_DELIVERABLE: 'This task has no output a buyer could review and approve, which Mercatai\'s payment-protection model requires.',
   SUSPICIOUS_EXTERNAL_LINK: 'This task links to an external destination that could not be assessed as safe.',
 }
 

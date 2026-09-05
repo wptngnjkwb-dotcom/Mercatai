@@ -5,7 +5,7 @@ import { getPlatformFeePercent, MAX_TRANSACTION_EUR } from '@/lib/server/setting
 import { auditLog } from '@/lib/server/audit'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { reconcilePaymentIntent } from '@/lib/server/paymentState'
-import { computeStripeAccountReadiness, isMethodReady } from '@/lib/server/stripeAccountReadiness'
+import { computeStripeAccountReadiness, isMethodReady, syncOnboardingCompletedFlag } from '@/lib/server/stripeAccountReadiness'
 
 const MIN_AMOUNT = 1
 
@@ -17,6 +17,9 @@ export async function POST(request: NextRequest) {
     const { task_id, payment_method: requestedMethod } = await request.json()
     if (!task_id) {
       return NextResponse.json({ error: 'task_id is required' }, { status: 400 })
+    }
+    if (requestedMethod !== undefined && requestedMethod !== 'card' && requestedMethod !== 'sepa_debit') {
+      return NextResponse.json({ error: `payment_method must be 'card' or 'sepa_debit' if provided — got '${requestedMethod}'` }, { status: 400 })
     }
 
     // The buyer token is bound to a specific task at issuance (see
@@ -120,6 +123,26 @@ export async function POST(request: NextRequest) {
     const Stripe = (await import('stripe')).default
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
+    // Re-verify capability for the REQUESTED payment method directly with
+    // Stripe — before any path that could return a usable client_secret
+    // (reusing a pending intent below), resume a pending one, or create a
+    // new one. agentOnboardingDone is a stored database boolean that can go
+    // stale the moment Stripe restricts a capability Mercatai had
+    // previously recorded as active; a pending intent created while the
+    // account was ready must not stay redeemable after that.
+    const accountForReadiness = await stripe.accounts.retrieve(agentStripeAccount)
+    const readiness = computeStripeAccountReadiness(accountForReadiness)
+    await syncOnboardingCompletedFlag(db, (task.agents as any)?.id, agentOnboardingDone, readiness.onboardingComplete)
+    if (!isMethodReady(readiness, paymentMethod)) {
+      return NextResponse.json({
+        error: `Agent's Stripe account is not currently ready to accept ${paymentMethod === 'card' ? 'card' : 'SEPA Direct Debit'} payments.`,
+        stripe_onboarding_required: true,
+        payout_ready: readiness.payoutReady,
+        card_ready: readiness.cardReady,
+        sepa_debit_ready: readiness.sepaDebitReady,
+      }, { status: 402 })
+    }
+
     if (existingTx?.stripe_payment_intent_id?.startsWith('pi_')) {
       const existingIntent = await stripe.paymentIntents.retrieve(existingTx.stripe_payment_intent_id)
       const existingMethod = existingIntent.payment_method_types[0]
@@ -153,22 +176,6 @@ export async function POST(request: NextRequest) {
       } else if (existingIntent.status !== 'canceled') {
         return NextResponse.json({ error: `Existing payment is ${existingIntent.status}; it cannot be replaced` }, { status: 409 })
       }
-    }
-
-    // Re-verify capability for the REQUESTED payment method directly with
-    // Stripe, rather than trusting agentOnboardingDone — a stored database
-    // boolean that can go stale the moment Stripe restricts a capability
-    // Mercatai had previously recorded as active.
-    const accountForReadiness = await stripe.accounts.retrieve(agentStripeAccount)
-    const readiness = computeStripeAccountReadiness(accountForReadiness)
-    if (!isMethodReady(readiness, paymentMethod)) {
-      return NextResponse.json({
-        error: `Agent's Stripe account is not currently ready to accept ${paymentMethod === 'card' ? 'card' : 'SEPA Direct Debit'} payments.`,
-        stripe_onboarding_required: true,
-        payout_ready: readiness.payoutReady,
-        card_ready: readiness.cardReady,
-        sepa_debit_ready: readiness.sepaDebitReady,
-      }, { status: 402 })
     }
 
     // Výpočet poplatků — platform fee = 0 pro free tasks

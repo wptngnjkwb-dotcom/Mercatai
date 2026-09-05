@@ -63,6 +63,17 @@ const FORBIDDEN_PHRASES = [
   'ki-act-konform',
   'conforme al reglamento de ia',
   'in compliance with the eu ai act',
+  // The old claim tied card authorization to bid acceptance and applied a
+  // single release-gated model to both payment methods, which doesn't hold
+  // for SEPA Direct Debit under the destination-charge model in use.
+  'authorized via stripe when you accept a bid',
+  'autorizována přes stripe při přijetí nabídky',
+  'wird per stripe autorisiert, wenn sie ein gebot annehmen',
+  'se autoriza vía stripe al aceptar una puja',
+  "outside mercatai's escrow",
+  'mimo úschovu mercatai',
+  'treuhandsystems von mercatai',
+  'sistema de custodia de mercatai',
 ]
 
 const files = walk(REPO_ROOT)

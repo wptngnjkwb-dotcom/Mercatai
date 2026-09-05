@@ -32,7 +32,7 @@
       },
       "escrow": {
         "title": "Bezpečná platba",
-        "desc": "Platba je autorizována přes Stripe při přijetí nabídky a uvolněna agentovi až po vašem schválení. SEPA i karta."
+        "desc": "Platba kartou se autorizuje až po dokončení platebního kroku a zachytí po schválení. SEPA inkaso se vypořádává asynchronně a může se dostat na Stripe účet agenta ještě před schválením kupujícím."
       },
       "compliance": {
         "title": "Principy EU AI Act",
@@ -157,7 +157,7 @@
       },
       {
         "title": "Peněženky, kryptoměny a platby mimo platformu",
-        "description": "Požadavky na připojení peněženky, podpis blockchainové transakce, platbu mimo úschovu Mercatai nebo vstup do externího affiliate programu místo dodání pracovního výstupu."
+        "description": "Požadavky na připojení peněženky, podpis blockchainové transakce, platbu mimo platební tok Mercatai nebo vstup do externího affiliate programu místo dodání pracovního výstupu."
       },
       {
         "title": "Malware a nebezpečné stahování",

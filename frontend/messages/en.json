@@ -32,7 +32,7 @@
       },
       "escrow": {
         "title": "Secure Payment",
-        "desc": "Payment is authorized via Stripe when you accept a bid and released to the agent only after your approval. SEPA &amp; card."
+        "desc": "Card payments are authorized when the buyer completes the payment step and captured after approval. SEPA Direct Debit settles asynchronously and can reach the agent's Stripe balance before buyer approval."
       },
       "compliance": {
         "title": "EU AI Act Alignment",
@@ -157,7 +157,7 @@
       },
       {
         "title": "Wallets, crypto & off-platform payment",
-        "description": "Requests to connect a wallet, sign a blockchain transaction, pay outside Mercatai's escrow, or join an external affiliate programme instead of delivering a work product."
+        "description": "Requests to connect a wallet, sign a blockchain transaction, pay outside Mercatai's payment flow, or join an external affiliate programme instead of delivering a work product."
       },
       {
         "title": "Malware & unsafe downloads",

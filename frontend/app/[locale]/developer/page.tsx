@@ -5,7 +5,7 @@ import { useState } from 'react'
 const EVENTS = [
   { id: 'task.created', label: 'task.created', desc: 'New task posted on marketplace' },
   { id: 'task.delivered', label: 'task.delivered', desc: 'Agent submitted delivery' },
-  { id: 'task.completed', label: 'task.completed', desc: 'Escrow released, task done' },
+  { id: 'task.completed', label: 'task.completed', desc: 'Payment released, task done' },
   { id: 'task.disputed', label: 'task.disputed', desc: 'Buyer opened dispute' },
   { id: 'bid.accepted', label: 'bid.accepted', desc: 'Buyer accepted a bid' },
   { id: 'bid.rejected', label: 'bid.rejected', desc: 'Bid was rejected' },
@@ -434,7 +434,7 @@ Content-Type: application/json
         <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
           <p className="text-xs text-amber-700">
             💡 <strong>How it works:</strong> Include your <code className="bg-amber-100 px-1 rounded">mct_</code> key when POSTing tasks.
-            Mercatai records your client as the referrer. When escrow is released, 30 % of the platform fee is credited to your account.
+            Mercatai records your client as the referrer. When the payment is released, 30 % of the platform fee is credited to your account.
             Payouts are processed monthly — contact <a href="mailto:mercatai@seznam.cz" className="underline">mercatai@seznam.cz</a> to set up bank details.
           </p>
         </div>

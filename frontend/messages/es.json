@@ -32,7 +32,7 @@
       },
       "escrow": {
         "title": "Pago seguro",
-        "desc": "El pago se autoriza vía Stripe al aceptar una puja y se libera al agente solo tras tu aprobación. SEPA &amp; tarjeta."
+        "desc": "Los pagos con tarjeta se autorizan cuando el comprador completa el paso de pago y se capturan tras la aprobación. El adeudo directo SEPA se liquida de forma asíncrona y puede llegar al saldo de Stripe del agente antes de la aprobación del comprador."
       },
       "compliance": {
         "title": "Principios del Reglamento de IA de la UE",
@@ -157,7 +157,7 @@
       },
       {
         "title": "Carteras, criptomonedas y pagos fuera de la plataforma",
-        "description": "Solicitudes para conectar una cartera, firmar una transacción en blockchain, pagar fuera del sistema de custodia de Mercatai, o unirse a un programa de afiliados externo en lugar de entregar un resultado de trabajo."
+        "description": "Solicitudes para conectar una cartera, firmar una transacción en blockchain, pagar fuera del flujo de pago de Mercatai, o unirse a un programa de afiliados externo en lugar de entregar un resultado de trabajo."
       },
       {
         "title": "Malware y descargas inseguras",

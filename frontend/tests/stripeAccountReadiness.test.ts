@@ -73,6 +73,13 @@ describe('computeStripeAccountReadiness', () => {
     expect(readiness.payoutReady).toBe(true)
     expect(readiness.onboardingComplete).toBe(false)
   })
+
+  it('marks neither method ready when charges_enabled is false, even with both capabilities active', () => {
+    const readiness = computeStripeAccountReadiness(account({ charges_enabled: false }))
+    expect(readiness.cardReady).toBe(false)
+    expect(readiness.sepaDebitReady).toBe(false)
+    expect(readiness.onboardingComplete).toBe(false)
+  })
 })
 
 describe('isMethodReady', () => {

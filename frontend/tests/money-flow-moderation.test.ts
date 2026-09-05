@@ -25,9 +25,11 @@ function resetAccountRetrieveResult() {
 }
 resetAccountRetrieveResult()
 
+let existingTxRow: Record<string, unknown> | null = null
+
 const stripeAccountsRetrieve = vi.fn(async () => accountRetrieveResult)
 const stripePaymentIntentsCreate = vi.fn(async () => ({ id: 'pi_test_123', client_secret: 'secret_test' }))
-const stripePaymentIntentsRetrieve = vi.fn(async () => ({ status: 'requires_payment_method', payment_method_types: ['card'] }))
+const stripePaymentIntentsRetrieve = vi.fn(async () => ({ status: 'requires_payment_method', payment_method_types: ['card'], client_secret: 'secret_existing_pending' }))
 const stripePaymentIntentsCancel = vi.fn(async () => ({}))
 
 vi.mock('stripe', () => ({
@@ -56,7 +58,7 @@ vi.mock('@/lib/server/supabase', () => ({
         insert: () => builder,
         maybeSingle: async () => {
           if (table === 'bids') return { data: bidRow, error: null }
-          if (table === 'transactions') return { data: null, error: null }
+          if (table === 'transactions') return { data: existingTxRow, error: null }
           return { data: null, error: null }
         },
         single: async () => {
@@ -99,9 +101,12 @@ vi.mock('@/lib/server/paymentState', () => ({ reconcilePaymentIntent: vi.fn(asyn
 beforeEach(() => {
   taskModerationStatus = 'approved'
   taskUpdates.length = 0
+  existingTxRow = null
   resetAccountRetrieveResult()
   stripeAccountsRetrieve.mockClear()
   stripePaymentIntentsCreate.mockClear()
+  stripePaymentIntentsRetrieve.mockClear()
+  stripePaymentIntentsCancel.mockClear()
 })
 
 describe('PUT /api/v1/bids/[id]/accept — moderation guard', () => {
@@ -199,5 +204,71 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
 
     expect(response.status).toBe(201)
     expect(stripePaymentIntentsCreate).toHaveBeenCalled()
+  })
+
+  it('rejects an invalid payment_method with 400 rather than silently defaulting to card', async () => {
+    const { POST } = await import('@/app/api/v1/payments/create-intent/route')
+    const buyerToken = await signToken({ role: 'buyer', task_id: TASK_ID, org_id: 'org-1' }, '30d')
+    const request = new NextRequest('http://localhost/api/v1/payments/create-intent', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${buyerToken}` },
+      body: JSON.stringify({ task_id: TASK_ID, payment_method: 'crad' }),
+    })
+    const response = await POST(request)
+    const body = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(body.error).toMatch(/payment_method/i)
+    expect(stripeAccountsRetrieve).not.toHaveBeenCalled()
+    expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
+  })
+
+  describe('P0 — a pending PaymentIntent must not be resumable once its capability is revoked', () => {
+    beforeEach(() => {
+      existingTxRow = {
+        id: 'tx-pending-1',
+        escrow_status: 'pending',
+        stripe_payment_intent_id: 'pi_existing_pending',
+        gross_amount_eur: 50,
+        platform_fee_eur: 2.1,
+        stripe_fee_eur: 0.4,
+        agent_payout_eur: 47.5,
+        review_deadline_at: '2026-01-01T00:00:00.000Z',
+      }
+    })
+
+    it('does not return the pending client_secret, retrieve the intent, or create a new one when card_payments has been restricted', async () => {
+      accountRetrieveResult.capabilities = { card_payments: 'inactive', sepa_debit_payments: 'active', transfers: 'active' }
+      const response = await fundRequest('card')()
+      const body = await response.json()
+
+      expect(response.status).toBe(402)
+      expect(body.client_secret).toBeUndefined()
+      expect(body.card_ready).toBe(false)
+      expect(stripePaymentIntentsRetrieve).not.toHaveBeenCalled()
+      expect(stripePaymentIntentsCancel).not.toHaveBeenCalled()
+      expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
+    })
+
+    it('does not return the pending client_secret, retrieve the intent, or create a new one when sepa_debit_payments has been restricted', async () => {
+      accountRetrieveResult.capabilities = { card_payments: 'active', sepa_debit_payments: 'inactive', transfers: 'active' }
+      const response = await fundRequest('sepa_debit')()
+      const body = await response.json()
+
+      expect(response.status).toBe(402)
+      expect(body.client_secret).toBeUndefined()
+      expect(body.sepa_debit_ready).toBe(false)
+      expect(stripePaymentIntentsRetrieve).not.toHaveBeenCalled()
+      expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
+    })
+
+    it('still resumes the pending intent normally when the capability is genuinely active', async () => {
+      const response = await fundRequest('card')()
+      const body = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(body.client_secret).toBe('secret_existing_pending')
+      expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
+    })
   })
 })

@@ -1,4 +1,6 @@
 import type Stripe from 'stripe'
+import { auditLog } from '@/lib/server/audit'
+import type { getSupabase } from '@/lib/server/supabase'
 
 /**
  * Derives real payment readiness from a live Stripe Account object, rather
@@ -28,8 +30,13 @@ export function computeStripeAccountReadiness(account: Stripe.Account): StripeAc
   const sepaDebitPaymentsStatus = capabilities.sepa_debit_payments ?? 'inactive'
   const transfersStatus = capabilities.transfers ?? 'inactive'
 
-  const cardReady = cardPaymentsStatus === 'active'
-  const sepaDebitReady = sepaDebitPaymentsStatus === 'active'
+  // A capability can show 'active' while the account is still, in practice,
+  // unable to actually charge anyone — charges_enabled is Stripe's own
+  // umbrella flag for that, so it gates both methods regardless of their
+  // individual capability status.
+  const chargesEnabled = !!account.charges_enabled
+  const cardReady = cardPaymentsStatus === 'active' && chargesEnabled
+  const sepaDebitReady = sepaDebitPaymentsStatus === 'active' && chargesEnabled
   const transfersReady = transfersStatus === 'active'
   const payoutReady = transfersReady && !!account.payouts_enabled
 
@@ -52,4 +59,32 @@ export function computeStripeAccountReadiness(account: Stripe.Account): StripeAc
 /** Which single readiness flag gates a given payment method's PaymentIntent creation. */
 export function isMethodReady(readiness: StripeAccountReadiness, method: 'card' | 'sepa_debit'): boolean {
   return readiness.payoutReady && (method === 'card' ? readiness.cardReady : readiness.sepaDebitReady)
+}
+
+/**
+ * Keeps agents.stripe_onboarding_completed in sync with what was just
+ * computed from live Stripe data — in both directions. A no-op when the two
+ * already agree, so every caller that has just computed readiness can call
+ * this unconditionally rather than duplicating the "did it change" check
+ * and the matching audit-log call. Both the onboarding-status GET route and
+ * create-intent (which fetches live account data anyway, to gate the
+ * PaymentIntent it's about to create) call this, so a stale `true` left
+ * over from before Stripe restricted a capability gets corrected by
+ * whichever of the two happens to run next — including a buyer's own
+ * payment attempt.
+ */
+export async function syncOnboardingCompletedFlag(
+  db: ReturnType<typeof getSupabase>,
+  agentDbId: string | undefined | null,
+  storedValue: boolean | undefined | null,
+  computedValue: boolean
+): Promise<void> {
+  if (!agentDbId || computedValue === !!storedValue) return
+  await db.from('agents').update({ stripe_onboarding_completed: computedValue }).eq('id', agentDbId)
+  await auditLog({
+    action: computedValue ? 'stripe_connect_onboard_completed' : 'stripe_connect_onboard_restricted',
+    resource_type: 'agent',
+    resource_id: agentDbId,
+    details: { stripe_onboarding_completed: computedValue },
+  })
 }

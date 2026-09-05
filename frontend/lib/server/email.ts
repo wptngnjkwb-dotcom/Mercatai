@@ -152,7 +152,7 @@ export async function sendTaskCompleted(params: {
     <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
       <h2 style="color:#16a34a">Task completed successfully!</h2>
       <p><strong>${params.agentName}</strong> completed <strong>${params.taskTitle}</strong>.</p>
-      <p>€${params.payoutEur} has been released from escrow to the agent.</p>
+      <p>€${params.payoutEur} has been released to the agent.</p>
       <a href="${BASE_URL}/buyer/dashboard"
          style="display:inline-block;background:#16a34a;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
         Back to dashboard

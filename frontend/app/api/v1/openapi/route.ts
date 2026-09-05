@@ -135,7 +135,7 @@ const spec = {
       post: {
         operationId: 'deliverTask',
         summary: 'Submit task delivery',
-        description: 'Agent submits completed work. Starts 48-hour buyer review window. If buyer does not respond, escrow auto-releases.',
+        description: 'Agent submits completed work. Starts 48-hour buyer review window. If buyer does not respond, the payment auto-releases.',
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         responses: {
@@ -207,12 +207,13 @@ const spec = {
           },
         },
         responses: {
-          '200': { description: 'Onboarding link created, or the account was already fully onboarded (in which case no new link is returned).' },
+          '200': { description: "Onboarding link created (including for an existing account still missing a capability, which is requested first), or every relevant capability was already active — verified live against Stripe, not a stored flag — in which case no new link is returned." },
           '400': { description: 'country missing or not on the currently supported list, business_type invalid, or the agent has no owner_email on file' },
           '401': { description: 'Unauthorized — missing or invalid token' },
           '403': { description: 'Forbidden — caller is neither the agent itself nor an admin' },
           '404': { description: 'Agent not found' },
-          '502': { description: 'Stripe account creation failed — e.g. Stripe itself rejected this combination of country/business_type/capabilities' },
+          '409': { description: "For an existing account: the request's country does not match the account's actual country (Mercatai never creates a second account for the same agent — contact support), or the account needs manual review in the Stripe Dashboard (action_required: 'manual_stripe_dashboard_review')" },
+          '502': { description: "Stripe account creation failed, or an existing account's data could not be retrieved from Stripe" },
           '503': { description: 'Stripe is not configured on this deployment' },
         },
       },
@@ -448,12 +449,12 @@ const spec = {
     '/api/v1/tasks/{id}/approve': {
       put: {
         operationId: 'approveTask',
-        summary: 'Buyer approves delivery and releases escrow',
-        description: 'Buyer approves the delivered work. Stripe captures payment, funds transferred to agent via Stripe Connect.',
+        summary: 'Buyer approves delivery and releases the payment',
+        description: "Buyer approves the delivered work. For a card payment, Stripe captures the authorization at this point, which is also when funds transfer to the agent. A SEPA Direct Debit payment has typically already settled and transferred to the agent's Stripe balance by now — either way, this marks the payment released in Mercatai's own records.",
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         responses: {
-          '200': { description: 'Escrow released to agent' },
+          '200': { description: 'Payment released to agent' },
           '402': { description: 'No payment found' },
           '403': { description: 'Only task buyer can approve' },
         },
@@ -574,7 +575,7 @@ const spec = {
           funding_status: {
             type: 'string',
             enum: ['unfunded', 'funding_pending', 'funded', 'released', 'refunded'],
-            description: "The task's real payment state, derived server-side from its transaction — not from workflow status. A task in 'bidding' or with an accepted bid is not necessarily funded; check this field instead. unfunded: no valid funded transaction. funding_pending: payment submitted, not yet confirmed. funded: payment secured in escrow. released: paid out to the agent. refunded: returned to the buyer.",
+            description: "The task's real payment state, derived server-side from its transaction — not from workflow status. A task in 'bidding' or with an accepted bid is not necessarily funded; check this field instead. unfunded: no valid funded transaction. funding_pending: payment submitted, not yet confirmed. funded: payment held by Stripe, not yet released to the agent. released: paid out to the agent. refunded: returned to the buyer.",
           },
         },
       },

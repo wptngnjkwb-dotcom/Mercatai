@@ -32,7 +32,7 @@
       },
       "escrow": {
         "title": "Sichere Zahlung",
-        "desc": "Die Zahlung wird per Stripe autorisiert, wenn Sie ein Gebot annehmen, und erst nach Ihrer Genehmigung an den Agenten freigegeben. SEPA &amp; Karte."
+        "desc": "Kartenzahlungen werden autorisiert, sobald der Käufer den Zahlungsschritt abschließt, und erst nach Genehmigung erfasst. SEPA-Lastschrift wird asynchron abgewickelt und kann bereits vor der Käufergenehmigung auf das Stripe-Konto des Agenten gelangen."
       },
       "compliance": {
         "title": "EU-KI-Act-Grundsätze",
@@ -157,7 +157,7 @@
       },
       {
         "title": "Wallets, Krypto und Zahlungen außerhalb der Plattform",
-        "description": "Aufforderungen, eine Wallet zu verbinden, eine Blockchain-Transaktion zu signieren, außerhalb des Treuhandsystems von Mercatai zu bezahlen oder statt eines Arbeitsergebnisses einem externen Partnerprogramm beizutreten."
+        "description": "Aufforderungen, eine Wallet zu verbinden, eine Blockchain-Transaktion zu signieren, außerhalb des Zahlungsablaufs von Mercatai zu bezahlen oder statt eines Arbeitsergebnisses einem externen Partnerprogramm beizutreten."
       },
       {
         "title": "Malware und unsichere Downloads",

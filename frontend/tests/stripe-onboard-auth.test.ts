@@ -17,6 +17,7 @@ const agentRow = {
   stripe_onboarding_completed: false,
 }
 const agentUpdates: Record<string, unknown>[] = []
+let dbAgentUpdateError: { message: string } | null = null
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
@@ -29,7 +30,8 @@ vi.mock('@/lib/server/supabase', () => ({
           return builder
         },
         single: async () => (table === 'agents' ? { data: agentRow, error: null } : { data: null, error: null }),
-        then: (resolve: (v: unknown) => unknown) => resolve({ data: null, error: null }),
+        then: (resolve: (v: unknown) => unknown) =>
+          resolve({ data: null, error: table === 'agents' ? dbAgentUpdateError : null }),
       }
       return builder
     },
@@ -42,6 +44,7 @@ vi.mock('@/lib/server/audit', () => ({ auditLog: vi.fn(async () => {}) }))
 // simply never reached for a forbidden request, not just that the HTTP
 // response looks right.
 const accountsCreate = vi.fn(async () => ({ id: 'acct_test123' }))
+const accountsUpdate = vi.fn(async () => ({ id: 'acct_existing' }))
 const accountLinksCreate = vi.fn(async () => ({ url: 'https://connect.stripe.com/setup/test', expires_at: Math.floor(Date.now() / 1000) + 3600 }))
 const accountsRetrieve = vi.fn(async () => ({
   details_submitted: true,
@@ -52,7 +55,7 @@ const accountsRetrieve = vi.fn(async () => ({
 }))
 const stripeConstructor = vi.fn(function () {
   return {
-    accounts: { create: accountsCreate, retrieve: accountsRetrieve },
+    accounts: { create: accountsCreate, retrieve: accountsRetrieve, update: accountsUpdate },
     accountLinks: { create: accountLinksCreate },
   }
 })
@@ -332,5 +335,120 @@ describe('GET /api/v1/agents/[id]/stripe-onboard — onboarding completeness der
     const response = await getStatus()
     expect(response.status).toBe(200)
     expect(agentUpdates).toHaveLength(0)
+  })
+})
+
+describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediation', () => {
+  beforeEach(() => {
+    agentUpdates.length = 0
+    accountsCreate.mockClear()
+    accountsUpdate.mockClear()
+    accountLinksCreate.mockClear()
+    accountsRetrieve.mockClear()
+    ;(agentRow as any).stripe_account_id = 'acct_existing'
+  })
+
+  function requestWithBody(bearer: string, body: Record<string, unknown>) {
+    return new NextRequest(`http://localhost/api/v1/agents/${OWN_AGENT_ID}/stripe-onboard`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
+      body: JSON.stringify(body),
+    })
+  }
+
+  it("rejects with 409 when the request country does not match the existing account's country — does not create a second account", async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'NO' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(body.existing_country).toBe('CZ')
+    expect(accountsCreate).not.toHaveBeenCalled()
+    expect(accountsUpdate).not.toHaveBeenCalled()
+  })
+
+  it('requests missing capabilities on an existing account created before card_payments was added, then issues a fresh onboarding link', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      // Legacy account: sepa_debit_payments alone already satisfies
+      // onboardingComplete (at least one method + payout ready), so this
+      // also proves card_payments still gets requested even though the
+      // account isn't "incomplete" by that looser bar.
+      capabilities: { sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.onboarding_url).toBeTruthy()
+    expect(accountsUpdate).toHaveBeenCalledWith('acct_existing', {
+      capabilities: expect.objectContaining({ card_payments: { requested: true } }),
+    })
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it('returns "already completed" without calling accounts.update when every capability is already active', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.message).toMatch(/already completed/i)
+    expect(accountsUpdate).not.toHaveBeenCalled()
+    expect(accountLinksCreate).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/v1/agents/[id]/stripe-onboard — orphaned account on DB write failure', () => {
+  beforeEach(() => {
+    agentUpdates.length = 0
+    accountsCreate.mockClear()
+    accountLinksCreate.mockClear()
+    ;(agentRow as any).stripe_account_id = null
+  })
+
+  function requestWithBody(bearer: string, body: Record<string, unknown>) {
+    return new NextRequest(`http://localhost/api/v1/agents/${OWN_AGENT_ID}/stripe-onboard`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
+      body: JSON.stringify(body),
+    })
+  }
+
+  it('does not return a successful onboarding link when saving the new stripe_account_id to the agent record fails', async () => {
+    dbAgentUpdateError = { message: 'connection reset' }
+    try {
+      const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+      const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+      const body = await response.json()
+
+      expect(response.status).toBe(500)
+      expect(body.onboarding_url).toBeUndefined()
+      expect(body.stripe_account_id).toBe('acct_test123')
+      expect(accountLinksCreate).not.toHaveBeenCalled()
+    } finally {
+      dbAgentUpdateError = null
+    }
   })
 })

@@ -3,7 +3,7 @@ import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { SUPPORTED_ONBOARDING_COUNTRIES, isSupportedOnboardingCountry } from '@/lib/onboardingCountries'
-import { computeStripeAccountReadiness } from '@/lib/server/stripeAccountReadiness'
+import { computeStripeAccountReadiness, syncOnboardingCompletedFlag } from '@/lib/server/stripeAccountReadiness'
 
 // Stripe's legal-entity structures for a connected account. Left unset by
 // default so Stripe's hosted onboarding asks the account holder directly —
@@ -68,10 +68,6 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
   if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
 
-  if (agent.stripe_onboarding_completed) {
-    return NextResponse.json({ message: 'Stripe onboarding already completed', stripe_account_id: agent.stripe_account_id })
-  }
-
   // Registration has required and stored owner_email since this was added,
   // and the migration backfills it for pre-existing agents wherever their
   // organization's historical name was itself a valid email — but an agent
@@ -92,8 +88,77 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
   let stripeAccountId = agent.stripe_account_id
 
-  // Vytvoř Stripe Connect Express účet pokud ještě neexistuje
-  if (!stripeAccountId) {
+  if (stripeAccountId) {
+    // An account already exists — verify its LIVE state rather than
+    // trusting the stored stripe_onboarding_completed flag, and attempt a
+    // remediation path for whatever is actually still missing (including
+    // card_payments for an account created before that capability was
+    // added here) instead of just re-issuing a link and hoping.
+    let account
+    try {
+      account = await stripe.accounts.retrieve(stripeAccountId)
+    } catch (stripeErr) {
+      const message = stripeErr instanceof Error ? stripeErr.message : 'Could not retrieve the existing Stripe account'
+      return NextResponse.json({ error: message, stripe_account_id: stripeAccountId }, { status: 502 })
+    }
+
+    // A connected account's country is essentially fixed after creation —
+    // if the request now names a different country than the account
+    // actually holds, that account belongs to a different real-world
+    // holder than the one submitting this request. Silently creating a
+    // second account would leave two Stripe accounts for one agent record;
+    // this needs a human to sort out instead.
+    if (account.country !== country) {
+      return NextResponse.json({
+        error: `This agent's existing Stripe account is registered in ${account.country}, which does not match the requested country (${country}). Mercatai does not automatically create a second account for the same agent — contact support.`,
+        stripe_account_id: stripeAccountId,
+        existing_country: account.country,
+      }, { status: 409 })
+    }
+
+    const readiness = computeStripeAccountReadiness(account)
+    await syncOnboardingCompletedFlag(db, agent.id, agent.stripe_onboarding_completed, readiness.onboardingComplete)
+
+    if (account.requirements?.disabled_reason) {
+      return NextResponse.json({
+        error: `This Stripe account needs manual review (Stripe's reason: ${account.requirements.disabled_reason}). Check the Stripe Dashboard or contact Stripe support directly — a new onboarding link cannot resolve this.`,
+        stripe_account_id: stripeAccountId,
+        action_required: 'manual_stripe_dashboard_review',
+        disabled_reason: account.requirements.disabled_reason,
+      }, { status: 409 })
+    }
+
+    // Deliberately a stricter bar than readiness.onboardingComplete (which
+    // only requires identity + payouts + AT LEAST ONE payment method, and
+    // gates create-intent). Here, any capability short of fully active is
+    // worth requesting — otherwise a legacy account that already satisfies
+    // onboardingComplete via SEPA alone (created before card_payments was
+    // added to the capabilities requested at account creation, below) would
+    // never have card_payments requested for it, since it would always
+    // short-circuit as "already completed" first.
+    const missingCapabilities: Record<string, { requested: true }> = {}
+    if (readiness.cardPaymentsStatus !== 'active') missingCapabilities.card_payments = { requested: true }
+    if (readiness.sepaDebitPaymentsStatus !== 'active') missingCapabilities.sepa_debit_payments = { requested: true }
+    if (readiness.transfersStatus !== 'active') missingCapabilities.transfers = { requested: true }
+
+    if (Object.keys(missingCapabilities).length === 0) {
+      return NextResponse.json({ message: 'Stripe onboarding already completed', stripe_account_id: stripeAccountId })
+    }
+
+    try {
+      await stripe.accounts.update(stripeAccountId, { capabilities: missingCapabilities })
+    } catch (stripeErr) {
+      const message = stripeErr instanceof Error ? stripeErr.message : 'Could not request the missing capabilities'
+      return NextResponse.json({
+        error: `Could not request this account's missing capabilities: ${message}. This may need manual review in the Stripe Dashboard.`,
+        stripe_account_id: stripeAccountId,
+        action_required: 'manual_stripe_dashboard_review',
+      }, { status: 409 })
+    }
+    // Fall through to issue a fresh account link below — the newly-requested
+    // capabilities (and any outstanding requirements) are resolved through
+    // Stripe's own hosted onboarding, not by this route directly.
+  } else {
     try {
       const account = await stripe.accounts.create({
         type: 'express',
@@ -122,9 +187,32 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return NextResponse.json({ error: message }, { status: 502 })
     }
 
-    await db.from('agents')
+    const { error: linkError } = await db.from('agents')
       .update({ stripe_account_id: stripeAccountId })
       .eq('id', params.id)
+
+    if (linkError) {
+      // The Stripe account exists but the agent record was never linked to
+      // it — a real, orphaned Stripe object. Reporting success here would
+      // hand back an onboarding link for an account nothing else in
+      // Mercatai can ever find again. Fail loudly and leave a trail for an
+      // admin to reconcile manually instead.
+      console.error('Stripe account created but failed to link to agent record — orphaned Stripe account', {
+        agentDbId: params.id,
+        stripeAccountId,
+        dbError: linkError.message,
+      })
+      await auditLog({
+        action: 'stripe_account_orphaned',
+        resource_type: 'agent',
+        resource_id: params.id,
+        details: { stripe_account_id: stripeAccountId, db_error: linkError.message },
+      })
+      return NextResponse.json({
+        error: `Your Stripe account was created but could not be saved. Contact support with this reference: ${stripeAccountId}`,
+        stripe_account_id: stripeAccountId,
+      }, { status: 500 })
+    }
   }
 
   // Vygeneruj onboarding link (platí 24h)
@@ -188,18 +276,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   // (details_submitted && no currently_due items) only ever moved this flag
   // from false to true and never looked at capabilities, payouts_enabled,
   // or a later restriction at all.
-  if (completed !== agent.stripe_onboarding_completed) {
-    await db.from('agents')
-      .update({ stripe_onboarding_completed: completed })
-      .eq('id', params.id)
-
-    await auditLog({
-      action: completed ? 'stripe_connect_onboard_completed' : 'stripe_connect_onboard_restricted',
-      resource_type: 'agent',
-      resource_id: params.id,
-      details: { stripe_account_id: agent.stripe_account_id, ...readiness },
-    })
-  }
+  await syncOnboardingCompletedFlag(db, agent.id, agent.stripe_onboarding_completed, completed)
 
   return NextResponse.json({
     onboarding_completed: completed,
