@@ -11,6 +11,7 @@ const TASK_ID = '77777777-7777-7777-7777-777777777777'
 
 const taskRow = { id: TASK_ID, status: 'in_progress', assigned_agent_id: ASSIGNED_AGENT_ID }
 const taskUpdates: Record<string, unknown>[] = []
+let assignedAgentVisibility = 'public'
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
@@ -22,7 +23,11 @@ vi.mock('@/lib/server/supabase', () => ({
           if (table === 'tasks') taskUpdates.push(values)
           return builder
         },
-        single: async () => (table === 'tasks' ? { data: taskRow, error: null } : { data: null, error: null }),
+        single: async () => {
+          if (table === 'tasks') return { data: taskRow, error: null }
+          if (table === 'agents') return { data: { id: ASSIGNED_AGENT_ID, profile_visibility: assignedAgentVisibility }, error: null }
+          return { data: null, error: null }
+        },
         then: (resolve: (v: unknown) => unknown) => resolve({ data: null, error: null }),
       }
       return builder
@@ -31,7 +36,8 @@ vi.mock('@/lib/server/supabase', () => ({
 }))
 
 vi.mock('@/lib/server/audit', () => ({ auditLog: vi.fn(async () => {}) }))
-vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks: vi.fn(async () => {}) }))
+const { fireWebhooks } = vi.hoisted(() => ({ fireWebhooks: vi.fn(async (_event: string, _payload: Record<string, unknown>) => {}) }))
+vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks }))
 
 function deliverRequest(bearer: string) {
   return new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/deliver`, {
@@ -44,6 +50,8 @@ function deliverRequest(bearer: string) {
 describe('POST /api/v1/tasks/[id]/deliver auth', () => {
   beforeEach(() => {
     taskUpdates.length = 0
+    assignedAgentVisibility = 'public'
+    fireWebhooks.mockClear()
   })
 
   it('lets the assigned agent deliver', async () => {
@@ -79,5 +87,24 @@ describe('POST /api/v1/tasks/[id]/deliver auth', () => {
 
     expect(response.status).toBe(200)
     expect(taskUpdates).toHaveLength(1)
+  })
+
+  it('includes the real agent_id in the public webhook payload for a public agent', async () => {
+    const token = await signToken({ agent_id: ASSIGNED_AGENT_ID, tier: 1 }, '15m')
+    await POST(deliverRequest(token), { params: { id: TASK_ID } })
+
+    expect(fireWebhooks).toHaveBeenCalledWith('task.delivered', expect.objectContaining({ agent_id: ASSIGNED_AGENT_ID }))
+  })
+
+  it('never puts a private agent\'s UUID or agent_id in the public webhook payload', async () => {
+    assignedAgentVisibility = 'private'
+    const token = await signToken({ agent_id: ASSIGNED_AGENT_ID, tier: 1 }, '15m')
+    await POST(deliverRequest(token), { params: { id: TASK_ID } })
+
+    expect(fireWebhooks).toHaveBeenCalledTimes(1)
+    const payload = fireWebhooks.mock.calls[0][1]
+    expect(payload).not.toHaveProperty('agent_id')
+    expect(payload).toMatchObject({ agent_private: true })
+    expect(JSON.stringify(payload)).not.toContain(ASSIGNED_AGENT_ID)
   })
 })

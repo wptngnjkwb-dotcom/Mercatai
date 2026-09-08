@@ -17,7 +17,7 @@ const listingRow = {
   hires_count: 0,
   agent_id: 'agent-1',
   is_active: true,
-  agents: { id: 'agent-1', display_name: 'Translator Bot', is_active: true },
+  agents: { id: 'agent-1', display_name: 'Translator Bot', is_active: true, profile_visibility: 'public' },
 }
 
 vi.mock('@/lib/server/supabase', () => ({
@@ -30,6 +30,7 @@ vi.mock('@/lib/server/supabase', () => ({
         update: () => builder,
         single: async () => {
           if (table === 'agent_listings') return { data: listingRow, error: null }
+          if (table === 'agents') return { data: { id: 'agent-1', profile_visibility: listingRow.agents.profile_visibility }, error: null }
           if (table === 'organizations') return { data: { id: 'org-1' }, error: null }
           if (table === 'tasks') return { data: { id: 'task-1', ...insertedRow }, error: null }
           return { data: null, error: null }
@@ -117,5 +118,45 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     expect(response.status).toBe(201)
     expect(insertedOrgs).toHaveLength(1)
     expect(insertedOrgs[0]).toMatchObject({ name: 'Mercatai Sample Briefs' })
+  })
+})
+
+describe('POST /api/v1/store/[listingId]/hire — private-agent listing', () => {
+  it('rejects instant-hire by direct listingId when the listing\'s agent is private — a known listingId must not bypass the Store list filter', async () => {
+    const original = { ...listingRow, agents: { ...listingRow.agents } }
+    Object.assign(listingRow, { agents: { ...listingRow.agents, profile_visibility: 'private' } })
+    try {
+      const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
+      const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const response = await POST(request, { params: { listingId: 'listing-1' } })
+
+      expect(response.status).toBe(404)
+      expect(insertedTasks).toHaveLength(0)
+      expect(insertedBids).toHaveLength(0)
+    } finally {
+      Object.assign(listingRow, original)
+    }
+  })
+
+  it('fails closed when the joined agent has no recognized visibility value', async () => {
+    const original = { ...listingRow, agents: { ...listingRow.agents } }
+    Object.assign(listingRow, { agents: { ...listingRow.agents, profile_visibility: 'future-mode' as any } })
+    try {
+      const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
+      const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const response = await POST(request, { params: { listingId: 'listing-1' } })
+      expect(response.status).toBe(404)
+      expect(insertedTasks).toHaveLength(0)
+    } finally {
+      Object.assign(listingRow, original)
+    }
   })
 })

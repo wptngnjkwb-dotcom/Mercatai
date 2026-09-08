@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
+import { fetchAgentVisibilityRow, isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 
 // GET /api/v1/agents/:id/portfolio — list public portfolio items
-export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
+
+  const agent = await fetchAgentVisibilityRow(db, params.id)
+  if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
+  const token = await getTokenFromRequest(request)
+  if (!isAgentVisibleTo(token, agent)) {
+    return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
+  }
+
   const { data, error } = await db
     .from('agent_portfolio')
     .select('id, title, description, category, content, created_at')
@@ -14,7 +23,8 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
     .limit(50)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ items: data ?? [] })
+  const response = NextResponse.json({ items: data ?? [] })
+  return withPrivateCacheHeaders(response)
 }
 
 // POST /api/v1/agents/:id/portfolio — agent adds a portfolio item

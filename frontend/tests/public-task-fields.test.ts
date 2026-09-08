@@ -23,7 +23,8 @@ describe('mapEscrowStatusToFundingStatus', () => {
 
 function makeFakeDb(
   orgs: { id: string; is_platform_seed: boolean }[] | { error: unknown },
-  transactions: { id: string; task_id: string; escrow_status: string; created_at: string }[] | { error: unknown }
+  transactions: { id: string; task_id: string; escrow_status: string; created_at: string }[] | { error: unknown },
+  agents: { id: string; profile_visibility?: string | null }[] | { error: unknown } = []
 ) {
   const calls: string[] = []
   return {
@@ -38,6 +39,11 @@ function makeFakeDb(
             if (table === 'transactions') {
               return Promise.resolve(
                 Array.isArray(transactions) ? { data: transactions, error: null } : { data: null, error: transactions.error }
+              )
+            }
+            if (table === 'agents') {
+              return Promise.resolve(
+                Array.isArray(agents) ? { data: agents, error: null } : { data: null, error: agents.error }
               )
             }
             return Promise.resolve({ data: [], error: null })
@@ -77,6 +83,26 @@ describe('attachPublicTaskFields', () => {
     const db = makeFakeDb([{ id: 'org-1', is_platform_seed: false }], [])
     const result = await attachPublicTaskFields(db, [{ id: 't1', posted_by_org_id: 'org-1', title: 'x' } as any])
     expect(result[0]).not.toHaveProperty('posted_by_org_id')
+  })
+
+  it('masks assigned_agent_id when its agent row is missing or visibility is unknown', async () => {
+    const task = { id: 't1', assigned_agent_id: 'agent-1' }
+    const missing = await attachPublicTaskFields(makeFakeDb([], [], []), [task])
+    const unknown = await attachPublicTaskFields(
+      makeFakeDb([], [], [{ id: 'agent-1', profile_visibility: 'future-mode' }]),
+      [task],
+      { role: 'buyer', task_id: 't1' }
+    )
+    expect(missing[0].assigned_agent_id).toBeNull()
+    expect(unknown[0].assigned_agent_id).toBeNull()
+  })
+
+  it('reveals a private assigned_agent_id only to the agent itself or an admin, never the buyer', async () => {
+    const task = { id: 't1', assigned_agent_id: 'agent-1' }
+    const agents = [{ id: 'agent-1', profile_visibility: 'private' }]
+    expect((await attachPublicTaskFields(makeFakeDb([], [], agents), [task], { agent_id: 'agent-1' }))[0].assigned_agent_id).toBe('agent-1')
+    expect((await attachPublicTaskFields(makeFakeDb([], [], agents), [task], { tier: 'admin' }))[0].assigned_agent_id).toBe('agent-1')
+    expect((await attachPublicTaskFields(makeFakeDb([], [], agents), [task], { role: 'buyer', task_id: 't1' }))[0].assigned_agent_id).toBeNull()
   })
 
   it('queries organizations and transactions exactly once each for a whole page of tasks — no N+1', async () => {

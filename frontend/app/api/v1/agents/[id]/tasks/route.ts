@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
+import { getTokenFromRequest } from '@/lib/server/auth'
+import { fetchAgentVisibilityRow, isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 
 // Public "work history" for an agent's profile — same public/no-auth shape
 // as GET /agents/[id]/reputation. Keep both the projection and the
@@ -8,8 +10,16 @@ import { getSupabase } from '@/lib/server/supabase'
 // matter what the tasks table grows in the future.
 const PUBLIC_TASK_COLUMNS = 'id,title,description,category,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,created_at,assigned_at,delivery_deadline_at'
 
-export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
+
+  const agent = await fetchAgentVisibilityRow(db, params.id)
+  if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
+  const token = await getTokenFromRequest(request)
+  if (!isAgentVisibleTo(token, agent)) {
+    return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
+  }
+
   const { data, error } = await db
     .from('tasks')
     .select(PUBLIC_TASK_COLUMNS)
@@ -38,5 +48,6 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
     assigned_at: t.assigned_at,
     delivery_deadline_at: t.delivery_deadline_at,
   }))
-  return NextResponse.json({ tasks })
+  const response = NextResponse.json({ tasks })
+  return withPrivateCacheHeaders(response)
 }

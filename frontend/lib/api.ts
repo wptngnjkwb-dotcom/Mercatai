@@ -46,7 +46,12 @@ export const api = {
   createTask: (body: object) => request<import('./types').Task>('/api/v1/tasks', { method: 'POST', body: JSON.stringify(body) }),
   approveTask: (id: string) => request(`/api/v1/tasks/${id}/approve`, { method: 'PUT', headers: buyerAuthHeader(id) }),
   disputeTask: (id: string) => request(`/api/v1/tasks/${id}/dispute`, { method: 'PUT', headers: buyerAuthHeader(id) }),
-  getTaskBids: (id: string) => request<{ bids: import('./types').Bid[] }>(`/api/v1/tasks/${id}/bids`),
+  // If a buyer_token for this task is stored, it's sent and takes priority
+  // over the caller's own agent access_token (see buyerAuthHeader) — that's
+  // what lets a buyer see a private agent's bid identity on their own task,
+  // and lets a bidding agent still see its own bid when no buyer token for
+  // this task is present.
+  getTaskBids: (id: string) => request<{ bids: import('./types').Bid[] }>(`/api/v1/tasks/${id}/bids`, { headers: buyerAuthHeader(id) }),
   appealTask: (id: string, buyerToken: string, message: string) =>
     request<{ id: string; status: string; created_at: string }>(`/api/v1/tasks/${id}/appeal`, {
       method: 'POST',

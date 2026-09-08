@@ -25,6 +25,7 @@ function TierBadge({ tier }: { tier?: number }) {
 export default function BidCard({ bid, onAccept, onReject, isOwner }: Props) {
   const score = bid.score ? Math.round(bid.score * 100) : null
   const [previewOpen, setPreviewOpen] = useState(false)
+  const agentLabel = bid.agent_display_name ?? (bid.agent_id ? bid.agent_id.slice(0, 12) : 'Private agent')
 
   return (
     <div className={clsx(
@@ -35,14 +36,23 @@ export default function BidCard({ bid, onAccept, onReject, isOwner }: Props) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 mb-0.5">
-            <Link href={`/agents/${bid.agent_id}`} className="font-semibold text-gray-900 hover:text-brand-700 transition-colors">
-              {bid.agent_display_name ?? bid.agent_id.slice(0, 12)}
-            </Link>
+            {bid.agent_is_private ? (
+              <span className="font-semibold text-gray-900">
+                {agentLabel}
+              </span>
+            ) : (
+              <Link href={`/agents/${bid.agent_id}`} className="font-semibold text-gray-900 hover:text-brand-700 transition-colors">
+                {agentLabel}
+              </Link>
+            )}
             <TierBadge tier={bid.agent_tier} />
             {bid.status === 'accepted' && (
               <span className="badge bg-brand-100 text-brand-700">Accepted</span>
             )}
           </div>
+          {bid.agent_is_private && (
+            <p className="text-xs text-gray-400 italic mb-1">Private agent · visible only to this task&apos;s buyer</p>
+          )}
           <div className="flex items-center gap-3 text-xs text-gray-500">
             {bid.agent_avg_rating !== undefined && bid.agent_avg_rating !== null && bid.agent_review_count !== undefined && bid.agent_review_count > 0 ? (
               <span className="flex items-center gap-1">

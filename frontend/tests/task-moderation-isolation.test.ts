@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
+import { signToken } from '@/lib/server/auth'
 
 process.env.JWT_SECRET_KEY = 'test-secret-for-moderation-isolation-32ch'
 
@@ -33,7 +34,7 @@ let cannedTask: Record<string, unknown> = {
 // Rows for the activity feed's recentBids query — each carries its own
 // embedded task moderation_status/posted_by_org_id, independent of
 // cannedTask above.
-let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string; posted_by_org_id?: string } | null; agents: { display_name: string } }[] = []
+let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string; posted_by_org_id?: string } | null; agents: { display_name: string; profile_visibility?: string } }[] = []
 
 // Seedable transactions/organizations rows for is_demo + funding_status +
 // settled-GMV coverage. The shared `tasks` dispatch below only ever returns
@@ -43,6 +44,10 @@ let activityBidRows: { id: string; price_eur: number; submitted_at: string; task
 // task_id: 'task-1' to stay consistent with what that lookup will resolve to.
 let activityTransactionRows: { task_id: string; escrow_status: string; gross_amount_eur?: number; released_at?: string | null; created_at?: string }[] = []
 let activityOrganizationRows: { id: string; is_platform_seed: boolean }[] = []
+// Backs the batched agents visibility lookup attachPublicTaskFields makes
+// for GET /api/v1/tasks (list) — separate from cannedTask so a task's
+// assigned_agent_id can be tested against both a public and a private agent.
+let taskListAgentVisibilityRows: { id: string; profile_visibility?: string }[] = []
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
@@ -99,7 +104,7 @@ vi.mock('@/lib/server/supabase', () => ({
             return resolve({ data: matches ? [project(cannedTask)] : [], count: matches ? 1 : 0, error: null })
           }
           if (table === 'bids') return resolve({ data: activityBidRows, count: activityBidRows.length, error: null })
-          if (table === 'agents') return resolve({ data: [], count: 0, error: null })
+          if (table === 'agents') return resolve({ data: taskListAgentVisibilityRows, count: taskListAgentVisibilityRows.length, error: null })
           if (table === 'transactions') {
             const matches = activityTransactionRows.filter((row) =>
               eqFilters.every(([f, v]) => (row as Record<string, unknown>)[f] === v)
@@ -131,6 +136,7 @@ beforeEach(() => {
   activityBidRows = []
   activityTransactionRows = []
   activityOrganizationRows = []
+  taskListAgentVisibilityRows = []
 })
 
 describe('POST /api/v1/tasks — moderation publish flow', () => {
@@ -360,6 +366,66 @@ describe('GET /api/v1/tasks — is_demo and funding_status', () => {
   })
 })
 
+describe('GET /api/v1/tasks — assigned_agent_id visibility (list)', () => {
+  const PRIVATE_AGENT_ID = 'agent-private-1'
+
+  async function withAssignedAgent(visibility: string, fn: () => Promise<void>) {
+    const original = cannedTask.assigned_agent_id
+    cannedTask = { ...cannedTask, assigned_agent_id: PRIVATE_AGENT_ID }
+    taskListAgentVisibilityRows = [{ id: PRIVATE_AGENT_ID, profile_visibility: visibility }]
+    try {
+      await fn()
+    } finally {
+      cannedTask = { ...cannedTask, assigned_agent_id: original }
+      taskListAgentVisibilityRows = []
+    }
+  }
+
+  it('masks a private assigned agent to null in the task list for an anonymous caller', () => withAssignedAgent('private', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const request = new NextRequest('http://localhost/api/v1/tasks')
+    const response = await GET(request)
+    const body = await response.json()
+    expect(body.tasks[0].assigned_agent_id).toBeNull()
+    expect(JSON.stringify(body)).not.toContain(PRIVATE_AGENT_ID)
+  }))
+
+  it('keeps the internal assigned_agent_id hidden in the list from this task\'s own buyer token', () => withAssignedAgent('private', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const buyerToken = await signToken({ role: 'buyer', task_id: cannedTask.id, org_id: 'org-1' }, '30d')
+    const request = new NextRequest('http://localhost/api/v1/tasks', { headers: { authorization: `Bearer ${buyerToken}` } })
+    const response = await GET(request)
+    const body = await response.json()
+    expect(body.tasks[0].assigned_agent_id).toBeNull()
+  }))
+
+  it('still masks the agent in the list for a buyer token bound to a different task', () => withAssignedAgent('private', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const buyerToken = await signToken({ role: 'buyer', task_id: 'some-other-task', org_id: 'org-1' }, '30d')
+    const request = new NextRequest('http://localhost/api/v1/tasks', { headers: { authorization: `Bearer ${buyerToken}` } })
+    const response = await GET(request)
+    const body = await response.json()
+    expect(body.tasks[0].assigned_agent_id).toBeNull()
+  }))
+
+  it('reveals the real assigned_agent_id in the list to an admin token', () => withAssignedAgent('private', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const adminToken = await signToken({ tier: 'admin' }, '12h')
+    const request = new NextRequest('http://localhost/api/v1/tasks', { headers: { authorization: `Bearer ${adminToken}` } })
+    const response = await GET(request)
+    const body = await response.json()
+    expect(body.tasks[0].assigned_agent_id).toBe(PRIVATE_AGENT_ID)
+  }))
+
+  it('never masks a public assigned agent in the list — unchanged behavior', () => withAssignedAgent('public', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const request = new NextRequest('http://localhost/api/v1/tasks')
+    const response = await GET(request)
+    const body = await response.json()
+    expect(body.tasks[0].assigned_agent_id).toBe(PRIVATE_AGENT_ID)
+  }))
+})
+
 // GET /api/v1/tasks/[id] and POST /api/v1/bids moderation-gate coverage
 // lives in agent-public-response.test.ts and bids-auth.test.ts respectively
 // — those files already import and mock those exact routes, and this suite
@@ -379,8 +445,8 @@ describe('GET /api/v1/activity — moderation isolation', () => {
 
   it('excludes a bid whose task is quarantined — a bid is as private as its task', async () => {
     activityBidRows = [
-      { id: 'bid-visible', price_eur: 50, submitted_at: '2026-08-22T10:00:00.000Z', tasks: { title: 'Visible task', category: 'research', moderation_status: 'approved' }, agents: { display_name: 'Agent A' } },
-      { id: 'bid-hidden', price_eur: 999, submitted_at: '2026-08-22T11:00:00.000Z', tasks: { title: 'Should stay hidden', category: 'research', moderation_status: 'quarantined' }, agents: { display_name: 'Agent B' } },
+      { id: 'bid-visible', price_eur: 50, submitted_at: '2026-08-22T10:00:00.000Z', tasks: { title: 'Visible task', category: 'research', moderation_status: 'approved' }, agents: { display_name: 'Agent A', profile_visibility: 'public' } },
+      { id: 'bid-hidden', price_eur: 999, submitted_at: '2026-08-22T11:00:00.000Z', tasks: { title: 'Should stay hidden', category: 'research', moderation_status: 'quarantined' }, agents: { display_name: 'Agent B', profile_visibility: 'public' } },
     ]
     const { GET } = await import('@/app/api/v1/activity/route')
     const request = new NextRequest('http://localhost/api/v1/activity')
@@ -391,6 +457,38 @@ describe('GET /api/v1/activity — moderation isolation', () => {
     const bidEvents = body.events.filter((e: any) => e.id?.startsWith('bid-'))
     expect(bidEvents.some((e: any) => e.detail === 'Should stay hidden')).toBe(false)
     expect(bidEvents.some((e: any) => e.detail === 'Visible task')).toBe(true)
+  })
+
+  it('excludes a private agent\'s bid from the public feed entirely — not anonymized, dropped', async () => {
+    activityBidRows = [
+      { id: 'bid-pub', price_eur: 50, submitted_at: '2026-08-22T10:00:00.000Z', tasks: { title: 'Public task', category: 'research', moderation_status: 'approved' }, agents: { display_name: 'Public Agent', profile_visibility: 'public' } },
+      { id: 'bid-priv', price_eur: 999, submitted_at: '2026-08-22T11:00:00.000Z', tasks: { title: 'Task with a private bidder', category: 'research', moderation_status: 'approved' }, agents: { display_name: 'Secret Agent', profile_visibility: 'private' } },
+    ]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const request = new NextRequest('http://localhost/api/v1/activity')
+    const response = await GET(request)
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    const bidEvents = body.events.filter((e: any) => e.id?.startsWith('bid-'))
+    expect(bidEvents.some((e: any) => e.detail === 'Public task')).toBe(true)
+    expect(bidEvents.some((e: any) => e.detail === 'Task with a private bidder')).toBe(false)
+    expect(JSON.stringify(body)).not.toContain('Secret Agent')
+  })
+
+  it('fails closed when a bid agent has a missing or unknown visibility value', async () => {
+    activityBidRows = [
+      { id: 'bid-unknown', price_eur: 50, submitted_at: '2026-08-22T10:00:00.000Z', tasks: { title: 'Unknown visibility', category: 'research', moderation_status: 'approved' }, agents: { display_name: 'Hidden A', profile_visibility: 'future-mode' } },
+      { id: 'bid-missing', price_eur: 60, submitted_at: '2026-08-22T11:00:00.000Z', tasks: { title: 'Missing visibility', category: 'research', moderation_status: 'approved' }, agents: { display_name: 'Hidden B' } },
+    ]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.events.some((e: any) => e.id === 'bid-bid-unknown')).toBe(false)
+    expect(body.events.some((e: any) => e.id === 'bid-bid-missing')).toBe(false)
+    expect(JSON.stringify(body)).not.toContain('Hidden A')
+    expect(JSON.stringify(body)).not.toContain('Hidden B')
   })
 })
 
@@ -459,7 +557,7 @@ describe('GET /api/v1/activity — events feed: demo marking and real completion
     activityBidRows = [{
       id: 'bid-1', price_eur: 15, submitted_at: '2026-08-22T10:00:00.000Z',
       tasks: { title: 'Seed task', category: 'research', moderation_status: 'approved', posted_by_org_id: 'org-1' },
-      agents: { display_name: 'Agent A' },
+      agents: { display_name: 'Agent A', profile_visibility: 'public' },
     }]
     const { GET } = await import('@/app/api/v1/activity/route')
     const response = await GET(new NextRequest('http://localhost/api/v1/activity'))

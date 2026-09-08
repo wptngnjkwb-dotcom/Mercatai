@@ -30,6 +30,7 @@ const rawTask = {
 }
 
 let selectedColumns = ''
+let agentProfileVisibility = 'public'
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
@@ -43,6 +44,9 @@ vi.mock('@/lib/server/supabase', () => ({
         eq: (field: string, value: unknown) => { eqFilters.push([field, value]); return builder },
         order: () => builder,
         limit: () => builder,
+        // fetchAgentVisibilityRow's lookup — this test is about a public
+        // agent's work history, so it's always visible.
+        single: async () => (table === 'agents' ? { data: { id: AGENT_ID, profile_visibility: agentProfileVisibility }, error: null } : { data: null, error: null }),
         then: (resolve: (v: unknown) => unknown) => {
           if (table !== 'tasks') return resolve({ data: [], error: null })
           const matches = eqFilters.every(([f, v]) => (rawTask as Record<string, unknown>)[f] === v)
@@ -86,6 +90,18 @@ describe('GET /api/v1/agents/[id]/tasks', () => {
       expect(body.tasks).toEqual([])
     } finally {
       ;(rawTask as any).moderation_status = original
+    }
+  })
+
+  it('404s a private agent\'s work history for an anonymous caller', async () => {
+    agentProfileVisibility = 'private'
+    try {
+      const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')
+      const request = new NextRequest(`http://localhost/api/v1/agents/${AGENT_ID}/tasks`)
+      const response = await GET(request, { params: { id: AGENT_ID } })
+      expect(response.status).toBe(404)
+    } finally {
+      agentProfileVisibility = 'public'
     }
   })
 })

@@ -70,7 +70,15 @@ CREATE TABLE IF NOT EXISTS agents (
     -- One Stripe Connect account per agent — never shared, or one agent's
     -- payouts could be misdirected to another's Stripe account.
     stripe_account_id           TEXT UNIQUE,
-    stripe_onboarding_completed BOOLEAN NOT NULL DEFAULT false
+    stripe_onboarding_completed BOOLEAN NOT NULL DEFAULT false,
+    -- 'private' hides this agent from public discovery (directories, search,
+    -- recommendations, Store) and profile/reputation/reviews/portfolio/work
+    -- history, without affecting login, bidding, delivery, or payouts — see
+    -- frontend/sql/12_agent_profile_visibility.sql for the full rationale
+    -- and every place this is enforced. Defaults to 'public' so applying
+    -- this to an existing database changes nothing for existing agents.
+    profile_visibility          TEXT NOT NULL DEFAULT 'public'
+                                CHECK (profile_visibility IN ('public', 'private'))
 );
 
 -- ============================================================
@@ -286,6 +294,14 @@ CREATE INDEX IF NOT EXISTS idx_agents_embedding
 
 CREATE INDEX IF NOT EXISTS idx_tasks_embedding
     ON tasks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- Public listings (GET /agents, /agents/recommend, GET /store) filter on
+-- is_active = true AND profile_visibility = 'public' together — a partial
+-- index scoped to exactly that shape keeps it small and cheap regardless
+-- of table size.
+CREATE INDEX IF NOT EXISTS idx_agents_public_active
+    ON agents (reputation_score DESC, id)
+    WHERE is_active = true AND profile_visibility = 'public';
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status      ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_category    ON tasks(category);

@@ -5,6 +5,7 @@ import { auditLog } from '@/lib/server/audit'
 import { applyReputationEvent } from '@/lib/server/reputation'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { recordAffiliateEarning } from '@/lib/server/affiliate'
+import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   // 1. Autentizace — buyer token for this task, or admin token
@@ -117,7 +118,13 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     details: { transaction_id: tx?.id, agent_payout_eur: tx?.agent_payout_eur },
   })
 
-  fireWebhooks('task.completed', { task_id: params.id, agent_payout_eur: tx?.agent_payout_eur, agent_id: task.assigned_agent_id })
+  // Third-party developer webhooks never learn a private agent's identity
+  // — see frontend/lib/server/agentVisibility.ts.
+  fireWebhooks('task.completed', {
+    task_id: params.id,
+    agent_payout_eur: tx?.agent_payout_eur,
+    ...(await agentIdentityForWebhook(db, task.assigned_agent_id)),
+  })
 
   // Affiliate: record 30% share for the referring API client (fire-and-forget)
   if (tx?.platform_fee_eur > 0) {

@@ -14,13 +14,20 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { agent_id, display_name, description, capabilities, languages, owner_email, gdpr_consent, organization_join_token } = body
+    const { agent_id, display_name, description, capabilities, languages, owner_email, gdpr_consent, organization_join_token, profile_visibility } = body
 
     if (!agent_id || !display_name) {
       return NextResponse.json({ error: 'agent_id and display_name are required' }, { status: 400 })
     }
     if (!gdpr_consent) {
       return NextResponse.json({ error: 'GDPR consent is required to register' }, { status: 400 })
+    }
+    // Optional — defaults to 'public'. A private agent still logs in, bids,
+    // delivers, and gets paid exactly the same; only its discoverability
+    // changes. See frontend/lib/server/agentVisibility.ts.
+    const resolvedVisibility = profile_visibility === undefined ? 'public' : profile_visibility
+    if (resolvedVisibility !== 'public' && resolvedVisibility !== 'private') {
+      return NextResponse.json({ error: "profile_visibility must be 'public' or 'private'" }, { status: 400 })
     }
     // Already documented as required in the OpenAPI spec (RegisterAgentRequest)
     // and needed for real — it becomes the Stripe Connect account's email at
@@ -107,6 +114,7 @@ export async function POST(request: NextRequest) {
         reputation_score: 50.0,
         tier: 1,
         free_tasks_remaining: 10,
+        profile_visibility: resolvedVisibility,
         // Auto-approved on registration so agents can start bidding immediately.
         // Risk is bounded: new agents carry a low Mercatai Score, and buyers
         // choose the winning bid and pay only on approval (pay-on-approval).
@@ -137,6 +145,7 @@ export async function POST(request: NextRequest) {
       id: agent.id,
       agent_id: agent.agent_id,
       display_name: agent.display_name,
+      profile_visibility: agent.profile_visibility,
       status: 'active',
       message: 'Agent registered and active — you can log in and start bidding.',
       api_key: apiKey,
@@ -157,11 +166,15 @@ export async function GET(request: NextRequest) {
   const capability = searchParams.get('capability')
   const language = searchParams.get('language')
 
-  let query = db.from('agents').select('id,agent_id,display_name,description,capabilities,languages,reputation_score,tier,success_rate,total_tasks_completed').eq('is_active', true)
+  // profile_visibility = 'public' excludes agents that opted into a private
+  // profile — see frontend/lib/server/agentVisibility.ts. This route has no
+  // caller-identity concept at all (unauthenticated), so there is no
+  // exception for "the agent itself" here the way there is on GET /agents/{id}.
+  let query = db.from('agents').select('id,agent_id,display_name,description,capabilities,languages,reputation_score,tier,success_rate,total_tasks_completed').eq('is_active', true).eq('profile_visibility', 'public')
   if (capability) query = query.contains('capabilities', [capability])
   if (language) query = query.contains('languages', [language])
 
   const { data, error } = await query.order('reputation_score', { ascending: false }).limit(50)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ agents: data })
+  return NextResponse.json({ agents: data }, { headers: { 'Cache-Control': 'no-store' } })
 }

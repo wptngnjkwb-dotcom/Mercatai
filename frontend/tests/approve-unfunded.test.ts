@@ -21,6 +21,8 @@ let transactionRow: Record<string, unknown> | null
 let taskRow: Record<string, unknown> | null
 const taskUpdates: Record<string, unknown>[] = []
 const transactionUpdates: Record<string, unknown>[] = []
+const ASSIGNED_AGENT_ID = 'agent-1'
+let assignedAgentVisibility = 'public'
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
@@ -34,7 +36,11 @@ vi.mock('@/lib/server/supabase', () => ({
           return builder
         },
         maybeSingle: async () => ({ data: table === 'transactions' ? transactionRow : taskRow }),
-        single: async () => ({ data: table === 'transactions' ? transactionRow : taskRow }),
+        single: async () => {
+          if (table === 'transactions') return { data: transactionRow }
+          if (table === 'agents') return { data: { id: ASSIGNED_AGENT_ID, profile_visibility: assignedAgentVisibility } }
+          return { data: taskRow }
+        },
       }
       return builder
     },
@@ -62,7 +68,7 @@ const {
   return {
     auditLog: vi.fn(async () => {}),
     applyReputationEvent: vi.fn(async () => {}),
-    fireWebhooks: vi.fn(async () => {}),
+    fireWebhooks: vi.fn(async (_event: string, _payload: Record<string, unknown>) => {}),
     recordAffiliateEarning: vi.fn(async () => {}),
     retrievePaymentIntent: retrieve,
     capturePaymentIntent: capture,
@@ -97,6 +103,7 @@ describe('PUT /api/v1/tasks/[id]/approve', () => {
     // in review, so every case below has to start there to reach the guard.
     taskRow = { id: TASK_ID, status: 'review', assigned_agent_id: 'agent-1' }
     process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'
+    assignedAgentVisibility = 'public'
   })
 
   function expectNoSideEffects() {
@@ -189,5 +196,40 @@ describe('PUT /api/v1/tasks/[id]/approve', () => {
     expect(transactionUpdates[0]).toMatchObject({ escrow_status: 'released' })
     expect(applyReputationEvent).toHaveBeenCalled()
     expect(fireWebhooks).toHaveBeenCalled()
+  })
+
+  it('includes the real agent_id in the public task.completed webhook payload for a public agent', async () => {
+    transactionRow = {
+      id: 'tx-1',
+      task_id: TASK_ID,
+      escrow_status: 'held',
+      platform_fee_eur: 5,
+      agent_payout_eur: 90,
+      stripe_payment_intent_id: 'pi_test',
+    }
+
+    await PUT(approveRequest(), { params: { id: TASK_ID } })
+
+    expect(fireWebhooks).toHaveBeenCalledWith('task.completed', expect.objectContaining({ agent_id: ASSIGNED_AGENT_ID }))
+  })
+
+  it('never puts a private agent\'s UUID or agent_id in the public task.completed webhook payload', async () => {
+    assignedAgentVisibility = 'private'
+    transactionRow = {
+      id: 'tx-1',
+      task_id: TASK_ID,
+      escrow_status: 'held',
+      platform_fee_eur: 5,
+      agent_payout_eur: 90,
+      stripe_payment_intent_id: 'pi_test',
+    }
+
+    await PUT(approveRequest(), { params: { id: TASK_ID } })
+
+    expect(fireWebhooks).toHaveBeenCalledTimes(1)
+    const payload = fireWebhooks.mock.calls[0][1]
+    expect(payload).not.toHaveProperty('agent_id')
+    expect(payload).toMatchObject({ agent_private: true })
+    expect(JSON.stringify(payload)).not.toContain(ASSIGNED_AGENT_ID)
   })
 })

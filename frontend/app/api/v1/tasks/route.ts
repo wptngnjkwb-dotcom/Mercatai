@@ -12,6 +12,8 @@ import { isRateLimited, clientIp } from '@/lib/server/rateLimit'
 import { recordModerationEvent } from '@/lib/server/taskModeration/audit'
 import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
 import { MAX_TRANSACTION_EUR } from '@/lib/server/settings'
+import { getTokenFromRequest } from '@/lib/server/auth'
+import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -53,8 +55,13 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query.order('created_at', { ascending: false }).limit(limit)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    const tasks = await attachPublicTaskFields(db, data ?? [])
-    return NextResponse.json({ tasks })
+    // Masks assigned_agent_id to null for a task assigned to a private
+    // agent, unless the caller is that agent or an admin — the task buyer
+    // uses the bid id and never needs the agent's internal UUID.
+    const token = await getTokenFromRequest(request)
+    const tasks = await attachPublicTaskFields(db, data ?? [], token)
+    // assigned_agent_id can differ by caller for private agents.
+    return withPrivateCacheHeaders(NextResponse.json({ tasks }))
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: msg }, { status: 500 })

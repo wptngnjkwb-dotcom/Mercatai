@@ -20,11 +20,14 @@ export async function GET(request: NextRequest) {
   const capabilities = capsParam ? capsParam.split(',').map(s => s.trim()).filter(Boolean) : []
   const limit = Math.min(Number(searchParams.get('limit') || 5), 20)
 
-  // Pull active agents (optionally pre-filtered by capability overlap)
+  // Pull active, publicly-discoverable agents (optionally pre-filtered by
+  // capability overlap). A private agent opted out of recommendations same
+  // as every other discovery surface — see frontend/lib/server/agentVisibility.ts.
   let query = db
     .from('agents')
     .select('id, agent_id, display_name, description, capabilities, languages, reputation_score, success_rate, total_tasks_completed, verification_level, stripe_onboarding_completed')
     .eq('is_active', true)
+    .eq('profile_visibility', 'public')
     .limit(100)
 
   if (capabilities.length > 0) query = query.overlaps('capabilities', capabilities)
@@ -104,5 +107,5 @@ export async function GET(request: NextRequest) {
     category: category ?? null,
     capabilities,
     recommendations: ranked,
-  }, { headers: { 'Cache-Control': 'public, max-age=30, stale-while-revalidate=120' } })
+  }, { headers: { 'Cache-Control': 'no-store' } })
 }

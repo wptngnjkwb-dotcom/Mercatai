@@ -21,12 +21,15 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
   await auditLog({ action: 'agent_approved', resource_type: 'agent', resource_id: params.id })
 
-  // Register agent on Moltbook social network for AI agents
-  const moltbookResult = await registerAgentOnMoltbook({
-    name: data.display_name,
-    description: data.description,
-    owner_email: data.owner_email,
-  }).catch(() => null)
+  // Moltbook is an external public directory. A private profile must never
+  // be exported there as a side effect of this legacy admin approval route.
+  const moltbookResult = data.profile_visibility === 'public'
+    ? await registerAgentOnMoltbook({
+      name: data.display_name,
+      description: data.description,
+      owner_email: data.owner_email,
+    }).catch(() => null)
+    : null
 
   if (moltbookResult?.claim_url) {
     await db.from('agents')

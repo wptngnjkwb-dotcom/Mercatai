@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { resolveApiClient } from '@/lib/server/affiliate'
+import { getTokenFromRequest } from '@/lib/server/auth'
+import { isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 
 // Tier labels for human-readable output
 const TIER_LABELS: Record<number, string> = {
@@ -52,11 +54,19 @@ export async function GET(
 
   const { data: agent, error } = await db
     .from('agents')
-    .select('id, agent_id, display_name, reputation_score, tier, success_rate, total_tasks_completed, is_active, created_at')
+    .select('id, agent_id, display_name, reputation_score, tier, success_rate, total_tasks_completed, is_active, created_at, profile_visibility')
     .eq(isUuid ? 'id' : 'agent_id', idParam)
     .single()
 
   if (error || !agent) {
+    return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
+  }
+
+  // A developer mct_ API key (apiClient, above) never unlocks a private
+  // profile — only a JWT that is this agent's own, an admin's, matters
+  // here, so this is deliberately a separate check from apiClient.
+  const token = await getTokenFromRequest(request)
+  if (!isAgentVisibleTo(token, agent)) {
     return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
   }
 
@@ -105,11 +115,10 @@ export async function GET(
     },
   }
 
-  return NextResponse.json(response, {
-    headers: {
-      'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
-    },
-  })
+  // Do not cache even a currently-public reputation response: visibility can
+  // be switched to private at any time, and a stale shared response would
+  // keep exposing the profile after that switch.
+  return withPrivateCacheHeaders(NextResponse.json(response))
 }
 
 // Very rough percentile based on score distribution

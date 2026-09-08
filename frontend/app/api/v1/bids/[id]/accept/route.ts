@@ -3,6 +3,7 @@ import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { fireWebhooks } from '@/lib/server/webhooks'
+import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   const token = await getTokenFromRequest(request)
@@ -54,6 +55,14 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   ])
 
   await auditLog({ action: 'bid_accepted', resource_type: 'bid', resource_id: params.id, details: { task_id: bid.task_id, agent_id: bid.agent_id } })
-  fireWebhooks('bid.accepted', { bid_id: params.id, task_id: bid.task_id, agent_id: bid.agent_id, price_eur: bid.price_eur })
+  // Third-party developer webhooks never learn a private agent's identity
+  // — see frontend/lib/server/agentVisibility.ts. The audit log above is
+  // internal, not public distribution, and keeps the real agent_id.
+  fireWebhooks('bid.accepted', {
+    bid_id: params.id,
+    task_id: bid.task_id,
+    price_eur: bid.price_eur,
+    ...(await agentIdentityForWebhook(db, bid.agent_id)),
+  })
   return NextResponse.json({ id: params.id, status: 'accepted', task_status: 'assigned' })
 }

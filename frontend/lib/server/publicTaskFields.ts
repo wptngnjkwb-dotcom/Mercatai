@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/server/supabase'
+import { fetchAgentVisibilityRows, isAgentVisibleTo, type DecodedTokenLike } from '@/lib/server/agentVisibility'
 
 /**
  * Public, buyer-facing funding state. Deliberately not a 1:1 mirror of
@@ -62,6 +63,7 @@ export async function fetchSeedOrgIds(db: ReturnType<typeof getSupabase>, orgIds
 interface TaskWithOrg {
   id: string
   posted_by_org_id?: string | null
+  assigned_agent_id?: string | null
 }
 
 interface TransactionAttempt {
@@ -109,29 +111,46 @@ function pickLatestEscrowStatusPerTask(rows: TransactionAttempt[]): Map<string, 
  * org/task name, description, or any client-supplied value). `posted_by_org_id`
  * itself is stripped from every returned object — only the two derived
  * fields are public.
+ *
+ * When `assigned_agent_id` points at a private agent, it's replaced with
+ * `null` in the response unless `token` belongs to that agent or an admin.
+ * A task buyer sees the private agent's chosen display identity and
+ * reputation on the bid, but never needs this internal UUID. This is
+ * applied here with one batched
+ * agents query for the whole page rather than a per-task lookup.
  */
 export async function attachPublicTaskFields<T extends TaskWithOrg>(
   db: ReturnType<typeof getSupabase>,
-  tasks: T[]
+  tasks: T[],
+  token?: DecodedTokenLike | null
 ): Promise<Array<Omit<T, 'posted_by_org_id'> & { is_demo: boolean; funding_status: FundingStatus }>> {
   if (tasks.length === 0) return []
 
   const taskIds = tasks.map((t) => t.id)
   const orgIds = Array.from(new Set(tasks.map((t) => t.posted_by_org_id).filter((id): id is string => !!id)))
+  const assignedAgentIds = tasks.map((t) => t.assigned_agent_id).filter((id): id is string => !!id)
 
-  const [seedOrgIds, txRows] = await Promise.all([
+  const [seedOrgIds, txRows, agentVisibilityById] = await Promise.all([
     fetchSeedOrgIds(db, orgIds),
     fetchInChunks<TransactionAttempt>(taskIds, (chunk) =>
       db.from('transactions').select('id, task_id, escrow_status, created_at').in('task_id', chunk)
     ),
+    fetchAgentVisibilityRows(db, assignedAgentIds),
   ])
 
   const latestStatusByTask = pickLatestEscrowStatusPerTask(txRows)
 
   return tasks.map((t) => {
-    const { posted_by_org_id, ...rest } = t
+    const { posted_by_org_id, assigned_agent_id, ...rest } = t
+    const assignedAgent = assigned_agent_id ? agentVisibilityById.get(assigned_agent_id) : undefined
+    // The identifier is public only when the referenced row exists and its
+    // visibility decision succeeds. Missing rows and unknown visibility
+    // values fail closed instead of becoming an identity leak.
+    const agentVisible = !assigned_agent_id
+      || (!!assignedAgent && isAgentVisibleTo(token, assignedAgent))
     return {
       ...rest,
+      assigned_agent_id: agentVisible ? assigned_agent_id : null,
       is_demo: !!posted_by_org_id && seedOrgIds.has(posted_by_org_id),
       funding_status: mapEscrowStatusToFundingStatus(latestStatusByTask.get(t.id)),
     } as Omit<T, 'posted_by_org_id'> & { is_demo: boolean; funding_status: FundingStatus }

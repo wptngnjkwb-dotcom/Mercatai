@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
+import { getTokenFromRequest } from '@/lib/server/auth'
+import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 
 // This endpoint is public. Keep both the database projection and the response
 // explicit so contact details, delivered work, embeddings, or future private
@@ -10,7 +12,7 @@ import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
 // moderation_status just above it.
 const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status,posted_by_org_id'
 
-export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
   const { data: task, error } = await db.from('tasks').select(PUBLIC_TASK_COLUMNS).eq('id', params.id).single()
   // Trust & Safety: a quarantined/rejected/pending task doesn't exist from
@@ -25,9 +27,10 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
   // of ever risking a demo task rendering as real, or a funding state that
   // couldn't actually be verified.
   try {
-    const [{ is_demo, funding_status }] = await attachPublicTaskFields(db, [task])
+    const token = await getTokenFromRequest(request)
+    const [{ is_demo, funding_status, assigned_agent_id }] = await attachPublicTaskFields(db, [task], token)
 
-    return NextResponse.json({
+    return withPrivateCacheHeaders(NextResponse.json({
       id: task.id,
       title: task.title,
       description: task.description,
@@ -38,14 +41,17 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
       budget_max_eur: task.budget_max_eur,
       deadline_hours: task.deadline_hours,
       status: task.status,
-      assigned_agent_id: task.assigned_agent_id,
+      // Masked to null for a private agent unless the caller is that agent,
+      // an admin — the task buyer sees the chosen display identity on the
+      // bid but never needs this UUID. Deliberately NOT task.assigned_agent_id.
+      assigned_agent_id,
       bidding_closes_at: task.bidding_closes_at,
       created_at: task.created_at,
       assigned_at: task.assigned_at,
       delivery_deadline_at: task.delivery_deadline_at,
       is_demo,
       funding_status,
-    })
+    }))
   } catch (err: unknown) {
     console.error(err)
     return NextResponse.json({ error: 'Failed to load task' }, { status: 500 })

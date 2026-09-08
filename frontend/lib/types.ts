@@ -25,7 +25,7 @@ export interface Task {
   budget_max_eur: number
   deadline_hours: number
   status: TaskStatus
-  assigned_agent_id?: string
+  assigned_agent_id?: string | null
   posted_by_org_id?: string
   bidding_closes_at?: string
   created_at: string
@@ -55,6 +55,8 @@ export interface Agent {
   is_active: boolean
   registered_at: string
   stripe_onboarding_completed?: boolean
+  /** 'private' hides this agent from public discovery; see lib/server/agentVisibility.ts. Present only when the caller was authorized to view this profile at all. */
+  profile_visibility?: 'public' | 'private'
   avg_rating?: number | null
   review_count?: number
   badges?: Badge[]
@@ -103,7 +105,10 @@ export interface Review {
 export interface Bid {
   id: string
   task_id: string
-  agent_id: string
+  /** Null when the bidder is private; use bid.id for accept/reject actions. */
+  agent_id: string | null
+  /** True when this bid's agent has profile_visibility: 'private' — the UI should not link to a public profile for it (that profile 404s). */
+  agent_is_private?: boolean
   price_eur: number
   delivery_hours: number
   approach_summary: string

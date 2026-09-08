@@ -5,6 +5,7 @@ import { auditLog } from '@/lib/server/audit'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { sendTaskCreated } from '@/lib/server/email'
 import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
+import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
 
 /**
  * Instant hire — the second entry point into the marketplace.
@@ -33,12 +34,15 @@ export async function POST(request: NextRequest, { params }: { params: { listing
 
     const { data: listing } = await db
       .from('agent_listings')
-      .select('*, agents!inner(id,display_name,is_active)')
+      .select('*, agents!inner(id,display_name,is_active,profile_visibility)')
       .eq('id', params.listingId)
       .eq('is_active', true)
       .single()
 
-    if (!listing || !(listing.agents as any)?.is_active) {
+    // A private agent's listing must be just as unreachable by a known
+    // listingId as it already is from the GET /store list — otherwise
+    // hiding it from the list is a UI-only fig leaf, not a real boundary.
+    if (!listing || !(listing.agents as any)?.is_active || (listing.agents as any)?.profile_visibility !== 'public') {
       return NextResponse.json({ error: 'Listing not found or inactive' }, { status: 404 })
     }
 
@@ -162,7 +166,11 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       details: { listing_id: listing.id, price_eur: listing.price_eur },
       ip_address: request.headers.get('x-forwarded-for') ?? undefined,
     })
-    fireWebhooks('bid.accepted', { task_id: task.id, agent_id: listing.agent_id, price_eur: listing.price_eur })
+    fireWebhooks('bid.accepted', {
+      task_id: task.id,
+      ...(await agentIdentityForWebhook(db, listing.agent_id)),
+      price_eur: listing.price_eur,
+    })
 
     if (buyer_email && typeof buyer_email === 'string' && buyer_email.includes('@')) {
       sendTaskCreated({

@@ -26,6 +26,7 @@ export default function AgentRegisterPage() {
   const [result, setResult] = useState<any>(null)
   const [caps, setCaps] = useState<string[]>([])
   const [langs, setLangs] = useState<string[]>(['en'])
+  const [profileVisibility, setProfileVisibility] = useState<'public' | 'private'>('public')
   const [gdprConsent, setGdprConsent] = useState(false)
   const [form, setForm] = useState({
     agent_id: '',
@@ -55,6 +56,7 @@ export default function AgentRegisterPage() {
         ...form,
         capabilities: caps,
         languages: langs,
+        profile_visibility: profileVisibility,
         gdpr_consent: true,
         ...(form.monthly_spending_limit_eur ? { monthly_spending_limit_eur: Number(form.monthly_spending_limit_eur) } : {}),
         ...(form.avatar_book_id ? { avatar_book_id: form.avatar_book_id } : {}),
@@ -82,6 +84,10 @@ export default function AgentRegisterPage() {
           <div className="flex justify-between py-1"><span className="text-gray-500">Agent ID</span><span className="font-mono">{result?.agent_id}</span></div>
           <div className="flex justify-between py-1"><span className="text-gray-500">DB ID</span><span className="font-mono text-xs">{result?.id}</span></div>
           <div className="flex justify-between py-1"><span className="text-gray-500">AvatarBook verified</span><span>{result?.avatar_book_verified ? '✅ Yes' : '❌ No'}</span></div>
+          <div className="flex justify-between py-1">
+            <span className="text-gray-500">{t('visibilityLabel')}</span>
+            <span>{result?.profile_visibility === 'private' ? t('visibilityPrivateTitle') : t('visibilityPublicTitle')}</span>
+          </div>
         </div>
         {result?.api_key && (
           <div className="mt-4 bg-amber-50 border border-amber-300 rounded-lg p-4 text-left">
@@ -167,6 +173,39 @@ export default function AgentRegisterPage() {
             <input className="input" type="number" min="0" value={form.monthly_spending_limit_eur} onChange={set('monthly_spending_limit_eur')}
               placeholder="1000" />
           </div>
+        </div>
+
+        <div>
+          <label className="label">{t('visibilityLabel')}</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
+            <label className={`card p-4 cursor-pointer border-2 transition-colors ${profileVisibility === 'public' ? 'border-brand-600' : 'border-transparent'}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <input
+                  type="radio"
+                  name="profile_visibility"
+                  className="h-4 w-4 text-brand-600 focus:ring-brand-600"
+                  checked={profileVisibility === 'public'}
+                  onChange={() => setProfileVisibility('public')}
+                />
+                <span className="font-semibold text-gray-900">{t('visibilityPublicTitle')}</span>
+              </div>
+              <p className="text-xs text-gray-500">{t('visibilityPublicDesc')}</p>
+            </label>
+            <label className={`card p-4 cursor-pointer border-2 transition-colors ${profileVisibility === 'private' ? 'border-brand-600' : 'border-transparent'}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <input
+                  type="radio"
+                  name="profile_visibility"
+                  className="h-4 w-4 text-brand-600 focus:ring-brand-600"
+                  checked={profileVisibility === 'private'}
+                  onChange={() => setProfileVisibility('private')}
+                />
+                <span className="font-semibold text-gray-900">{t('visibilityPrivateTitle')}</span>
+              </div>
+              <p className="text-xs text-gray-500">{t('visibilityPrivateDesc')}</p>
+            </label>
+          </div>
+          <p className="text-xs text-gray-400 mt-1">{t('visibilityNote')}</p>
         </div>
 
         <label className="flex items-start gap-3 cursor-pointer">

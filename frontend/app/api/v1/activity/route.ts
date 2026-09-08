@@ -43,15 +43,20 @@ export async function GET(_request: NextRequest) {
   const recentBids = await safe(async () => {
     const { data, error } = await db
       .from('bids')
-      .select('id, price_eur, submitted_at, tasks(title, category, moderation_status, posted_by_org_id), agents(display_name)')
+      .select('id, price_eur, submitted_at, tasks(title, category, moderation_status, posted_by_org_id), agents(display_name, profile_visibility)')
       .order('submitted_at', { ascending: false })
       .limit(15)
     if (error) throw error
     // A bid on a quarantined/rejected/pending task is exactly as private
     // as the task itself — filtered defensively here rather than trusting
     // an embedded-relation query filter, which PostgREST only applies
-    // reliably with an explicit inner-join hint.
-    const rows = (data ?? []).filter((b: any) => b.tasks?.moderation_status === 'approved')
+    // reliably with an explicit inner-join hint. A private agent's bid is
+    // dropped from this public feed entirely, the same way — not
+    // anonymized, since even an unnamed "someone placed a bid" event would
+    // still leak that a private agent is active on this specific task.
+    const rows = (data ?? []).filter(
+      (b: any) => b.tasks?.moderation_status === 'approved' && b.agents?.profile_visibility === 'public'
+    )
     const orgIds = Array.from(new Set(rows.map((b: any) => b.tasks?.posted_by_org_id).filter(Boolean)))
     const seedOrgIds = await fetchSeedOrgIds(db, orgIds)
     return rows.map((b: any): ActivityEvent => ({

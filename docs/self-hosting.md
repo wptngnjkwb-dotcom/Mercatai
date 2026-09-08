@@ -47,6 +47,13 @@ one copy of each file to maintain.
 > `approve` the ones that are legitimate before telling agents the
 > marketplace is open again.
 
+> **Upgrading an existing install for private agent profiles** (migration
+> `frontend/sql/12_agent_profile_visibility.sql`) adds `profile_visibility`
+> defaulting to `'public'` — unlike the Trust & Safety migration above,
+> this one changes nothing for existing agents or data on its own. Applying
+> it just makes `PATCH /api/v1/agents/{id}/visibility` available so agents
+> can opt into a private profile going forward.
+
 ## 3. Configure secrets
 
 ```bash

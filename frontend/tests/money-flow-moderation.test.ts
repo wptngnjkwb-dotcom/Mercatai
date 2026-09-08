@@ -10,6 +10,7 @@ const BID_ID = 'bid-1'
 
 let taskModerationStatus = 'approved'
 let agentStripeOnboardingCompleted = true
+let acceptedBidAgentVisibility = 'public'
 const taskUpdates: Record<string, unknown>[] = []
 const agentUpdates: Record<string, unknown>[] = []
 
@@ -81,6 +82,7 @@ vi.mock('@/lib/server/supabase', () => ({
           // The insert(...).select().single() at the end of a successful
           // create-intent call reaches here for 'transactions'.
           if (table === 'transactions') return { data: { id: 'tx-fake-1' }, error: null }
+          if (table === 'agents') return { data: { id: 'agent-1', profile_visibility: acceptedBidAgentVisibility }, error: null }
           return { data: null, error: null }
         },
         update: (values: Record<string, unknown>) => {
@@ -96,7 +98,8 @@ vi.mock('@/lib/server/supabase', () => ({
 }))
 
 vi.mock('@/lib/server/audit', () => ({ auditLog: vi.fn(async () => {}) }))
-vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks: vi.fn(async () => {}) }))
+const { fireWebhooks } = vi.hoisted(() => ({ fireWebhooks: vi.fn(async (_event: string, _payload: Record<string, unknown>) => {}) }))
+vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks }))
 vi.mock('@/lib/server/fees', () => ({ calculateFees: vi.fn(() => ({ stripe_fee_eur: 1, platform_fee_eur: 2.5, agent_payout_eur: 46.5 })) }))
 vi.mock('@/lib/server/settings', () => ({ getPlatformFeePercent: vi.fn(async () => 5), MAX_TRANSACTION_EUR: 10_000 }))
 vi.mock('@/lib/server/paymentState', () => ({ reconcilePaymentIntent: vi.fn(async () => 'requires_action') }))
@@ -104,6 +107,7 @@ vi.mock('@/lib/server/paymentState', () => ({ reconcilePaymentIntent: vi.fn(asyn
 beforeEach(() => {
   taskModerationStatus = 'approved'
   agentStripeOnboardingCompleted = true
+  acceptedBidAgentVisibility = 'public'
   taskUpdates.length = 0
   agentUpdates.length = 0
   existingTxRow = null
@@ -112,6 +116,7 @@ beforeEach(() => {
   stripePaymentIntentsCreate.mockClear()
   stripePaymentIntentsRetrieve.mockClear()
   stripePaymentIntentsCancel.mockClear()
+  fireWebhooks.mockClear()
 })
 
 describe('PUT /api/v1/bids/[id]/accept — moderation guard', () => {
@@ -140,6 +145,35 @@ describe('PUT /api/v1/bids/[id]/accept — moderation guard', () => {
 
     expect(response.status).toBe(200)
     expect(taskUpdates.length).toBeGreaterThan(0)
+  })
+
+  it('includes the real agent_id in the public bid.accepted webhook payload for a public agent', async () => {
+    const { PUT } = await import('@/app/api/v1/bids/[id]/accept/route')
+    const buyerToken = await signToken({ role: 'buyer', task_id: TASK_ID, org_id: 'org-1' }, '30d')
+    const request = new NextRequest(`http://localhost/api/v1/bids/${BID_ID}/accept`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${buyerToken}` },
+    })
+    await PUT(request, { params: { id: BID_ID } })
+
+    expect(fireWebhooks).toHaveBeenCalledWith('bid.accepted', expect.objectContaining({ agent_id: 'agent-1' }))
+  })
+
+  it('never puts a private agent\'s UUID or agent_id in the public bid.accepted webhook payload', async () => {
+    acceptedBidAgentVisibility = 'private'
+    const { PUT } = await import('@/app/api/v1/bids/[id]/accept/route')
+    const buyerToken = await signToken({ role: 'buyer', task_id: TASK_ID, org_id: 'org-1' }, '30d')
+    const request = new NextRequest(`http://localhost/api/v1/bids/${BID_ID}/accept`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${buyerToken}` },
+    })
+    await PUT(request, { params: { id: BID_ID } })
+
+    expect(fireWebhooks).toHaveBeenCalledTimes(1)
+    const payload = fireWebhooks.mock.calls[0][1]
+    expect(payload).not.toHaveProperty('agent_id')
+    expect(payload).toMatchObject({ agent_private: true })
+    expect(JSON.stringify(payload)).not.toContain('agent-1')
   })
 })
 

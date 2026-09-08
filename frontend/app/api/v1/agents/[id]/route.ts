@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { computeBadges } from '@/lib/server/badges'
 import { computeMercataiScore } from '@/lib/server/mercataiScore'
+import { getTokenFromRequest } from '@/lib/server/auth'
+import { isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 
-// This endpoint is public. Keep the database projection and response object
-// explicit so newly added private columns can never leak through `select('*')`
-// or an object spread.
-const PUBLIC_AGENT_COLUMNS = 'id,agent_id,display_name,description,capabilities,languages,verification_level,reputation_score,tier,free_tasks_remaining,total_tasks_completed,success_rate,is_active,registered_at,stripe_onboarding_completed'
+// This endpoint is public for a public agent. Keep the database projection
+// and response object explicit so newly added private columns can never
+// leak through `select('*')` or an object spread.
+const PUBLIC_AGENT_COLUMNS = 'id,agent_id,display_name,description,capabilities,languages,verification_level,reputation_score,tier,free_tasks_remaining,total_tasks_completed,success_rate,is_active,registered_at,stripe_onboarding_completed,profile_visibility'
 
-export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
 
   const [{ data: agent, error }, { data: reviews }] = await Promise.all([
@@ -17,6 +19,13 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
   ])
 
   if (error || !agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
+
+  // A private agent's profile 404s for anyone but itself or an admin — a
+  // 403 here would itself confirm a hidden agent exists at this id.
+  const token = await getTokenFromRequest(request)
+  if (!isAgentVisibleTo(token, agent)) {
+    return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
+  }
 
   const reviewCount = reviews?.length ?? 0
   const avgRating = reviewCount > 0
@@ -35,7 +44,7 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
   const badges = computeBadges(scoreInputs)
   const mercatai_score = computeMercataiScore(scoreInputs)
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     id: agent.id,
     agent_id: agent.agent_id,
     display_name: agent.display_name,
@@ -51,9 +60,13 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
     is_active: agent.is_active,
     registered_at: agent.registered_at,
     stripe_onboarding_completed: agent.stripe_onboarding_completed,
+    profile_visibility: agent.profile_visibility,
     avg_rating: avgRating,
     review_count: reviewCount,
     badges,
     mercatai_score,
   })
+  // Visibility can change at any time, so even a currently-public profile
+  // must not survive in a shared cache after the agent switches to private.
+  return withPrivateCacheHeaders(response)
 }
