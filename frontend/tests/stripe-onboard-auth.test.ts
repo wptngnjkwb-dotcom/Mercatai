@@ -192,6 +192,38 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({ country: 'NO' }))
   })
 
+  it('accepts every EU member represented by a non-default example and provisions card, SEPA, and transfers', async () => {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'DE' }), { params: { id: OWN_AGENT_ID } })
+
+    expect(response.status).toBe(200)
+    expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({
+      country: 'DE',
+      capabilities: {
+        card_payments: { requested: true },
+        sepa_debit_payments: { requested: true },
+        transfers: { requested: true },
+      },
+    }))
+  })
+
+  it('accepts a documented non-EEA Stripe Connect country without requesting the EU-only SEPA capability', async () => {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'PE' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.supported_payment_methods).toEqual(['card'])
+    expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({
+      country: 'PE',
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+    }))
+    expect((accountsCreate as any).mock.calls[0][0].capabilities).not.toHaveProperty('sepa_debit_payments')
+  })
+
   it('does not hardcode business_type — omits it from the Stripe call when the caller does not supply one', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'NO' }), { params: { id: OWN_AGENT_ID } })
@@ -432,6 +464,25 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
     } as any)
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.message).toMatch(/already completed/i)
+    expect(accountsUpdate).not.toHaveBeenCalled()
+    expect(accountLinksCreate).not.toHaveBeenCalled()
+  })
+
+  it('does not demand SEPA from a completed non-EEA account whose country profile is card-only', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'PE',
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'PE' }), { params: { id: OWN_AGENT_ID } })
     const body = await response.json()
 
     expect(response.status).toBe(200)

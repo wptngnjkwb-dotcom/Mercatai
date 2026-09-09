@@ -54,6 +54,7 @@ interface PaymentCheckoutProps {
 
 export default function PaymentCheckout({ taskId, buyerToken, amountEur, onComplete }: PaymentCheckoutProps) {
   const [method, setMethod] = useState<PaymentMethod>('card')
+  const [availableMethods, setAvailableMethods] = useState<PaymentMethod[]>(['card', 'sepa_debit'])
   const [intent, setIntent] = useState<PaymentIntentResponse | null>(null)
   const [stripe, setStripe] = useState<StripeClient | null>(null)
   const [elements, setElements] = useState<StripeElements | null>(null)
@@ -108,7 +109,18 @@ export default function PaymentCheckout({ taskId, buyerToken, amountEur, onCompl
         body: JSON.stringify({ task_id: taskId, payment_method: method }),
       })
       const body = await response.json()
-      if (!response.ok) throw new Error(body.error || 'Could not start payment')
+      if (!response.ok) {
+        if (Array.isArray(body.supported_payment_methods)) {
+          const supported = body.supported_payment_methods.filter((value: unknown): value is PaymentMethod =>
+            value === 'card' || value === 'sepa_debit'
+          )
+          if (supported.length > 0) {
+            setAvailableMethods(supported)
+            if (!supported.includes(method)) setMethod(supported[0])
+          }
+        }
+        throw new Error(body.error || 'Could not start payment')
+      }
       setIntent(body)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start payment')
@@ -157,19 +169,21 @@ export default function PaymentCheckout({ taskId, buyerToken, amountEur, onCompl
   if (!intent) {
     return (
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className={`grid gap-3 ${availableMethods.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
           <button type="button" onClick={() => setMethod('card')}
             className={`rounded-xl border p-4 text-left ${method === 'card' ? 'border-brand-600 bg-brand-50' : 'border-gray-200'}`}>
             <CreditCard size={20} className="mb-2" />
             <span className="block font-semibold">Card</span>
             <span className="text-xs text-gray-500">Authorized now, captured after approval</span>
           </button>
-          <button type="button" onClick={() => setMethod('sepa_debit')}
-            className={`rounded-xl border p-4 text-left ${method === 'sepa_debit' ? 'border-brand-600 bg-brand-50' : 'border-gray-200'}`}>
-            <Landmark size={20} className="mb-2" />
-            <span className="block font-semibold">SEPA debit</span>
-            <span className="text-xs text-gray-500">Bank debit; work starts after settlement</span>
-          </button>
+          {availableMethods.includes('sepa_debit') && (
+            <button type="button" onClick={() => setMethod('sepa_debit')}
+              className={`rounded-xl border p-4 text-left ${method === 'sepa_debit' ? 'border-brand-600 bg-brand-50' : 'border-gray-200'}`}>
+              <Landmark size={20} className="mb-2" />
+              <span className="block font-semibold">SEPA debit</span>
+              <span className="text-xs text-gray-500">Bank debit; work starts after settlement</span>
+            </button>
+          )}
         </div>
         <div className="flex justify-between rounded-lg bg-gray-50 px-4 py-3">
           <span className="font-medium">Total</span>

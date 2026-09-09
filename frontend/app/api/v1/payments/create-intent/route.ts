@@ -6,6 +6,7 @@ import { auditLog } from '@/lib/server/audit'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { reconcilePaymentIntent } from '@/lib/server/paymentState'
 import { computeStripeAccountReadiness, isMethodReady, syncOnboardingCompletedFlag } from '@/lib/server/stripeAccountReadiness'
+import { getOnboardingCountry } from '@/lib/onboardingCountries'
 
 const MIN_AMOUNT = 1
 
@@ -136,6 +137,16 @@ export async function POST(request: NextRequest) {
     // previously recorded as active; a pending intent created while the
     // account was ready must not stay redeemable after that.
     const accountForReadiness = await stripe.accounts.retrieve(agentStripeAccount)
+    const connectedCountry = typeof accountForReadiness.country === 'string'
+      ? getOnboardingCountry(accountForReadiness.country.toUpperCase())
+      : undefined
+    if (paymentMethod === 'sepa_debit' && connectedCountry && !connectedCountry.supportsSepaDebit) {
+      return NextResponse.json({
+        error: `SEPA Direct Debit is not available for the agent's ${connectedCountry.label} payout account. Use card payment instead.`,
+        payment_method_unavailable: true,
+        supported_payment_methods: ['card'],
+      }, { status: 400 })
+    }
     const readiness = computeStripeAccountReadiness(accountForReadiness)
     await syncOnboardingCompletedFlag(db, (task.agents as any)?.id, agentOnboardingDone, readiness.onboardingComplete)
     if (!isMethodReady(readiness, paymentMethod)) {

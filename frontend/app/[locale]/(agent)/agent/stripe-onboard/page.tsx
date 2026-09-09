@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { CheckCircle, AlertCircle, Loader2, ExternalLink } from 'lucide-react'
 import { api } from '@/lib/api'
-import { SUPPORTED_ONBOARDING_COUNTRIES } from '@/lib/onboardingCountries'
+import { onboardingCountryGroups, getOnboardingCountry } from '@/lib/onboardingCountries'
+
+const COUNTRY_GROUPS = onboardingCountryGroups()
 
 export default function StripeOnboardPage() {
   const searchParams = useSearchParams()
@@ -116,13 +118,23 @@ export default function StripeOnboardPage() {
             onChange={(e) => setCountry(e.target.value)}
           >
             <option value="">Select a country…</option>
-            {SUPPORTED_ONBOARDING_COUNTRIES.map((c) => (
-              <option key={c.code} value={c.code}>{c.label}</option>
+            {COUNTRY_GROUPS.map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.countries.map((c) => (
+                  <option key={c.code} value={c.code}>{c.label}</option>
+                ))}
+              </optgroup>
             ))}
           </select>
           <p className="text-xs text-gray-400 mt-1">
             Must match the actual country of the person or business that will hold this Stripe payout
-            account — it is difficult to change once the account is created.
+            account.{' '}
+            {country && getOnboardingCountry(country)
+              ? getOnboardingCountry(country)!.supportsSepaDebit
+                ? 'This country supports card and SEPA-funded tasks.'
+                : 'This country currently supports card-funded tasks only.'
+              : 'Most EU/EEA accounts support card and SEPA-funded tasks; a few (e.g. Iceland) and other listed Stripe Connect countries currently support card-funded tasks only.'}
+            {' '}Stripe confirms availability during onboarding.
           </p>
         </div>
 
@@ -133,7 +145,7 @@ export default function StripeOnboardPage() {
           </div>
           <div className="flex items-start gap-3">
             <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">2</span>
-            <span>Provide your business details and bank account (IBAN)</span>
+            <span>Provide your business details and supported bank account information</span>
           </div>
           <div className="flex items-start gap-3">
             <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">3</span>

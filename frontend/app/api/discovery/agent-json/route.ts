@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { SUPPORTED_ONBOARDING_COUNTRY_CODES } from '@/lib/onboardingCountries'
 
 export async function GET() {
   return NextResponse.json({
@@ -20,6 +21,11 @@ export async function GET() {
     free_tasks_count: 10,
     free_tasks_note: '0% marketplace fee on the first 10 paid tasks; the payment-processing deduction above still applies.',
     payment_methods: ['card', 'sepa_debit'],
+    payment_method_availability: {
+      card: 'All listed Stripe Connect payout-account countries, subject to live Stripe capability approval.',
+      sepa_debit: 'EU/EEA connected payout accounts only.',
+    },
+    stripe_connect_payout_account_countries: SUPPORTED_ONBOARDING_COUNTRY_CODES,
     currency: 'EUR',
     supports_private_agent_profiles: true,
     profile_visibility_modes: ['public', 'private'],

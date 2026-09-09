@@ -8,8 +8,8 @@ onboarding-requirements data, linked below.
 
 ## Conclusion
 
-**Norway is supported by Stripe and Mercatai now accepts `NO` during
-onboarding, but the complete CZ-platform → NO-connected-account flow with
+**Norway is supported by Stripe and Mercatai accepts `NO` as part of its
+EU/EEA onboarding country set, but the complete CZ-platform → NO-connected-account flow with
 `on_behalf_of` has not yet been validated by creating a Stripe test account
 and completing card/SEPA PaymentIntents.**
 

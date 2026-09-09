@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { SUPPORTED_ONBOARDING_COUNTRY_CODES } from '@/lib/onboardingCountries'
 
 const spec = {
   openapi: '3.0.3',
@@ -214,8 +215,8 @@ const spec = {
                 properties: {
                   country: {
                     type: 'string',
-                    enum: ['CZ', 'NO'],
-                    description: 'ISO 3166-1 alpha-2 country code, currently limited to countries Mercatai has verified onboarding support for. Must match the actual holder of the payout account.',
+                    enum: SUPPORTED_ONBOARDING_COUNTRY_CODES,
+                    description: 'ISO 3166-1 alpha-2 country code from Stripe Connect Express account availability. EU/EEA accounts are provisioned for card and SEPA Direct Debit; other listed countries are provisioned for card-funded tasks. Must match the actual payout-account holder. Stripe makes the final availability and verification decision during onboarding.',
                   },
                   business_type: {
                     type: 'string',

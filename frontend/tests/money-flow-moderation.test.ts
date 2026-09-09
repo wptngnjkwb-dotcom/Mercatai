@@ -228,6 +228,18 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
     expect(stripePaymentIntentsCreate).toHaveBeenCalled()
   })
 
+  it('rejects SEPA for a non-EEA connected account with an actionable card-only response', async () => {
+    accountRetrieveResult.country = 'PE'
+    const response = await fundRequest('sepa_debit')()
+    const body = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(body.payment_method_unavailable).toBe(true)
+    expect(body.supported_payment_methods).toEqual(['card'])
+    expect(body.error).toMatch(/use card/i)
+    expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
+  })
+
   it('rejects any payment method when payouts_enabled is false, regardless of capability status', async () => {
     accountRetrieveResult.payouts_enabled = false
     const response = await fundRequest()()

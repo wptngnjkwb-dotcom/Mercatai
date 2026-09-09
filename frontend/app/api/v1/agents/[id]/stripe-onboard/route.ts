@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
-import { SUPPORTED_ONBOARDING_COUNTRIES, isSupportedOnboardingCountry } from '@/lib/onboardingCountries'
+import {
+  getOnboardingCountry,
+  requiredCapabilitiesForCountry,
+} from '@/lib/onboardingCountries'
 import { computeStripeAccountReadiness, syncOnboardingCompletedFlag } from '@/lib/server/stripeAccountReadiness'
 
 // Stripe's legal-entity structures for a connected account. Left unset by
@@ -30,7 +33,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
   const body = await request.json().catch(() => ({}))
 
-  // country: ISO 3166-1 alpha-2, e.g. 'CZ', 'NO'. Required — no default. A
+  // country: ISO 3166-1 alpha-2, e.g. 'CZ', 'NO', or 'PE'. Required — no default. A
   // connected account's country is difficult to change after creation, so
   // silently defaulting a foreign agent to 'CZ' risks creating a Stripe
   // account that agent can never actually use. The caller must supply the
@@ -39,14 +42,20 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   const rawCountry = typeof body.country === 'string' ? body.country.trim().toUpperCase() : ''
   if (!rawCountry) {
     return NextResponse.json({
-      error: 'country is required (ISO 3166-1 alpha-2, e.g. "CZ" or "NO") — it must match the actual holder of the payout account.',
+      error: 'country is required (ISO 3166-1 alpha-2, e.g. "CZ", "NO", or "PE") — it must match the actual holder of the payout account.',
     }, { status: 400 })
   }
-  if (!isSupportedOnboardingCountry(rawCountry)) {
-    const supported = SUPPORTED_ONBOARDING_COUNTRIES.map((c) => c.code).join(', ')
-    return NextResponse.json({ error: `'${rawCountry}' is not currently supported for onboarding. Supported countries: ${supported}.` }, { status: 400 })
+  const countryConfig = getOnboardingCountry(rawCountry)
+  if (!countryConfig) {
+    return NextResponse.json({
+      error: `'${rawCountry}' is not currently supported for onboarding by Mercatai. Country availability depends on Stripe Connect Express, not merely on whether customers in that country can pay by card.`,
+    }, { status: 400 })
   }
   const country = rawCountry
+  const requiredCapabilities = requiredCapabilitiesForCountry(country)
+  if (!requiredCapabilities) {
+    return NextResponse.json({ error: `'${country}' has no Mercatai capability profile.` }, { status: 400 })
+  }
 
   // business_type: the connected account's legal form, e.g. 'individual' for
   // a sole proprietor or 'company' for an incorporated business. Optional —
@@ -141,13 +150,24 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     // still leave the account genuinely not ready, and reporting completion
     // then would be a false confirmation.
     const missingCapabilities: Record<string, { requested: true }> = {}
-    if (readiness.cardPaymentsStatus !== 'active') missingCapabilities.card_payments = { requested: true }
-    if (readiness.sepaDebitPaymentsStatus !== 'active') missingCapabilities.sepa_debit_payments = { requested: true }
-    if (readiness.transfersStatus !== 'active') missingCapabilities.transfers = { requested: true }
+    if (requiredCapabilities.card_payments && readiness.cardPaymentsStatus !== 'active') {
+      missingCapabilities.card_payments = { requested: true }
+    }
+    if (requiredCapabilities.sepa_debit_payments && readiness.sepaDebitPaymentsStatus !== 'active') {
+      missingCapabilities.sepa_debit_payments = { requested: true }
+    }
+    if (requiredCapabilities.transfers && readiness.transfersStatus !== 'active') {
+      missingCapabilities.transfers = { requested: true }
+    }
     const hasMissingCapabilities = Object.keys(missingCapabilities).length > 0
 
     if (readiness.onboardingComplete && !hasMissingCapabilities) {
-      return NextResponse.json({ message: 'Stripe onboarding already completed', stripe_account_id: stripeAccountId })
+      return NextResponse.json({
+        message: 'Stripe onboarding already completed',
+        stripe_account_id: stripeAccountId,
+        country,
+        supported_payment_methods: countryConfig.supportsSepaDebit ? ['card', 'sepa_debit'] : ['card'],
+      })
     }
 
     if (hasMissingCapabilities) {
@@ -173,16 +193,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         type: 'express',
         country,
         email: agent.owner_email,
-        capabilities: {
-          // card_payments must be requested alongside transfers for a
-          // connected account to actually receive card-funded destination
-          // charges made with on_behalf_of (as create-intent/route.ts does)
-          // — requesting only sepa_debit_payments left card payouts
-          // incompletely provisioned.
-          card_payments: { requested: true },
-          sepa_debit_payments: { requested: true },
-          transfers: { requested: true },
-        },
+        // All supported countries request card_payments + transfers. SEPA
+        // Direct Debit is additionally requested for EU/EEA accounts only;
+        // imposing it on every global account can make an otherwise valid
+        // Stripe Connect onboarding impossible.
+        capabilities: requiredCapabilities,
         ...(rawBusinessType ? { business_type: rawBusinessType as any } : {}),
         metadata: {
           mercatai_agent_id: agent.agent_id,
@@ -242,6 +257,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   return NextResponse.json({
     onboarding_url: accountLink.url,
     stripe_account_id: stripeAccountId,
+    country,
+    supported_payment_methods: countryConfig.supportsSepaDebit ? ['card', 'sepa_debit'] : ['card'],
     expires_at: new Date(accountLink.expires_at * 1000).toISOString(),
   })
 }

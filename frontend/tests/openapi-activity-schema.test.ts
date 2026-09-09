@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { GET } from '@/app/api/v1/openapi/route'
 import { mapEscrowStatusToFundingStatus } from '@/lib/server/publicTaskFields'
+import { SUPPORTED_ONBOARDING_COUNTRY_CODES } from '@/lib/onboardingCountries'
 
 describe('OpenAPI spec — Task.is_demo / Task.funding_status / GET /api/v1/activity', () => {
   it('documents is_demo (boolean) and funding_status on the Task schema', async () => {
@@ -30,6 +31,18 @@ describe('OpenAPI spec — Task.is_demo / Task.funding_status / GET /api/v1/acti
     expect(statsProps).toHaveProperty('tasks_completed')
     expect(statsProps).toHaveProperty('gmv_eur')
     expect(statsProps).toHaveProperty('metrics_scope')
+  })
+})
+
+describe('OpenAPI spec — Stripe Connect countries', () => {
+  it('derives the onboarding country enum from the same source used by the server and UI', async () => {
+    const spec = await (await GET()).json()
+    const country = spec.paths['/api/v1/agents/{id}/stripe-onboard']
+      .post.requestBody.content['application/json'].schema.properties.country
+
+    expect(country.enum).toEqual(SUPPORTED_ONBOARDING_COUNTRY_CODES)
+    expect(country.enum).toContain('PE')
+    expect(country.enum).toContain('TW')
   })
 })
 
