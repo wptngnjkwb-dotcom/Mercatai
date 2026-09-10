@@ -1,12 +1,19 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { CheckCircle, AlertCircle, Loader2, ExternalLink } from 'lucide-react'
 import { api } from '@/lib/api'
-import { onboardingCountryGroups, getOnboardingCountry } from '@/lib/onboardingCountries'
 
-const COUNTRY_GROUPS = onboardingCountryGroups()
+interface OnboardingCountry {
+  code: string
+  label: string
+  supportsSepaDebit: boolean
+}
+interface OnboardingCountryGroup {
+  label: string
+  countries: OnboardingCountry[]
+}
 
 export default function StripeOnboardPage() {
   const searchParams = useSearchParams()
@@ -19,12 +26,40 @@ export default function StripeOnboardPage() {
   const [error, setError] = useState('')
   const [stripeStatus, setStripeStatus] = useState<any>(null)
   const [country, setCountry] = useState('')
+  // Countries Mercatai currently has enabled are a server-side fact (see
+  // frontend/lib/server/stripeConnectCountries.ts) — fetched at runtime
+  // rather than imported statically, since the enabled subset depends on an
+  // env var a client bundle cannot read.
+  const [countryGroups, setCountryGroups] = useState<OnboardingCountryGroup[]>([])
+  const [countriesLoaded, setCountriesLoaded] = useState(false)
+  // React Strict Mode double-invokes effects in development — without this
+  // guard, landing on ?refresh=1 there would fire the link-refresh request
+  // twice. Only one has any real effect (both would mint a valid link for
+  // the same account, never a second account), but there's no reason to
+  // waste the extra Stripe call or risk a redirect race between the two
+  // responses.
+  const refreshStartedRef = useRef(false)
+
+  useEffect(() => {
+    fetch('/api/v1/onboarding-countries')
+      .then((res) => res.json())
+      .then((data) => setCountryGroups(data.groups || []))
+      .catch(() => setCountryGroups([]))
+      .finally(() => setCountriesLoaded(true))
+  }, [])
 
   useEffect(() => {
     if (success && agentDbId) {
       checkStatus()
     }
   }, [success, agentDbId])
+
+  useEffect(() => {
+    if (refresh === '1' && agentDbId && !refreshStartedRef.current) {
+      refreshStartedRef.current = true
+      refreshOnboardingLink()
+    }
+  }, [refresh, agentDbId])
 
   async function checkStatus() {
     setStatus('loading')
@@ -39,6 +74,32 @@ export default function StripeOnboardPage() {
     } catch {
       setStatus('error')
       setError('Could not fetch Stripe status.')
+    }
+  }
+
+  async function refreshOnboardingLink() {
+    setStatus('loading')
+    setError('')
+    const token = localStorage.getItem('mercatai_token')
+    if (!token) {
+      // A missing/invalid session must end here, in a clear message — never
+      // fall through to re-fetching or silently retrying, which could loop
+      // between this page and Stripe indefinitely.
+      setStatus('error')
+      setError('You are no longer logged in, so Mercatai cannot verify you own this Stripe onboarding session. Log in again, then restart from your dashboard.')
+      return
+    }
+    try {
+      const res = await fetch(`/api/v1/agents/${agentDbId}/stripe-onboard/refresh`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Could not refresh the onboarding link.')
+      window.location.href = data.onboarding_url
+    } catch (e: any) {
+      setStatus('error')
+      setError(e.message || 'Could not refresh the onboarding link.')
     }
   }
 
@@ -67,6 +128,31 @@ export default function StripeOnboardPage() {
       setStatus('error')
       setError(e.message)
     }
+  }
+
+  if (refresh === '1') {
+    // A malformed refresh link (no agent_db_id) must not spin forever
+    // waiting on an effect that will never fire — fail immediately.
+    if (!agentDbId || status === 'error') {
+      return (
+        <div className="max-w-lg mx-auto px-4 py-20 text-center">
+          <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-6">
+            <AlertCircle size={32} className="text-red-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-3">Could not resume Stripe onboarding</h1>
+          <p className="text-gray-500 mb-6">
+            {!agentDbId ? 'This onboarding link is missing required information.' : error}
+          </p>
+          <a href="/agent/dashboard" className="btn-primary inline-flex">Go to Dashboard</a>
+        </div>
+      )
+    }
+    return (
+      <div className="max-w-lg mx-auto px-4 py-20 text-center">
+        <Loader2 size={32} className="animate-spin mx-auto text-brand-600 mb-4" />
+        <p className="text-gray-500">Your previous Stripe onboarding link expired — getting you a fresh one...</p>
+      </div>
+    )
   }
 
   if (success && stripeStatus?.onboarding_completed) {
@@ -116,9 +202,10 @@ export default function StripeOnboardPage() {
             className="input w-full"
             value={country}
             onChange={(e) => setCountry(e.target.value)}
+            disabled={!countriesLoaded}
           >
-            <option value="">Select a country…</option>
-            {COUNTRY_GROUPS.map((group) => (
+            <option value="">{countriesLoaded ? 'Select a country…' : 'Loading countries…'}</option>
+            {countryGroups.map((group) => (
               <optgroup key={group.label} label={group.label}>
                 {group.countries.map((c) => (
                   <option key={c.code} value={c.code}>{c.label}</option>
@@ -129,11 +216,15 @@ export default function StripeOnboardPage() {
           <p className="text-xs text-gray-400 mt-1">
             Must match the actual country of the person or business that will hold this Stripe payout
             account.{' '}
-            {country && getOnboardingCountry(country)
-              ? getOnboardingCountry(country)!.supportsSepaDebit
-                ? 'This country supports card and SEPA-funded tasks.'
-                : 'This country currently supports card-funded tasks only.'
-              : 'Most EU/EEA accounts support card and SEPA-funded tasks; a few (e.g. Iceland) and other listed Stripe Connect countries currently support card-funded tasks only.'}
+            {(() => {
+              const selected = country ? countryGroups.flatMap((g) => g.countries).find((c) => c.code === country) : undefined
+              if (selected) {
+                return selected.supportsSepaDebit
+                  ? 'This country supports card and SEPA-funded tasks.'
+                  : 'This country currently supports card-funded tasks only.'
+              }
+              return 'Most EU/EEA accounts support card and SEPA-funded tasks; a few of them, and the other listed Stripe Connect countries, currently support card-funded tasks only.'
+            })()}
             {' '}Stripe confirms availability during onboarding.
           </p>
         </div>
@@ -181,7 +272,8 @@ export default function StripeOnboardPage() {
         </button>
 
         <p className="text-xs text-center text-gray-400">
-          Onboarding link expires after 24 hours. You can restart anytime from your dashboard.
+          This link is short-lived and single-use. If it expires before you finish, Mercatai automatically
+          generates you a fresh one — no need to restart from scratch.
         </p>
       </div>
     </div>

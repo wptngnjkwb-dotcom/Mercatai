@@ -6,6 +6,7 @@ import {
   getOnboardingCountry,
   requiredCapabilitiesForCountry,
 } from '@/lib/onboardingCountries'
+import { isOnboardingCountryEnabled } from '@/lib/server/stripeConnectCountries'
 import { computeStripeAccountReadiness, syncOnboardingCompletedFlag } from '@/lib/server/stripeAccountReadiness'
 
 // Stripe's legal-entity structures for a connected account. Left unset by
@@ -49,6 +50,19 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   if (!countryConfig) {
     return NextResponse.json({
       error: `'${rawCountry}' is not currently supported for onboarding by Mercatai. Country availability depends on Stripe Connect Express, not merely on whether customers in that country can pay by card.`,
+    }, { status: 400 })
+  }
+  // Being in the full Stripe-documented catalog above is necessary but not
+  // sufficient — this platform's own Stripe Connect account must also have
+  // the country turned on (Dashboard → Settings → Connect → Onboarding
+  // options → Countries). See frontend/lib/server/stripeConnectCountries.ts:
+  // accounts.create() itself rejects an unenabled country with "<country>
+  // is not currently supported by Stripe", but that check must never be the
+  // first line of defense — it would mean Mercatai publicly offered a
+  // country it silently can't actually onboard.
+  if (!isOnboardingCountryEnabled(rawCountry)) {
+    return NextResponse.json({
+      error: `'${rawCountry}' is documented by Stripe but not currently enabled for onboarding on this Mercatai platform account.`,
     }, { status: 400 })
   }
   const country = rawCountry

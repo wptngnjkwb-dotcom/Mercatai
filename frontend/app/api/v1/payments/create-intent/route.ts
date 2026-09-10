@@ -214,7 +214,15 @@ export async function POST(request: NextRequest) {
       payment_method_types: [paymentMethod],
       ...(captureMode === 'manual' ? { capture_method: 'manual' as const } : {}),
       // Destination charge: the connected agent receives the net amount and
-      // Mercatai keeps the calculated application fee.
+      // Mercatai keeps the calculated application fee. This on_behalf_of
+      // shape, fixed to EUR, is not automatically valid for every country
+      // in the onboarding catalog (frontend/lib/onboardingCountries.ts) or
+      // even every currently-enabled one — see "destination charges +
+      // on_behalf_of are not automatically valid for every catalog country"
+      // in docs/stripe-connect-country-support.md. A country whose
+      // connected accounts can't be the on_behalf_of merchant of record in
+      // EUR would need a different flow entirely (e.g. separate charges and
+      // transfers, or a recipient-only account), not a parameter tweak here.
       on_behalf_of: agentStripeAccount,
       application_fee_amount: Math.round((fees.platform_fee_eur + fees.stripe_fee_eur) * 100),
       transfer_data: { destination: agentStripeAccount },

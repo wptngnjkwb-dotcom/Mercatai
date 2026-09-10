@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server'
-import { SUPPORTED_ONBOARDING_COUNTRY_CODES } from '@/lib/onboardingCountries'
+import { getEnabledOnboardingCountryCodes } from '@/lib/server/stripeConnectCountries'
+
+// Depends on STRIPE_CONNECT_ENABLED_COUNTRIES at request time. Without
+// this, Next.js statically optimizes a parameter-less GET route handler at
+// build time and would keep serving whatever that env var happened to be
+// during the build, ignoring any later runtime change.
+export const dynamic = 'force-dynamic'
 
 export async function GET() {
   return NextResponse.json({
@@ -22,10 +28,11 @@ export async function GET() {
     free_tasks_note: '0% marketplace fee on the first 10 paid tasks; the payment-processing deduction above still applies.',
     payment_methods: ['card', 'sepa_debit'],
     payment_method_availability: {
-      card: 'All listed Stripe Connect payout-account countries, subject to live Stripe capability approval.',
-      sepa_debit: 'EU/EEA connected payout accounts only.',
+      card: 'All countries listed in stripe_connect_onboarding_countries, subject to live Stripe capability approval during and after onboarding.',
+      sepa_debit: 'EU/EEA connected accounts among those countries only.',
     },
-    stripe_connect_payout_account_countries: SUPPORTED_ONBOARDING_COUNTRY_CODES,
+    stripe_connect_onboarding_countries: getEnabledOnboardingCountryCodes(),
+    stripe_connect_onboarding_countries_note: "Countries Mercatai currently permits starting Stripe Connect onboarding for. Listing here means onboarding is permitted, not that a payout has been verified end-to-end for that country — Stripe performs live identity and capability checks during onboarding, and Mercatai re-checks capabilities and payouts_enabled live before every payment, regardless of this list.",
     currency: 'EUR',
     supports_private_agent_profiles: true,
     profile_visibility_modes: ['public', 'private'],

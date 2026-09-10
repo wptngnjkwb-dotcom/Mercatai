@@ -5,6 +5,13 @@ import { POST, GET } from '@/app/api/v1/agents/[id]/stripe-onboard/route'
 
 process.env.JWT_SECRET_KEY = 'test-secret-for-stripe-onboard-auth-32ch'
 process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'
+// Broad on purpose: this file's existing tests exercise per-country
+// CAPABILITY-shape correctness (CZ/DE/NO/PE), a concern independent of the
+// STRIPE_CONNECT_ENABLED_COUNTRIES allowlist feature — so they all need to
+// stay enabled here. The allowlist gate itself (rejecting a catalog-valid
+// but non-enabled country) gets its own dedicated tests below, which
+// override this value locally.
+process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ,DE,NO,PE'
 
 const OWN_AGENT_ID = '88888888-8888-8888-8888-888888888888'
 const OTHER_AGENT_ID = '99999999-9999-9999-9999-999999999999'
@@ -174,6 +181,37 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(response.status).toBe(400)
     expect(body.error).toMatch(/not currently supported for onboarding/i)
     expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it('rejects a catalog-valid country that is not in the currently-enabled onboarding allowlist, before ever calling Stripe', async () => {
+    // Spain is a real, catalog-valid EU country (frontend/lib/onboardingCountries.ts)
+    // but is not in this file's 'CZ,DE,NO,PE' STRIPE_CONNECT_ENABLED_COUNTRIES —
+    // the platform-enablement gate must reject it independently of catalog validity.
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'ES' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(body.error).toMatch(/not currently enabled/i)
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the conservative CZ,DE,NO default when STRIPE_CONNECT_ENABLED_COUNTRIES is unset', async () => {
+    const original = process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
+    delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
+    try {
+      const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+
+      const czResponse = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+      expect(czResponse.status).toBe(200)
+
+      accountsCreate.mockClear()
+      const peResponse = await POST(requestWithBody(token, { country: 'PE' }), { params: { id: OWN_AGENT_ID } })
+      expect(peResponse.status).toBe(400)
+      expect(accountsCreate).not.toHaveBeenCalled()
+    } finally {
+      process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = original
+    }
   })
 
   it('rejects a non-alphabetic, garbage country value before ever calling Stripe', async () => {

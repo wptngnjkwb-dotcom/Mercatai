@@ -1,7 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { GET } from '@/app/api/v1/openapi/route'
 import { mapEscrowStatusToFundingStatus } from '@/lib/server/publicTaskFields'
-import { SUPPORTED_ONBOARDING_COUNTRY_CODES } from '@/lib/onboardingCountries'
+
+// Self-contained on purpose: STRIPE_CONNECT_ENABLED_COUNTRIES is read fresh
+// per-request (see frontend/lib/server/stripeConnectCountries.ts) and other
+// test files set their own value at module scope under vitest's
+// isolate:false — this suite must not assume what that currently is, and
+// must restore it afterward so it doesn't leak into whichever file runs next.
+async function withEnabledCountries<T>(value: string, fn: () => Promise<T>): Promise<T> {
+  const original = process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
+  process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = value
+  try {
+    return await fn()
+  } finally {
+    if (original === undefined) delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
+    else process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = original
+  }
+}
 
 describe('OpenAPI spec — Task.is_demo / Task.funding_status / GET /api/v1/activity', () => {
   it('documents is_demo (boolean) and funding_status on the Task schema', async () => {
@@ -35,14 +50,40 @@ describe('OpenAPI spec — Task.is_demo / Task.funding_status / GET /api/v1/acti
 })
 
 describe('OpenAPI spec — Stripe Connect countries', () => {
-  it('derives the onboarding country enum from the same source used by the server and UI', async () => {
-    const spec = await (await GET()).json()
-    const country = spec.paths['/api/v1/agents/{id}/stripe-onboard']
-      .post.requestBody.content['application/json'].schema.properties.country
+  it('derives the onboarding country enum from the live STRIPE_CONNECT_ENABLED_COUNTRIES allowlist, not the full catalog', async () => {
+    await withEnabledCountries('CZ,DE,NO,PE,TW', async () => {
+      const spec = await (await GET()).json()
+      const country = spec.paths['/api/v1/agents/{id}/stripe-onboard']
+        .post.requestBody.content['application/json'].schema.properties.country
 
-    expect(country.enum).toEqual(SUPPORTED_ONBOARDING_COUNTRY_CODES)
-    expect(country.enum).toContain('PE')
-    expect(country.enum).toContain('TW')
+      expect(country.enum).toEqual(['CZ', 'DE', 'NO', 'PE', 'TW'])
+    })
+  })
+
+  it('never includes a country outside the currently-enabled allowlist, even though the full catalog has ~103', async () => {
+    await withEnabledCountries('CZ,DE,NO', async () => {
+      const spec = await (await GET()).json()
+      const country = spec.paths['/api/v1/agents/{id}/stripe-onboard']
+        .post.requestBody.content['application/json'].schema.properties.country
+
+      expect(country.enum).toEqual(['CZ', 'DE', 'NO'])
+      expect(country.enum).not.toContain('PE')
+      expect(country.enum).not.toContain('TW')
+    })
+  })
+
+  it('falls back to the conservative CZ,DE,NO default when the env var is unset', async () => {
+    const original = process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
+    delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
+    try {
+      const spec = await (await GET()).json()
+      const country = spec.paths['/api/v1/agents/{id}/stripe-onboard']
+        .post.requestBody.content['application/json'].schema.properties.country
+      expect(country.enum).toEqual(['CZ', 'DE', 'NO'])
+    } finally {
+      if (original === undefined) delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
+      else process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = original
+    }
   })
 })
 

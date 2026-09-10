@@ -69,12 +69,67 @@ For a non-EU/EEA connected account, a buyer request for SEPA Direct Debit is
 rejected before a PaymentIntent is created and the API returns card as the
 supported alternative.
 
+## Catalog vs. enabled — two different lists, on purpose
+
+`frontend/lib/onboardingCountries.ts` (~103 countries) is a static catalog of
+what Stripe *documents* as Express-capable. It is not what Mercatai actually
+offers. Separately, `STRIPE_CONNECT_ENABLED_COUNTRIES` (parsed in
+`frontend/lib/server/stripeConnectCountries.ts`) is the live allowlist of
+countries *this specific Stripe platform account* has turned on in its own
+Connect settings (Dashboard → Settings → Connect → Onboarding options →
+Countries) — validated against the catalog, invalid codes dropped with a
+server-side warning (no secrets in the log line), and falling back to a
+conservative `CZ, DE, NO` default whenever the env var is unset or resolves
+to nothing valid.
+
+This split exists because of a concrete incident: during an international
+Stripe Connect test pass, `stripe.accounts.create()` calls for catalog-valid
+countries (Iceland, Peru, Argentina) failed with *"`<country>` is not
+currently supported by Stripe"* — a platform-level restriction, unrelated to
+whether Stripe documents the country generally. Before this fix, Mercatai's
+UI, OpenAPI spec, and discovery JSON all advertised the full catalog as if it
+were live availability, so an agent could select a country the platform
+account itself would then reject at account-creation time. Every
+public-facing surface — the `/agent/stripe-onboard` country selector (via
+`GET /api/v1/onboarding-countries`), the OpenAPI `country` enum, and the
+discovery JSON's `stripe_connect_onboarding_countries` — now reads the same
+enabled allowlist, and `POST /api/v1/agents/{id}/stripe-onboard` rejects an
+unlisted country before ever calling Stripe.
+
+Being in the enabled list means **onboarding is permitted**, never that a
+payout has been **verified end-to-end** for that country — see "What
+inclusion in the selector means" above for what Stripe still has to confirm
+live, per account.
+
+## destination charges + on_behalf_of are not automatically valid for every catalog country
+
+Mercatai's buyer payment flow (`frontend/app/api/v1/payments/create-intent/route.ts`)
+uses a single, fixed shape: a destination charge with `on_behalf_of` and
+`transfer_data.destination` pointed at the agent's own connected account, in
+EUR. This flow assumes the connected account can be the merchant of record
+for an on_behalf_of charge in the platform's processing currency — true for
+the EU/EEA accounts Mercatai has actually exercised, but **not a property
+every one of the ~103 catalog countries is guaranteed to have**. Stripe
+gates `on_behalf_of` destination charges on the connected account's own
+capabilities and settlement currency, which can differ enough by country
+(cross-border settlement restrictions, non-EUR-only settlement, recipient
+accounts that support transfers but not being the on_behalf_of merchant of
+record) that a wider global rollout would need its own review — and, for at
+least some countries, a **different payment flow entirely** (e.g. separate
+charges and transfers without `on_behalf_of`, or a recipient-only connected
+account that never processes charges itself). This document does not change
+that architecture; it only makes sure Mercatai never *offers* a country the
+current flow, or this platform account, hasn't actually been confirmed to
+support.
+
 ## Operational requirements
 
 Stripe can require additional countries to be enabled in the platform's
-Connect settings. Country availability, cross-border settlement, supported
-bank-account formats, settlement currencies, foreign-exchange fees, tax
-reporting, and business eligibility remain country-specific.
+Connect settings — see "Catalog vs. enabled" above for how Mercatai now
+tracks that distinction explicitly. Country availability, cross-border
+settlement, supported bank-account formats, settlement currencies,
+foreign-exchange fees, tax reporting, and business eligibility remain
+country-specific.
 
 Before Mercatai publicly describes a country as tested end-to-end, complete a
 test-mode onboarding and card payment/refund flow using the production request

@@ -82,6 +82,9 @@ services:
       # webhook both answer 503 — the buyer cannot pay at all.
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      # Falls back to the conservative default (CZ,DE,NO) inside the app
+      # itself when unset — see frontend/lib/server/stripeConnectCountries.ts.
+      STRIPE_CONNECT_ENABLED_COUNTRIES: ${STRIPE_CONNECT_ENABLED_COUNTRIES:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       CRON_SECRET: ${CRON_SECRET}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}

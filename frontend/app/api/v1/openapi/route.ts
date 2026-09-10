@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server'
-import { SUPPORTED_ONBOARDING_COUNTRY_CODES } from '@/lib/onboardingCountries'
+import { getEnabledOnboardingCountryCodes } from '@/lib/server/stripeConnectCountries'
+
+// The country enum is patched in per-request from STRIPE_CONNECT_ENABLED_COUNTRIES
+// (see GET below) — without force-dynamic, Next.js would statically
+// optimize this parameter-less GET at build time and freeze that value in.
+export const dynamic = 'force-dynamic'
 
 const spec = {
   openapi: '3.0.3',
@@ -215,8 +220,12 @@ const spec = {
                 properties: {
                   country: {
                     type: 'string',
-                    enum: SUPPORTED_ONBOARDING_COUNTRY_CODES,
-                    description: 'ISO 3166-1 alpha-2 country code from Stripe Connect Express account availability. EU/EEA accounts are provisioned for card and SEPA Direct Debit; other listed countries are provisioned for card-funded tasks. Must match the actual payout-account holder. Stripe makes the final availability and verification decision during onboarding.',
+                    // Placeholder — replaced with the live enabled-country
+                    // list in GET() below. Kept empty here (rather than the
+                    // full 103-country catalog) so this spec can never be
+                    // served un-patched and silently overclaim availability.
+                    enum: [] as string[],
+                    description: 'ISO 3166-1 alpha-2 country code, restricted to the countries this Mercatai platform account currently has enabled for Stripe Connect onboarding (a subset of what Stripe documents as Express-capable — see STRIPE_CONNECT_ENABLED_COUNTRIES). EU/EEA accounts among these are provisioned for card and SEPA Direct Debit; the rest are provisioned for card-funded tasks. Must match the actual payout-account holder. Being enabled here means onboarding is permitted, not that a payout has been verified end-to-end for that country — Stripe makes the final availability and verification decision during and after onboarding.',
                   },
                   business_type: {
                     type: 'string',
@@ -273,6 +282,35 @@ const spec = {
           '403': { description: 'Forbidden — caller is neither the agent itself nor an admin' },
           '404': { description: 'Agent not found' },
           '503': { description: 'Stripe is not configured on this deployment' },
+        },
+      },
+    },
+    '/api/v1/agents/{id}/stripe-onboard/refresh': {
+      post: {
+        operationId: 'refreshStripeOnboardingLink',
+        summary: "Mint a fresh Stripe-hosted onboarding link for the agent's existing account",
+        description: "Stripe account_onboarding links are short-lived and single-use — Stripe sends the agent back to this flow via refresh_url whenever the link they were on expired or was already consumed, without completing onboarding. This endpoint issues a new link for the SAME existing Stripe account; it never creates a second account. The country is read from the Stripe account itself (never from the request), since by the time a refresh is needed the account and its country already exist.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: "The agent's database id (not its agent_id string)." }],
+        responses: {
+          '200': { description: 'Fresh onboarding link created for the existing Stripe account.' },
+          '400': { description: 'This agent has no existing Stripe account to refresh a link for — start onboarding with POST /api/v1/agents/{id}/stripe-onboard instead.' },
+          '401': { description: 'Unauthorized — missing or invalid token' },
+          '403': { description: 'Forbidden — caller is neither the agent itself nor an admin' },
+          '404': { description: 'Agent not found' },
+          '409': { description: "The account needs manual review in the Stripe Dashboard (action_required: 'manual_stripe_dashboard_review') — a new link cannot resolve this." },
+          '502': { description: "The existing account's data could not be retrieved from Stripe" },
+          '503': { description: 'Stripe is not configured on this deployment' },
+        },
+      },
+    },
+    '/api/v1/onboarding-countries': {
+      get: {
+        operationId: 'getOnboardingCountries',
+        summary: 'List the countries currently enabled for Stripe Connect onboarding',
+        description: 'Public, unauthenticated. Returns exactly the same allowlist reflected in this schema\'s stripe-onboard country enum and in the discovery JSON\'s stripe_connect_onboarding_countries — the single source of truth is STRIPE_CONNECT_ENABLED_COUNTRIES on the server.',
+        responses: {
+          '200': { description: 'Enabled country codes and UI-ready groups (European Union / EEA outside the EU / Other Stripe Connect countries).' },
         },
       },
     },
@@ -755,7 +793,16 @@ const spec = {
 }
 
 export async function GET() {
-  return NextResponse.json(spec, {
+  // spec is a module-scope constant (built once, shared across requests),
+  // so the live-configured country enum must be injected per-request on a
+  // clone rather than baked into that constant — the enabled list can
+  // depend on an env var and must never be evaluated only once at cold
+  // start (or, under vitest's isolate:false, cached across test files that
+  // each set STRIPE_CONNECT_ENABLED_COUNTRIES differently).
+  const liveSpec = structuredClone(spec)
+  liveSpec.paths['/api/v1/agents/{id}/stripe-onboard'].post.requestBody.content['application/json'].schema.properties.country.enum = getEnabledOnboardingCountryCodes()
+
+  return NextResponse.json(liveSpec, {
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
