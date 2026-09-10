@@ -15,7 +15,23 @@ const EU_CODES = [
   'SI', 'ES', 'SE',
 ]
 
+// Exact Stripe Express connected-account availability list published at
+// https://docs.stripe.com/connect/accounts (checked 2026-09-10). Keeping the
+// complete independent fixture catches omissions in the production catalog;
+// checking only EU membership previously missed AG and AR.
+const STRIPE_EXPRESS_CODES = `
+  AE AG AL AM AR AT AU BA BE BG BH BJ BN BO BS BW CA CH CI CL CO CR CY CZ DE DK
+  DO EC EE EG ES ET FI FR GB GH GM GR GT GY HK HU IE IL IS IT JM JO JP KE KH KR
+  KW LC LK LT LU LV MA MC MD MG MK MN MO MT MU MX NA NG NL NO NZ OM PA PE PH PK
+  PL PT PY QA RO RS RW SA SE SG SI SK SN SV TH TN TR TT TW TZ US UY UZ VN ZA
+`.trim().split(/\s+/)
+
 describe('Stripe Connect onboarding countries', () => {
+  it('matches Stripe’s complete documented Express connected-account country list', () => {
+    expect([...SUPPORTED_ONBOARDING_COUNTRY_CODES].sort()).toEqual([...STRIPE_EXPRESS_CODES].sort())
+    expect(SUPPORTED_ONBOARDING_COUNTRY_CODES).toHaveLength(103)
+  })
+
   it('contains 26 of the 27 EU member states exactly once', () => {
     const configuredEuCodes = SUPPORTED_ONBOARDING_COUNTRIES
       .filter((country) => country.region === 'eu')

@@ -80,7 +80,9 @@ const EEA_COUNTRIES: readonly OnboardingCountry[] = [
 
 const OTHER_STRIPE_CONNECT_COUNTRIES: readonly OnboardingCountry[] = [
   { code: 'AL', label: 'Albania', region: 'stripe_connect', supportsSepaDebit: false },
+  { code: 'AG', label: 'Antigua & Barbuda', region: 'stripe_connect', supportsSepaDebit: false },
   { code: 'AM', label: 'Armenia', region: 'stripe_connect', supportsSepaDebit: false },
+  { code: 'AR', label: 'Argentina', region: 'stripe_connect', supportsSepaDebit: false },
   { code: 'AU', label: 'Australia', region: 'stripe_connect', supportsSepaDebit: false },
   { code: 'BS', label: 'Bahamas', region: 'stripe_connect', supportsSepaDebit: false },
   { code: 'BH', label: 'Bahrain', region: 'stripe_connect', supportsSepaDebit: false },
