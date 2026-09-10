@@ -61,6 +61,90 @@ export function isMethodReady(readiness: StripeAccountReadiness, method: 'card' 
   return readiness.payoutReady && (method === 'card' ? readiness.cardReady : readiness.sepaDebitReady)
 }
 
+export type DisabledReasonAction =
+  | 'proceed'
+  | 'request_capabilities_then_proceed'
+  | 'wait_for_stripe'
+  | 'manual_stripe_dashboard_review'
+
+export interface DisabledReasonClassification {
+  action: DisabledReasonAction
+  disabledReason: string | null
+}
+
+// account.requirements.disabled_reason values meaning Stripe is actively
+// working the account and nobody needs to act — see
+// https://docs.stripe.com/connect/handling-api-verification#determine-if-verification-is-needed
+const WAITING_FOR_STRIPE_REASONS = new Set(['requirements.pending_verification', 'under_review'])
+
+/**
+ * Classifies account.requirements.disabled_reason into what a caller should
+ * actually do about it. Both stripe-onboard routes previously treated ANY
+ * non-empty disabled_reason as a dead end requiring manual Stripe Dashboard
+ * review — wrong for the two most common values in practice:
+ *   - `requirements.past_due` just means the account needs to go through
+ *     Stripe-hosted onboarding again to supply more information. That's the
+ *     entire point of an onboarding/refresh link, not a reason to refuse one.
+ *   - `action_required.requested_capabilities` means Mercatai itself hasn't
+ *     requested a capability yet — an accounts.update() call fixes it, not
+ *     a dashboard visit.
+ * Getting this wrong meant an agent mid-onboarding could be told to
+ * "contact support" for a completely normal, self-service state.
+ *
+ * Shared by both frontend/app/api/v1/agents/[id]/stripe-onboard/route.ts and
+ * its refresh/route.ts sibling so they can never classify the same Stripe
+ * state differently.
+ */
+export function classifyDisabledReason(disabledReason: string | null | undefined): DisabledReasonClassification {
+  const reason = disabledReason || null
+  if (!reason) return { action: 'proceed', disabledReason: null }
+  if (reason === 'requirements.past_due') return { action: 'proceed', disabledReason: reason }
+  if (reason === 'action_required.requested_capabilities') return { action: 'request_capabilities_then_proceed', disabledReason: reason }
+  if (WAITING_FOR_STRIPE_REASONS.has(reason)) return { action: 'wait_for_stripe', disabledReason: reason }
+  // listed, rejected.fraud, rejected.incomplete_verification, rejected.listed,
+  // rejected.other, rejected.terms_of_service, platform_paused, other, and
+  // any value Stripe adds later that this code doesn't yet recognize — fail
+  // toward "needs a human," never toward silently proceeding.
+  return { action: 'manual_stripe_dashboard_review', disabledReason: reason }
+}
+
+/**
+ * Builds the blocking response for a classification that must not proceed
+ * to a fresh Account Link — or null when the caller should continue
+ * (possibly after first requesting missing capabilities; see
+ * DisabledReasonAction). Shared so both stripe-onboard routes give an agent
+ * the exact same status/action_required/message for the same underlying
+ * Stripe state, instead of two hand-written copies that can drift apart.
+ */
+export function disabledReasonBlockingResponse(
+  classification: DisabledReasonClassification,
+  stripeAccountId: string
+): { status: number; body: Record<string, unknown> } | null {
+  if (classification.action === 'wait_for_stripe') {
+    return {
+      status: 409,
+      body: {
+        error: "Stripe is currently verifying this account's information — no action is needed right now. Check back shortly.",
+        stripe_account_id: stripeAccountId,
+        action_required: 'wait_for_stripe',
+        disabled_reason: classification.disabledReason,
+      },
+    }
+  }
+  if (classification.action === 'manual_stripe_dashboard_review') {
+    return {
+      status: 409,
+      body: {
+        error: `This Stripe account needs manual review (Stripe's reason: ${classification.disabledReason}). Check the Stripe Dashboard or contact Stripe support directly — a new onboarding link cannot resolve this.`,
+        stripe_account_id: stripeAccountId,
+        action_required: 'manual_stripe_dashboard_review',
+        disabled_reason: classification.disabledReason,
+      },
+    }
+  }
+  return null
+}
+
 /**
  * Keeps agents.stripe_onboarding_completed in sync with what was just
  * computed from live Stripe data — in both directions. A no-op when the two

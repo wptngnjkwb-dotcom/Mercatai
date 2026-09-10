@@ -570,6 +570,183 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
   })
 })
 
+describe('POST /api/v1/agents/[id]/stripe-onboard — disabled_reason classification', () => {
+  // Same classification as the refresh sibling route (see
+  // frontend/lib/server/stripeAccountReadiness.ts and
+  // tests/stripe-onboard-refresh.test.ts) — this file exercises it through
+  // the "existing account" branch, which is the only one that ever reads
+  // account.requirements.disabled_reason.
+  beforeEach(() => {
+    agentUpdates.length = 0
+    accountsCreate.mockClear()
+    accountsUpdate.mockClear()
+    accountLinksCreate.mockClear()
+    accountsRetrieve.mockClear()
+    ;(agentRow as any).stripe_account_id = 'acct_existing'
+  })
+
+  function requestWithBody(bearer: string, body: Record<string, unknown>) {
+    return new NextRequest(`http://localhost/api/v1/agents/${OWN_AGENT_ID}/stripe-onboard`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
+      body: JSON.stringify(body),
+    })
+  }
+
+  it('requirements.past_due is a normal, self-service state — issues a fresh link, never blocks with 409', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: false,
+      requirements: { disabled_reason: 'requirements.past_due', currently_due: ['individual.address.line1'] },
+      charges_enabled: false,
+      payouts_enabled: false,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.onboarding_url).toBeTruthy()
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it('action_required.requested_capabilities requests the missing capability, then still issues a fresh link', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: true,
+      requirements: { disabled_reason: 'action_required.requested_capabilities', currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(accountsUpdate).toHaveBeenCalledWith('acct_existing', {
+      capabilities: expect.objectContaining({ card_payments: { requested: true } }),
+    })
+    expect(response.status).toBe(200)
+    expect(body.onboarding_url).toBeTruthy()
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it('requirements.pending_verification waits for Stripe — 409, no new link, no claim the user must act', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: true,
+      requirements: { disabled_reason: 'requirements.pending_verification', currently_due: [] },
+      charges_enabled: false,
+      payouts_enabled: false,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(body.action_required).toBe('wait_for_stripe')
+    expect(body.error).not.toMatch(/contact support|must (provide|supply|submit)/i)
+    expect(accountLinksCreate).not.toHaveBeenCalled()
+    expect(accountsUpdate).not.toHaveBeenCalled()
+  })
+
+  it('under_review waits for Stripe — 409, no new link', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: true,
+      requirements: { disabled_reason: 'under_review', currently_due: [] },
+      charges_enabled: false,
+      payouts_enabled: false,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(body.action_required).toBe('wait_for_stripe')
+    expect(accountLinksCreate).not.toHaveBeenCalled()
+  })
+
+  it('rejected.fraud is genuinely blocked — 409 manual_stripe_dashboard_review, no new link', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: true,
+      requirements: { disabled_reason: 'rejected.fraud', currently_due: [] },
+      charges_enabled: false,
+      payouts_enabled: false,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(body.action_required).toBe('manual_stripe_dashboard_review')
+    expect(accountLinksCreate).not.toHaveBeenCalled()
+  })
+
+  it('listed is genuinely blocked — 409 manual_stripe_dashboard_review, no new link', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: true,
+      requirements: { disabled_reason: 'listed', currently_due: [] },
+      charges_enabled: false,
+      payouts_enabled: false,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(body.action_required).toBe('manual_stripe_dashboard_review')
+    expect(accountLinksCreate).not.toHaveBeenCalled()
+  })
+
+  it('an unrecognized disabled_reason fails toward manual review rather than silently proceeding', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: true,
+      requirements: { disabled_reason: 'some_future_stripe_value_not_yet_handled', currently_due: [] },
+      charges_enabled: false,
+      payouts_enabled: false,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(body.action_required).toBe('manual_stripe_dashboard_review')
+    expect(accountLinksCreate).not.toHaveBeenCalled()
+  })
+
+  it('returns a safe 502 (not the raw Stripe exception) when accountLinks.create fails', async () => {
+    accountsRetrieve.mockResolvedValueOnce({
+      country: 'CZ',
+      details_submitted: true,
+      requirements: { disabled_reason: null, currently_due: [] },
+      charges_enabled: true,
+      // Not "already completed" (which would return 200 before ever
+      // reaching accountLinks.create) — payouts_enabled: false forces the
+      // route past that shortcut and into the link-creation call this test
+      // needs to exercise.
+      payouts_enabled: false,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    accountLinksCreate.mockRejectedValueOnce(new Error('Stripe internal detail that must not reach the client'))
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(502)
+    expect(body.error).not.toContain('Stripe internal detail')
+  })
+})
+
 describe('POST /api/v1/agents/[id]/stripe-onboard — orphaned account on DB write failure', () => {
   beforeEach(() => {
     agentUpdates.length = 0

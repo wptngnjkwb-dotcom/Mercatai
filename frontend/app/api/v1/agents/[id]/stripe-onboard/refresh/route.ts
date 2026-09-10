@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
-import { getOnboardingCountry } from '@/lib/onboardingCountries'
+import { getOnboardingCountry, requiredCapabilitiesForCountry } from '@/lib/onboardingCountries'
+import {
+  computeStripeAccountReadiness,
+  classifyDisabledReason,
+  disabledReasonBlockingResponse,
+} from '@/lib/server/stripeAccountReadiness'
 
 // POST /api/v1/agents/:id/stripe-onboard/refresh
 //
@@ -58,29 +63,71 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ error: message, stripe_account_id: agent.stripe_account_id }, { status: 502 })
   }
 
-  if (account.requirements?.disabled_reason) {
-    return NextResponse.json({
-      error: `This Stripe account needs manual review (Stripe's reason: ${account.requirements.disabled_reason}). Check the Stripe Dashboard or contact Stripe support directly — a new onboarding link cannot resolve this.`,
-      stripe_account_id: agent.stripe_account_id,
-      action_required: 'manual_stripe_dashboard_review',
-      disabled_reason: account.requirements.disabled_reason,
-    }, { status: 409 })
+  // Some disabled_reason values (requirements.past_due,
+  // action_required.requested_capabilities) are normal, self-service states
+  // a fresh onboarding link resolves — only genuinely blocked or
+  // Stripe-side-pending states short-circuit here. Same classification the
+  // parent route uses — see frontend/lib/server/stripeAccountReadiness.ts.
+  const disabledClassification = classifyDisabledReason(account.requirements?.disabled_reason)
+  const blocking = disabledReasonBlockingResponse(disabledClassification, agent.stripe_account_id)
+  if (blocking) {
+    return NextResponse.json(blocking.body, { status: blocking.status })
   }
 
   const country = typeof account.country === 'string' ? account.country.toUpperCase() : undefined
   const countryConfig = country ? getOnboardingCountry(country) : undefined
+
+  // A capability can go missing without disabled_reason ever mentioning it
+  // by name (e.g. a legacy account from before a capability was added to
+  // what Mercatai requests for its country) — so this isn't gated strictly
+  // on disabledClassification being request_capabilities_then_proceed; it
+  // mirrors the parent route's own unconditional check, just without that
+  // route's separate "already completed" short-circuit (a refresh is
+  // always trying to move an incomplete account forward).
+  const requiredCapabilities = countryConfig ? requiredCapabilitiesForCountry(countryConfig.code) : null
+  if (requiredCapabilities) {
+    const readiness = computeStripeAccountReadiness(account)
+    const missingCapabilities: Record<string, { requested: true }> = {}
+    if (requiredCapabilities.card_payments && readiness.cardPaymentsStatus !== 'active') {
+      missingCapabilities.card_payments = { requested: true }
+    }
+    if (requiredCapabilities.sepa_debit_payments && readiness.sepaDebitPaymentsStatus !== 'active') {
+      missingCapabilities.sepa_debit_payments = { requested: true }
+    }
+    if (requiredCapabilities.transfers && readiness.transfersStatus !== 'active') {
+      missingCapabilities.transfers = { requested: true }
+    }
+    if (Object.keys(missingCapabilities).length > 0) {
+      try {
+        await stripe.accounts.update(agent.stripe_account_id, { capabilities: missingCapabilities })
+      } catch (stripeErr) {
+        const message = stripeErr instanceof Error ? stripeErr.message : 'Could not request the missing capabilities'
+        return NextResponse.json({
+          error: `Could not request this account's missing capabilities: ${message}. This may need manual review in the Stripe Dashboard.`,
+          stripe_account_id: agent.stripe_account_id,
+          action_required: 'manual_stripe_dashboard_review',
+        }, { status: 409 })
+      }
+    }
+  }
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://mercatai.eu'
 
   // Same account every time — this call can never create a new one. Stripe
   // account_onboarding links are Stripe-hosted end to end; nothing here
   // collects identity, bank, or ToS data directly.
-  const accountLink = await stripe.accountLinks.create({
-    account: agent.stripe_account_id,
-    refresh_url: `${baseUrl}/agent/stripe-onboard?refresh=1&agent_db_id=${params.id}`,
-    return_url: `${baseUrl}/agent/stripe-onboard?success=1&agent_db_id=${params.id}`,
-    type: 'account_onboarding',
-  })
+  let accountLink
+  try {
+    accountLink = await stripe.accountLinks.create({
+      account: agent.stripe_account_id,
+      refresh_url: `${baseUrl}/agent/stripe-onboard?refresh=1&agent_db_id=${params.id}`,
+      return_url: `${baseUrl}/agent/stripe-onboard?success=1&agent_db_id=${params.id}`,
+      type: 'account_onboarding',
+    })
+  } catch (linkErr) {
+    console.error('Failed to create Stripe account link:', linkErr instanceof Error ? linkErr.message : linkErr)
+    return NextResponse.json({ error: 'Could not create a Stripe onboarding link right now. Please try again shortly.' }, { status: 502 })
+  }
 
   // The link itself is never logged, emailed, or persisted — only the
   // account id, same restraint as the parent route's own audit entries.

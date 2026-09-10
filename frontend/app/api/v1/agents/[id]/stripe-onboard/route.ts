@@ -7,7 +7,12 @@ import {
   requiredCapabilitiesForCountry,
 } from '@/lib/onboardingCountries'
 import { isOnboardingCountryEnabled } from '@/lib/server/stripeConnectCountries'
-import { computeStripeAccountReadiness, syncOnboardingCompletedFlag } from '@/lib/server/stripeAccountReadiness'
+import {
+  computeStripeAccountReadiness,
+  syncOnboardingCompletedFlag,
+  classifyDisabledReason,
+  disabledReasonBlockingResponse,
+} from '@/lib/server/stripeAccountReadiness'
 
 // Stripe's legal-entity structures for a connected account. Left unset by
 // default so Stripe's hosted onboarding asks the account holder directly —
@@ -142,13 +147,15 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const readiness = computeStripeAccountReadiness(account)
     await syncOnboardingCompletedFlag(db, agent.id, agent.stripe_onboarding_completed, readiness.onboardingComplete)
 
-    if (account.requirements?.disabled_reason) {
-      return NextResponse.json({
-        error: `This Stripe account needs manual review (Stripe's reason: ${account.requirements.disabled_reason}). Check the Stripe Dashboard or contact Stripe support directly — a new onboarding link cannot resolve this.`,
-        stripe_account_id: stripeAccountId,
-        action_required: 'manual_stripe_dashboard_review',
-        disabled_reason: account.requirements.disabled_reason,
-      }, { status: 409 })
+    // Some disabled_reason values (requirements.past_due,
+    // action_required.requested_capabilities) are normal, self-service
+    // states a fresh onboarding link resolves — only genuinely blocked or
+    // Stripe-side-pending states short-circuit here. See
+    // frontend/lib/server/stripeAccountReadiness.ts.
+    const disabledClassification = classifyDisabledReason(account.requirements?.disabled_reason)
+    const blocking = disabledReasonBlockingResponse(disabledClassification, stripeAccountId)
+    if (blocking) {
+      return NextResponse.json(blocking.body, { status: blocking.status })
     }
 
     // Checking "any capability short of active" is deliberately a stricter
@@ -253,13 +260,22 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
   }
 
-  // Vygeneruj onboarding link (platí 24h)
-  const accountLink = await stripe.accountLinks.create({
-    account: stripeAccountId,
-    refresh_url: `${baseUrl}/agent/stripe-onboard?refresh=1&agent_db_id=${params.id}`,
-    return_url: `${baseUrl}/agent/stripe-onboard?success=1&agent_db_id=${params.id}`,
-    type: 'account_onboarding',
-  })
+  // Short-lived, single-use — Stripe sends the agent back to refresh_url
+  // (handled by the sibling refresh/route.ts) if it expires or is reused.
+  let accountLink
+  try {
+    accountLink = await stripe.accountLinks.create({
+      account: stripeAccountId,
+      refresh_url: `${baseUrl}/agent/stripe-onboard?refresh=1&agent_db_id=${params.id}`,
+      return_url: `${baseUrl}/agent/stripe-onboard?success=1&agent_db_id=${params.id}`,
+      type: 'account_onboarding',
+    })
+  } catch (linkErr) {
+    // Never the raw Stripe exception to the caller, and never the link
+    // itself (there isn't one — creation failed) in the log.
+    console.error('Failed to create Stripe account link:', linkErr instanceof Error ? linkErr.message : linkErr)
+    return NextResponse.json({ error: 'Could not create a Stripe onboarding link right now. Please try again shortly.' }, { status: 502 })
+  }
 
   await auditLog({
     action: 'stripe_connect_onboard_initiated',
