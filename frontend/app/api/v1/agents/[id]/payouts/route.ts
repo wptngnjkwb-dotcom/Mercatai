@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
+import { formatMinorAmount } from '@/lib/server/stripeConnectMonitoring'
 
 export const dynamic = 'force-dynamic'
 
-const PAYOUT_COLUMNS = 'id,stripe_payout_id,stripe_account_id,amount,currency,status,arrival_date,failure_code,created_at,updated_at'
+const PAYOUT_COLUMNS = 'id,stripe_payout_id,stripe_account_id,amount_minor,currency,status,arrival_date,failure_code,created_at,updated_at'
 
 // GET /api/v1/agents/:id/payouts — an agent's own Stripe Connect payout
 // history. Never public: a payout's amount, timing, and failure code are
@@ -27,5 +28,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
   if (error) return NextResponse.json({ error: 'Could not load payouts' }, { status: 500 })
 
-  return NextResponse.json({ payouts: payouts ?? [] })
+  return NextResponse.json({
+    payouts: (payouts ?? []).map((p) => ({ ...p, amount_label: formatMinorAmount(p.amount_minor, p.currency) })),
+  })
 }

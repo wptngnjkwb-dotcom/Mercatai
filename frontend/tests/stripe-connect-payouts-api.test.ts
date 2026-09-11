@@ -10,8 +10,8 @@ const AGENT_1 = '11111111-1111-1111-1111-111111111111'
 const AGENT_2 = '22222222-2222-2222-2222-222222222222'
 
 const payoutRows = [
-  { id: 'p1', stripe_payout_id: 'po_1', stripe_account_id: 'acct_1', agent_id: AGENT_1, amount: 100, currency: 'eur', status: 'paid', arrival_date: null, failure_code: null, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
-  { id: 'p2', stripe_payout_id: 'po_2', stripe_account_id: 'acct_2', agent_id: AGENT_2, amount: 50, currency: 'eur', status: 'failed', arrival_date: null, failure_code: 'account_closed', created_at: '2026-01-02T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' },
+  { id: 'p1', stripe_payout_id: 'po_1', stripe_account_id: 'acct_1', agent_id: AGENT_1, amount_minor: 10000, currency: 'eur', status: 'paid', arrival_date: null, failure_code: null, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+  { id: 'p2', stripe_payout_id: 'po_2', stripe_account_id: 'acct_2', agent_id: AGENT_2, amount_minor: 5000, currency: 'eur', status: 'failed', arrival_date: null, failure_code: 'account_closed', created_at: '2026-01-02T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' },
 ]
 
 let lastEqCalls: [string, unknown][] = []
@@ -54,6 +54,7 @@ describe('GET /api/v1/agents/[id]/payouts', () => {
     expect(response.status).toBe(200)
     expect(body.payouts).toHaveLength(1)
     expect(body.payouts[0].stripe_payout_id).toBe('po_1')
+    expect(body.payouts[0].amount_label).toBe('100.00 EUR')
     expect(lastEqCalls).toContainEqual(['agent_id', AGENT_1])
   })
 
@@ -117,6 +118,7 @@ describe('GET /api/v1/admin/payouts', () => {
 
     expect(response.status).toBe(200)
     expect(body.payouts).toHaveLength(2)
+    expect(body.payouts.map((p: any) => p.amount_label).sort()).toEqual(['100.00 EUR', '50.00 EUR'].sort())
   })
 
   it('filters to only failed payouts when status=failed', async () => {

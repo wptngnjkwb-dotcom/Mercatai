@@ -138,27 +138,41 @@ export async function sendModerationAlert(params: {
   )
 }
 
-export async function sendPayoutFailedAdminAlert(params: {
+/**
+ * Delivers the critical payout.failed admin alert, or throws — never
+ * swallows a failure the way `send()` above does. A missing
+ * ADMIN_ALERT_EMAIL or RESEND_API_KEY is itself a failure to throw on,
+ * not a reason to log "skipping" and let the caller treat this as done:
+ * the caller (ensureAdminAlertSent in stripeConnectMonitoring.ts) depends
+ * on a thrown error here to keep the underlying webhook event un-completed
+ * so it gets retried, and to keep the payout row's own admin_alert_status
+ * at 'failed' rather than incorrectly 'sent'.
+ */
+export async function sendPayoutFailedAdminAlertOrThrow(params: {
   payoutId: string
   stripeAccountId: string
   agentId: string | null
-  amount: number
-  currency: string
+  amountLabel: string
   failureCode: string | null
-}) {
+}): Promise<void> {
   const to = process.env.ADMIN_ALERT_EMAIL
   if (!to) {
-    console.log(`[email] ADMIN_ALERT_EMAIL not set — skipping payout-failed alert for ${params.payoutId}`)
-    return
+    throw new Error('ADMIN_ALERT_EMAIL is not configured — a critical payout-failure alert cannot be delivered')
   }
-  const amountLabel = `${params.amount.toFixed(2)} ${params.currency.toUpperCase()}`
-  await send(
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) {
+    throw new Error('RESEND_API_KEY is not configured — a critical payout-failure alert cannot be delivered')
+  }
+  const { Resend } = await import('resend')
+  const resend = new Resend(apiKey)
+  const { error } = await resend.emails.send({
+    from: FROM,
     to,
-    `🚨 Stripe payout failed — ${amountLabel}`,
-    `
+    subject: `🚨 Stripe payout failed — ${params.amountLabel}`,
+    html: `
     <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
       <h2 style="color:#dc2626">Payout failed</h2>
-      <p>A Stripe Connect payout of <strong>${amountLabel}</strong> failed.</p>
+      <p>A Stripe Connect payout of <strong>${params.amountLabel}</strong> failed.</p>
       <table style="width:100%;border-collapse:collapse;margin:12px 0">
         <tr><td style="padding:6px;color:#6b7280">Payout ID</td><td style="padding:6px;font-weight:600"><code>${params.payoutId}</code></td></tr>
         <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Connected account</td><td style="padding:6px;font-weight:600"><code>${params.stripeAccountId}</code></td></tr>
@@ -172,19 +186,25 @@ export async function sendPayoutFailedAdminAlert(params: {
       </a>
       <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
     </div>
-    `
-  )
+    `,
+  })
+  // Resend's SDK does not throw on an API-level failure (invalid key,
+  // rate limit, suppressed recipient, ...) — it resolves with { error }
+  // instead. Checking this explicitly is the entire point of this
+  // function existing separately from `send()` above.
+  if (error) {
+    throw new Error(`Resend rejected the payout-failure alert: ${error.message}`)
+  }
 }
 
-export async function sendPayoutFailedAgentNotice(params: { to: string; amount: number; currency: string }) {
-  const amountLabel = `${params.amount.toFixed(2)} ${params.currency.toUpperCase()}`
+export async function sendPayoutFailedAgentNotice(params: { to: string; amountLabel: string }) {
   await send(
     params.to,
-    `⚠️ A payout of ${amountLabel} to your bank account did not go through`,
+    `⚠️ A payout of ${params.amountLabel} to your bank account did not go through`,
     `
     <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
       <h2 style="color:#b45309">Payout did not go through</h2>
-      <p>Stripe attempted to pay out <strong>${amountLabel}</strong> to your connected bank account, but it failed.</p>
+      <p>Stripe attempted to pay out <strong>${params.amountLabel}</strong> to your connected bank account, but it failed.</p>
       <p>This is usually something on the bank side (a closed account, a mismatched account holder name, or similar) — check your Stripe Connect dashboard for what to fix, then Stripe retries automatically once it's resolved.</p>
       <a href="${BASE_URL}/agent/stripe-onboard"
          style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">

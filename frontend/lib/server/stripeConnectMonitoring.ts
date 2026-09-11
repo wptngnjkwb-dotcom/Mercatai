@@ -2,86 +2,104 @@ import type Stripe from 'stripe'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
 import { computeStripeAccountReadiness, syncOnboardingCompletedFlag } from '@/lib/server/stripeAccountReadiness'
-import { sendPayoutFailedAdminAlert, sendPayoutFailedAgentNotice } from '@/lib/server/email'
+import { sendPayoutFailedAdminAlertOrThrow, sendPayoutFailedAgentNotice } from '@/lib/server/email'
 
 type Db = ReturnType<typeof getSupabase>
 
-const POSTGRES_UNIQUE_VIOLATION = '23505'
+const DEFAULT_LEASE_SECONDS = 300
 
-export type ConnectEventClaim = { claimed: true; id: string } | { claimed: false }
+export type ConnectEventClaim = { claimed: true; id: string; claimToken: string; attemptCount: number } | { claimed: false }
 
 /**
- * Claims a Stripe Connect event for processing, keyed by Stripe's own
- * event id. Stripe redelivers events on timeout or retry, and two
- * deliveries of the same event can also race each other — this makes
- * both cases resolve to exactly one processing attempt. The first INSERT
- * wins the row; any other delivery sees the unique-violation and either
- * finds the event already 'completed' (nothing left to do), still
- * 'processing' (a concurrent delivery is handling it right now), or
- * 'failed' (a previous attempt didn't finish — this delivery may retry it,
- * but only by winning its own atomic reclaim, in case yet another
- * concurrent delivery is reclaiming it at the same moment).
- *
- * Throws on a genuine database error (not a unique-violation) so the
- * caller returns 500 and Stripe retries the delivery later.
+ * Claims a Stripe Connect event for processing via the claim_stripe_connect_event
+ * Postgres function — a real, atomic lease, not a permanent lock. See that
+ * function (frontend/sql/14_stripe_connect_monitoring.sql) for the full
+ * mechanics: a brand-new event is inserted as 'processing'; an existing
+ * event is reclaimed only if it's 'failed' or its lease has expired, never
+ * a fresh 'processing' or a 'completed' row. Every claim mints a new
+ * claim_token — mark-completed/mark-failed must match both id AND
+ * claim_token, so a worker whose lease already expired and was reclaimed
+ * by someone else can never overwrite that newer attempt's result.
  */
-export async function claimConnectEvent(db: Db, event: Stripe.Event): Promise<ConnectEventClaim> {
-  const { data: inserted, error: insertError } = await db
-    .from('stripe_connect_events')
-    .insert({
-      stripe_event_id: event.id,
-      event_type: event.type,
-      stripe_account_id: event.account ?? null,
-      status: 'processing',
-    })
-    .select('id')
-    .single()
+export async function claimConnectEvent(db: Db, event: Stripe.Event, leaseSeconds = DEFAULT_LEASE_SECONDS): Promise<ConnectEventClaim> {
+  const { data, error } = await db.rpc('claim_stripe_connect_event', {
+    p_stripe_event_id: event.id,
+    p_event_type: event.type,
+    p_stripe_account_id: event.account ?? null,
+    p_lease_seconds: leaseSeconds,
+  })
+  if (error) throw new Error(`Failed to claim Stripe Connect event ${event.id}: ${error.message}`)
 
-  if (!insertError && inserted) return { claimed: true, id: inserted.id }
-
-  if (insertError?.code !== POSTGRES_UNIQUE_VIOLATION) {
-    throw new Error(`Failed to record Stripe Connect event ${event.id}: ${insertError?.message ?? 'unknown error'}`)
-  }
-
-  const { data: existing, error: fetchError } = await db
-    .from('stripe_connect_events')
-    .select('id, status')
-    .eq('stripe_event_id', event.id)
-    .maybeSingle()
-
-  if (fetchError || !existing) {
-    throw new Error(`Failed to look up existing Stripe Connect event ${event.id}: ${fetchError?.message ?? 'not found'}`)
-  }
-
-  if (existing.status !== 'failed') {
-    return { claimed: false }
-  }
-
-  const { data: reclaimed } = await db
-    .from('stripe_connect_events')
-    .update({ status: 'processing' })
-    .eq('id', existing.id)
-    .eq('status', 'failed')
-    .select('id')
-    .maybeSingle()
-
-  return reclaimed ? { claimed: true, id: reclaimed.id } : { claimed: false }
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row) return { claimed: false }
+  return { claimed: true, id: row.id, claimToken: row.claim_token, attemptCount: row.attempt_count }
 }
 
-export async function markConnectEventCompleted(db: Db, id: string): Promise<void> {
-  await db.from('stripe_connect_events').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', id)
+/**
+ * Marks a claimed event completed — but ONLY the row matching both id and
+ * claim_token, and only if that update actually affected a row. Throws on
+ * a database error OR on zero rows affected (the lease was reclaimed by a
+ * newer attempt in the meantime), so the webhook route can never return
+ * 200 to Stripe without a genuinely confirmed completion.
+ */
+export async function markConnectEventCompleted(db: Db, id: string, claimToken: string): Promise<void> {
+  const { data, error } = await db
+    .from('stripe_connect_events')
+    .update({ status: 'completed', completed_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('claim_token', claimToken)
+    .select('id')
+
+  if (error) throw new Error(`Failed to mark Stripe Connect event ${id} completed: ${error.message}`)
+  if (!data || data.length === 0) {
+    throw new Error(`Failed to mark Stripe Connect event ${id} completed: claim_token no longer matches — its lease was reclaimed by another attempt`)
+  }
 }
 
-export async function markConnectEventFailed(db: Db, id: string): Promise<void> {
-  try {
-    await db.from('stripe_connect_events').update({ status: 'failed' }).eq('id', id)
-  } catch {
-    // Best-effort — if even this write fails, the row is stuck at
-    // 'processing'. The next genuinely new Stripe event for this account
-    // is unaffected either way; only a retry of this exact event id would
-    // be (harmlessly) treated as "already being handled" rather than
-    // retried immediately.
+/**
+ * Marks a claimed event failed, scoped to id + claim_token the same way as
+ * markConnectEventCompleted, and throws on error or zero rows affected —
+ * a plain try/catch around the caller's own throw is not enough, this
+ * needs the real Supabase result checked. If THIS write also fails (or
+ * loses the race), that is still safe: the stale-lease branch of
+ * claim_stripe_connect_event lets a later delivery reclaim the row once
+ * its lease expires regardless of whether this particular mark-failed
+ * call succeeded.
+ */
+export async function markConnectEventFailed(db: Db, id: string, claimToken: string, lastError: string): Promise<void> {
+  const { data, error } = await db
+    .from('stripe_connect_events')
+    .update({ status: 'failed', last_error: lastError.slice(0, 500) })
+    .eq('id', id)
+    .eq('claim_token', claimToken)
+    .select('id')
+
+  if (error) throw new Error(`Failed to mark Stripe Connect event ${id} failed: ${error.message}`)
+  if (!data || data.length === 0) {
+    throw new Error(`Failed to mark Stripe Connect event ${id} failed: claim_token no longer matches — its lease was reclaimed by another attempt`)
   }
+}
+
+// Currencies Stripe treats as having no fractional/minor unit — the
+// integer amount Stripe reports IS the whole-currency amount already, not
+// a smallest-unit count to divide by 100. All other currencies (including
+// today's CZK/EUR/NOK) use 2 decimal places. This is deliberately not the
+// data model: stripe_connect_payouts.amount_minor always stores Stripe's
+// raw integer unchanged — this function only matters when FORMATTING an
+// amount for a human (UI, email), never when persisting one.
+// https://docs.stripe.com/currencies#zero-decimal
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  'bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf',
+])
+
+export function minorUnitExponent(currency: string): number {
+  return ZERO_DECIMAL_CURRENCIES.has(currency.toLowerCase()) ? 0 : 2
+}
+
+export function formatMinorAmount(amountMinor: number, currency: string): string {
+  const exponent = minorUnitExponent(currency)
+  const amount = amountMinor / 10 ** exponent
+  return `${amount.toFixed(exponent)} ${currency.toUpperCase()}`
 }
 
 interface AccountReadinessSnapshot {
@@ -93,37 +111,47 @@ interface AccountReadinessSnapshot {
 }
 
 /**
- * account.updated: keeps agents.stripe_onboarding_completed in sync (both
- * directions, via the shared helper — never derived from a single
- * boolean), and logs a distinct 'stripe_connect_readiness_lost' audit
- * event whenever any individual gate regresses since the last snapshot —
- * not just when the aggregate onboardingComplete flag flips. An agent with
- * two active payment methods that loses one still has
- * onboardingComplete=true (it only ever requires "at least one"), but has
- * genuinely lost something Stripe previously granted, and that must not
- * go unnoticed just because the coarser flag didn't move.
+ * account.updated: always re-fetches the CURRENT Account directly from
+ * Stripe using the verified event.account, rather than trusting
+ * event.data.object — Stripe does not guarantee delivery order, and a
+ * late-arriving event's embedded snapshot can be older than what is
+ * already true. Fetching fresh means there is no stale snapshot to
+ * accidentally apply: whichever event triggers this fetch, the fetch
+ * itself always returns whatever is truly current right now.
+ *
+ * Readiness-regression detection reads and writes
+ * stripe_connect_account_status — a reliable, critically-checked table —
+ * rather than best-effort auditLog() (which swallows its own errors and
+ * must never be the sole source of truth for this comparison). Keeps
+ * agents.stripe_onboarding_completed in sync in both directions via the
+ * shared helper, never derived from a single boolean.
  */
-export async function handleAccountUpdated(db: Db, event: Stripe.Event): Promise<void> {
-  const account = event.data.object as Stripe.Account
-  const stripeAccountId = event.account ?? account.id
+export async function handleAccountUpdated(db: Db, stripe: Stripe, event: Stripe.Event): Promise<void> {
+  const stripeAccountId = event.account
   if (!stripeAccountId) return
+
+  let account: Stripe.Account
+  try {
+    account = await stripe.accounts.retrieve(stripeAccountId)
+  } catch {
+    // Never guess state from the stale event body, never leak the raw
+    // Stripe error. Throwing here means the event is marked 'failed' and
+    // Stripe retries the delivery.
+    throw new Error(`Failed to fetch current account state for connected account ${stripeAccountId}`)
+  }
 
   const { data: agent, error: agentError } = await db
     .from('agents')
     .select('id, stripe_onboarding_completed')
     .eq('stripe_account_id', stripeAccountId)
     .maybeSingle()
-
-  if (agentError) {
-    throw new Error(`Failed to look up agent for connected account ${stripeAccountId}: ${agentError.message}`)
-  }
+  if (agentError) throw new Error(`Failed to look up agent for connected account ${stripeAccountId}: ${agentError.message}`)
 
   if (!agent) {
     // A real, if unusual, situation — not every connected account this
-    // Stripe platform account knows about necessarily has a live agent
-    // record (a deleted agent, or an account from before this database's
-    // current state). Nothing to sync or compare against; just leave a
-    // trail.
+    // Stripe platform knows about necessarily has a live agent record.
+    // Best-effort audit trail is fine here; there is no critical state to
+    // reconcile for an account with no matching agent.
     await auditLog({
       action: 'stripe_connect_unknown_account',
       resource_type: 'stripe_account',
@@ -133,7 +161,6 @@ export async function handleAccountUpdated(db: Db, event: Stripe.Event): Promise
   }
 
   const readiness = computeStripeAccountReadiness(account)
-
   const current: AccountReadinessSnapshot = {
     charges_enabled: !!account.charges_enabled,
     payouts_enabled: !!account.payouts_enabled,
@@ -142,30 +169,25 @@ export async function handleAccountUpdated(db: Db, event: Stripe.Event): Promise
     transfers_status: readiness.transfersStatus,
   }
 
-  const { data: lastSnapshot, error: snapshotError } = await db
-    .from('audit_logs')
-    .select('details')
-    .eq('resource_type', 'agent')
-    .eq('resource_id', agent.id)
-    .eq('action', 'stripe_connect_account_snapshot')
-    .order('created_at', { ascending: false })
-    .limit(1)
+  const { data: prevStatus, error: prevError } = await db
+    .from('stripe_connect_account_status')
+    .select('charges_enabled, payouts_enabled, card_payments_status, sepa_debit_payments_status, transfers_status')
+    .eq('stripe_account_id', stripeAccountId)
     .maybeSingle()
+  if (prevError) throw new Error(`Failed to read prior account status for ${stripeAccountId}: ${prevError.message}`)
 
-  if (snapshotError) {
-    throw new Error(`Failed to look up prior readiness snapshot for agent ${agent.id}: ${snapshotError.message}`)
-  }
-
-  const prev = lastSnapshot?.details as Partial<AccountReadinessSnapshot> | undefined
-  if (prev) {
+  if (prevStatus) {
     const regressed: string[] = []
-    if (prev.charges_enabled === true && !current.charges_enabled) regressed.push('charges_enabled')
-    if (prev.payouts_enabled === true && !current.payouts_enabled) regressed.push('payouts_enabled')
-    if (prev.card_payments_status === 'active' && current.card_payments_status !== 'active') regressed.push('card_payments')
-    if (prev.sepa_debit_payments_status === 'active' && current.sepa_debit_payments_status !== 'active') regressed.push('sepa_debit_payments')
-    if (prev.transfers_status === 'active' && current.transfers_status !== 'active') regressed.push('transfers')
+    if (prevStatus.charges_enabled === true && !current.charges_enabled) regressed.push('charges_enabled')
+    if (prevStatus.payouts_enabled === true && !current.payouts_enabled) regressed.push('payouts_enabled')
+    if (prevStatus.card_payments_status === 'active' && current.card_payments_status !== 'active') regressed.push('card_payments')
+    if (prevStatus.sepa_debit_payments_status === 'active' && current.sepa_debit_payments_status !== 'active') regressed.push('sepa_debit_payments')
+    if (prevStatus.transfers_status === 'active' && current.transfers_status !== 'active') regressed.push('transfers')
 
     if (regressed.length > 0) {
+      // Best-effort — the regression itself was already reliably detected
+      // above using the critical table; this is only the human-readable
+      // audit trail entry, not the source of truth for detection.
       await auditLog({
         action: 'stripe_connect_readiness_lost',
         resource_type: 'agent',
@@ -175,12 +197,10 @@ export async function handleAccountUpdated(db: Db, event: Stripe.Event): Promise
     }
   }
 
-  await auditLog({
-    action: 'stripe_connect_account_snapshot',
-    resource_type: 'agent',
-    resource_id: agent.id,
-    details: { ...current },
-  })
+  const { error: upsertError } = await db
+    .from('stripe_connect_account_status')
+    .upsert({ stripe_account_id: stripeAccountId, agent_id: agent.id, ...current, updated_at: new Date().toISOString() }, { onConflict: 'stripe_account_id' })
+  if (upsertError) throw new Error(`Failed to record account status for ${stripeAccountId}: ${upsertError.message}`)
 
   await syncOnboardingCompletedFlag(db, agent.id, agent.stripe_onboarding_completed, readiness.onboardingComplete)
 }
@@ -188,40 +208,100 @@ export async function handleAccountUpdated(db: Db, event: Stripe.Event): Promise
 const PAYOUT_STATUSES = new Set(['pending', 'in_transit', 'paid', 'failed', 'canceled'])
 
 /**
- * payout.created / payout.updated / payout.paid / payout.failed: records
- * payout STATE ONLY (see stripe_connect_payouts in
- * frontend/sql/14_stripe_connect_monitoring.sql — never a bank account
- * number or account holder name), keyed on (stripe_account_id,
- * stripe_payout_id) so redelivery or a later status transition for the
- * same payout updates one row rather than creating duplicates. Never
- * touches tasks or transactions — a single payout can bundle funds from
- * many of them, so there is no single one to update; only
- * reconcilePaymentIntent (driven by payment_intent.* events on the
- * platform-account webhook) ever changes escrow_status. Alerts (admin
- * email always; the agent's own owner_email when one is on file) fire
- * only on the transition INTO 'failed', not on every redelivery of an
- * already-failed payout's events.
+ * Atomically claims the right to (re)send the critical payout.failed admin
+ * alert for one payout row, via claim_payout_admin_alert. Retryable and
+ * concurrency-safe: repeated or concurrent failure events for the same
+ * payout must never both send. If this worker wins the claim but sending
+ * fails (including a missing ADMIN_ALERT_EMAIL/RESEND_API_KEY, which
+ * sendPayoutFailedAdminAlertOrThrow throws on rather than silently
+ * no-opping), admin_alert_status is set back to 'failed' and this
+ * function re-throws — which the caller must propagate so the whole
+ * webhook event is NOT marked completed, and Stripe retries the delivery.
+ * The payout row's own state (already written by the caller before this
+ * runs) is unaffected either way.
  */
-export async function handlePayoutEvent(db: Db, event: Stripe.Event): Promise<void> {
-  const payout = event.data.object as Stripe.Payout
+async function ensureAdminAlertSent(
+  db: Db,
+  payoutRowId: string,
+  details: { payoutId: string; stripeAccountId: string; agentId: string | null; amountMinor: number; currency: string; failureCode: string | null }
+): Promise<void> {
+  const { data: claimed, error: claimError } = await db.rpc('claim_payout_admin_alert', {
+    p_payout_row_id: payoutRowId,
+    p_lease_seconds: DEFAULT_LEASE_SECONDS,
+  })
+  if (claimError) throw new Error(`Failed to claim admin-alert delivery for payout ${payoutRowId}: ${claimError.message}`)
+  if (!claimed) return // already 'sent', or another attempt currently owns a fresh 'sending' claim
+
+  const amountLabel = formatMinorAmount(details.amountMinor, details.currency)
+  try {
+    await sendPayoutFailedAdminAlertOrThrow({
+      payoutId: details.payoutId,
+      stripeAccountId: details.stripeAccountId,
+      agentId: details.agentId,
+      amountLabel,
+      failureCode: details.failureCode,
+    })
+    const { error } = await db
+      .from('stripe_connect_payouts')
+      .update({ admin_alert_status: 'sent', admin_alert_sent_at: new Date().toISOString() })
+      .eq('id', payoutRowId)
+    if (error) throw new Error(`Admin alert was sent but recording it failed for payout ${payoutRowId}: ${error.message}`)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown error sending admin alert'
+    const { data: currentRow } = await db.from('stripe_connect_payouts').select('admin_alert_attempts').eq('id', payoutRowId).maybeSingle()
+    const nextAttempts = (currentRow?.admin_alert_attempts ?? 0) + 1
+    const { error: markFailedError } = await db
+      .from('stripe_connect_payouts')
+      .update({ admin_alert_status: 'failed', admin_alert_attempts: nextAttempts, last_alert_error: message.slice(0, 500) })
+      .eq('id', payoutRowId)
+    if (markFailedError) {
+      console.error(`Additionally failed to record admin-alert failure for payout ${payoutRowId}:`, markFailedError.message)
+    }
+    throw new Error(`Admin alert delivery failed for payout ${payoutRowId}: ${message}`)
+  }
+}
+
+/**
+ * payout.created / payout.updated / payout.paid / payout.failed: always
+ * re-fetches the CURRENT Payout directly from Stripe (in the connected
+ * account's context, via { stripeAccount: stripeAccountId }) rather than
+ * trusting event.data.object — the same order-independence rationale as
+ * handleAccountUpdated above. A late-arriving payout.created cannot
+ * revert an already-'paid' or already-'failed' row, because processing
+ * it re-fetches Stripe's own current truth rather than replaying its own
+ * stale embedded snapshot.
+ *
+ * Upserts by (stripe_account_id, stripe_payout_id) so redelivery or a
+ * later status transition updates one row rather than creating
+ * duplicates. Never touches tasks or transactions — a single payout can
+ * bundle funds from many of them, so there is no single one to update;
+ * only reconcilePaymentIntent (driven by payment_intent.* events on the
+ * platform-account webhook) ever changes escrow_status. The critical
+ * admin alert on a transition into 'failed' is delegated to
+ * ensureAdminAlertSent above (retryable, deduplicated); the agent's own
+ * notice stays best-effort and is only attempted on that same transition.
+ */
+export async function handlePayoutEvent(db: Db, stripe: Stripe, event: Stripe.Event): Promise<void> {
   const stripeAccountId = event.account
   if (!stripeAccountId) return
+  const eventPayoutId = (event.data.object as Stripe.Payout)?.id
+  if (!eventPayoutId) return
+
+  let payout: Stripe.Payout
+  try {
+    payout = await stripe.payouts.retrieve(eventPayoutId, { stripeAccount: stripeAccountId })
+  } catch {
+    throw new Error(`Failed to fetch current payout state for ${eventPayoutId} on connected account ${stripeAccountId}`)
+  }
 
   const status = PAYOUT_STATUSES.has(payout.status) ? payout.status : 'pending'
-  const amount = payout.amount / 100
+  const amountMinor = payout.amount
   const currency = payout.currency
   const arrivalDate = payout.arrival_date ? new Date(payout.arrival_date * 1000).toISOString() : null
   const failureCode = payout.failure_code ?? null
 
-  const { data: agent, error: agentError } = await db
-    .from('agents')
-    .select('id, owner_email')
-    .eq('stripe_account_id', stripeAccountId)
-    .maybeSingle()
-
-  if (agentError) {
-    throw new Error(`Failed to look up agent for connected account ${stripeAccountId}: ${agentError.message}`)
-  }
+  const { data: agent, error: agentError } = await db.from('agents').select('id, owner_email').eq('stripe_account_id', stripeAccountId).maybeSingle()
+  if (agentError) throw new Error(`Failed to look up agent for connected account ${stripeAccountId}: ${agentError.message}`)
 
   const { data: existingRow, error: existingError } = await db
     .from('stripe_connect_payouts')
@@ -229,28 +309,29 @@ export async function handlePayoutEvent(db: Db, event: Stripe.Event): Promise<vo
     .eq('stripe_account_id', stripeAccountId)
     .eq('stripe_payout_id', payout.id)
     .maybeSingle()
+  if (existingError) throw new Error(`Failed to look up existing payout ${payout.id}: ${existingError.message}`)
 
-  if (existingError) {
-    throw new Error(`Failed to look up existing payout ${payout.id}: ${existingError.message}`)
-  }
-
-  const wasAlreadyFailed = existingRow?.status === 'failed'
-  let rowId: string
-
-  if (existingRow) {
-    const { error } = await db
+  async function updateExistingPayoutRow(id: string): Promise<void> {
+    const { data: updatedRows, error } = await db
       .from('stripe_connect_payouts')
       .update({
         agent_id: agent?.id ?? null,
-        amount,
+        amount_minor: amountMinor,
         currency,
         status,
         arrival_date: arrivalDate,
         failure_code: failureCode,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', existingRow.id)
+      .eq('id', id)
+      .select('id')
     if (error) throw new Error(`Failed to update payout ${payout.id}: ${error.message}`)
+    if (!updatedRows || updatedRows.length === 0) throw new Error(`Failed to update payout ${payout.id}: no row matched id ${id}`)
+  }
+
+  let rowId: string
+  if (existingRow) {
+    await updateExistingPayoutRow(existingRow.id)
     rowId = existingRow.id
   } else {
     const { data: insertedRow, error } = await db
@@ -259,7 +340,7 @@ export async function handlePayoutEvent(db: Db, event: Stripe.Event): Promise<vo
         stripe_payout_id: payout.id,
         stripe_account_id: stripeAccountId,
         agent_id: agent?.id ?? null,
-        amount,
+        amount_minor: amountMinor,
         currency,
         status,
         arrival_date: arrivalDate,
@@ -267,8 +348,28 @@ export async function handlePayoutEvent(db: Db, event: Stripe.Event): Promise<vo
       })
       .select('id')
       .single()
-    if (error || !insertedRow) throw new Error(`Failed to record payout ${payout.id}: ${error?.message ?? 'no row returned'}`)
-    rowId = insertedRow.id
+
+    if (error?.code === '23505') {
+      // Lost a race with a concurrent event for the SAME payout that
+      // inserted first (two different Stripe event ids for one payout,
+      // processed by two different requests at nearly the same time) —
+      // fall back to updating the row that won, rather than crashing.
+      const { data: raceRow, error: raceLookupError } = await db
+        .from('stripe_connect_payouts')
+        .select('id')
+        .eq('stripe_account_id', stripeAccountId)
+        .eq('stripe_payout_id', payout.id)
+        .maybeSingle()
+      if (raceLookupError || !raceRow) {
+        throw new Error(`Failed to record payout ${payout.id}: lost an insert race but could not find the winning row: ${raceLookupError?.message ?? 'not found'}`)
+      }
+      await updateExistingPayoutRow(raceRow.id)
+      rowId = raceRow.id
+    } else if (error || !insertedRow) {
+      throw new Error(`Failed to record payout ${payout.id}: ${error?.message ?? 'no row returned'}`)
+    } else {
+      rowId = insertedRow.id
+    }
   }
 
   await auditLog({
@@ -276,21 +377,55 @@ export async function handlePayoutEvent(db: Db, event: Stripe.Event): Promise<vo
     resource_type: 'stripe_payout',
     resource_id: rowId,
     agent_id: agent?.id,
-    details: { stripe_payout_id: payout.id, stripe_account_id: stripeAccountId, amount, currency, status, failure_code: failureCode, event_type: event.type },
+    details: { stripe_payout_id: payout.id, stripe_account_id: stripeAccountId, amount_minor: amountMinor, currency, status, failure_code: failureCode, event_type: event.type },
   })
 
-  const justFailed = status === 'failed' && !wasAlreadyFailed
-  if (justFailed) {
-    await sendPayoutFailedAdminAlert({
-      payoutId: payout.id,
-      stripeAccountId,
-      agentId: agent?.id ?? null,
-      amount,
-      currency,
-      failureCode,
-    })
-    if (agent?.owner_email) {
-      await sendPayoutFailedAgentNotice({ to: agent.owner_email, amount, currency })
+  if (status === 'failed') {
+    // Critical, retryable, deduplicated — see ensureAdminAlertSent. A
+    // thrown error here must propagate so the caller does not mark this
+    // webhook event completed.
+    await ensureAdminAlertSent(db, rowId, { payoutId: payout.id, stripeAccountId, agentId: agent?.id ?? null, amountMinor, currency, failureCode })
+  }
+
+  const justFailed = status === 'failed' && existingRow?.status !== 'failed'
+  if (justFailed && agent?.owner_email) {
+    // Best-effort and non-critical, deliberately not gated on the admin
+    // alert's own success — the agent's own notice may be sent, skipped,
+    // or occasionally duplicated on a redelivery without materially
+    // affecting anyone; only the admin alert must be reliable.
+    try {
+      await sendPayoutFailedAgentNotice({ to: agent.owner_email, amountLabel: formatMinorAmount(amountMinor, currency) })
+    } catch (err) {
+      console.error(`Best-effort agent payout-failure notice failed for payout ${payout.id}:`, err instanceof Error ? err.message : err)
     }
   }
+}
+
+/**
+ * account.external_account.updated: Stripe sends this when a connected
+ * account's external bank account or card changes status — notably after
+ * a payout failure marks it 'errored', which means further payouts to it
+ * will keep failing until the agent fixes it in their Stripe dashboard.
+ * Captures only a coarse status and account type, NEVER an account
+ * number, last4, routing number, account holder name, or the raw object —
+ * this is deliberately a lighter, best-effort capture (an audit trail
+ * entry), not a new critical table.
+ */
+export async function handleExternalAccountUpdated(db: Db, event: Stripe.Event): Promise<void> {
+  const stripeAccountId = event.account
+  if (!stripeAccountId) return
+
+  const externalAccount = event.data.object as { object?: string; status?: string }
+  const safeStatus = typeof externalAccount.status === 'string' ? externalAccount.status : 'unknown'
+  const externalAccountType = externalAccount.object === 'card' ? 'card' : 'bank_account'
+
+  const { data: agent, error: agentError } = await db.from('agents').select('id').eq('stripe_account_id', stripeAccountId).maybeSingle()
+  if (agentError) throw new Error(`Failed to look up agent for connected account ${stripeAccountId}: ${agentError.message}`)
+
+  await auditLog({
+    action: 'stripe_connect_external_account_updated',
+    resource_type: 'agent',
+    resource_id: agent?.id,
+    details: { stripe_account_id: stripeAccountId, external_account_type: externalAccountType, status: safeStatus },
+  })
 }

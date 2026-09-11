@@ -293,41 +293,135 @@ CREATE TABLE IF NOT EXISTS task_moderation_appeals (
 );
 
 -- ============================================================
--- stripe_connect_events — idempotency ledger for the Connect webhook
--- (POST /api/v1/payments/stripe-connect-webhook). See
+-- stripe_connect_events — idempotency ledger AND lease for the Connect
+-- webhook (POST /api/v1/payments/stripe-connect-webhook). claim_token +
+-- processing_started_at make 'processing' a real, expiring lease rather
+-- than a permanent lock — see claim_stripe_connect_event() below and
 -- frontend/sql/14_stripe_connect_monitoring.sql for the full rationale.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS stripe_connect_events (
-    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    stripe_event_id   TEXT NOT NULL UNIQUE,
-    event_type        TEXT NOT NULL,
-    stripe_account_id TEXT,
-    status            TEXT NOT NULL DEFAULT 'processing'
-                      CHECK (status IN ('processing', 'completed', 'failed')),
-    created_at        TIMESTAMPTZ DEFAULT NOW(),
-    completed_at      TIMESTAMPTZ
+    id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    stripe_event_id       TEXT NOT NULL UNIQUE,
+    event_type            TEXT NOT NULL,
+    stripe_account_id     TEXT,
+    status                TEXT NOT NULL DEFAULT 'processing'
+                          CHECK (status IN ('processing', 'completed', 'failed')),
+    claim_token           UUID NOT NULL,
+    processing_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    attempt_count         INTEGER NOT NULL DEFAULT 1,
+    last_error            TEXT,
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    completed_at          TIMESTAMPTZ
 );
+
+CREATE OR REPLACE FUNCTION claim_stripe_connect_event(
+    p_stripe_event_id TEXT,
+    p_event_type TEXT,
+    p_stripe_account_id TEXT,
+    p_lease_seconds INTEGER DEFAULT 300
+) RETURNS TABLE (id UUID, claim_token UUID, attempt_count INTEGER) AS $$
+DECLARE
+    v_id UUID;
+    v_token UUID := uuid_generate_v4();
+    v_attempts INTEGER;
+BEGIN
+    INSERT INTO stripe_connect_events (stripe_event_id, event_type, stripe_account_id, status, claim_token, processing_started_at, attempt_count)
+    VALUES (p_stripe_event_id, p_event_type, p_stripe_account_id, 'processing', v_token, NOW(), 1)
+    ON CONFLICT (stripe_event_id) DO NOTHING
+    RETURNING stripe_connect_events.id INTO v_id;
+
+    IF v_id IS NOT NULL THEN
+        RETURN QUERY SELECT v_id, v_token, 1;
+        RETURN;
+    END IF;
+
+    UPDATE stripe_connect_events e
+    SET status = 'processing',
+        claim_token = v_token,
+        processing_started_at = NOW(),
+        attempt_count = e.attempt_count + 1
+    WHERE e.stripe_event_id = p_stripe_event_id
+      AND (
+          e.status = 'failed'
+          OR (e.status = 'processing' AND e.processing_started_at < NOW() - (p_lease_seconds || ' seconds')::interval)
+      )
+    RETURNING e.id, e.attempt_count INTO v_id, v_attempts;
+
+    IF v_id IS NOT NULL THEN
+        RETURN QUERY SELECT v_id, v_token, v_attempts;
+    END IF;
+
+    RETURN;
+END;
+$$ LANGUAGE plpgsql;
 
 -- ============================================================
 -- stripe_connect_payouts — payout STATE ONLY (never bank account number,
 -- account holder name, or any other field copied from Stripe's Payout
 -- object). No task_id/transaction_id: a payout can merge funds from many
--- transactions, so it never maps to a single one.
+-- transactions, so it never maps to a single one. amount_minor is
+-- Stripe's own smallest-currency-unit integer, never divided by 100 here
+-- — see formatMinorAmount() in stripeConnectMonitoring.ts. admin_alert_*
+-- tracks delivery of the critical payout.failed admin alert as its own
+-- durable, retryable claim, independent of the webhook event's lease.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS stripe_connect_payouts (
-    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    stripe_payout_id  TEXT NOT NULL,
-    stripe_account_id TEXT NOT NULL,
-    agent_id          UUID REFERENCES agents(id) ON DELETE SET NULL,
-    amount            DECIMAL(12,2) NOT NULL,
-    currency          TEXT NOT NULL,
-    status            TEXT NOT NULL
-                      CHECK (status IN ('pending', 'in_transit', 'paid', 'failed', 'canceled')),
-    arrival_date      TIMESTAMPTZ,
-    failure_code      TEXT,
-    created_at        TIMESTAMPTZ DEFAULT NOW(),
-    updated_at        TIMESTAMPTZ DEFAULT NOW(),
+    id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    stripe_payout_id        TEXT NOT NULL,
+    stripe_account_id       TEXT NOT NULL,
+    agent_id                UUID REFERENCES agents(id) ON DELETE SET NULL,
+    amount_minor            BIGINT NOT NULL,
+    currency                TEXT NOT NULL,
+    status                  TEXT NOT NULL
+                            CHECK (status IN ('pending', 'in_transit', 'paid', 'failed', 'canceled')),
+    arrival_date            TIMESTAMPTZ,
+    failure_code            TEXT,
+    admin_alert_status      TEXT NOT NULL DEFAULT 'pending'
+                            CHECK (admin_alert_status IN ('pending', 'sending', 'sent', 'failed')),
+    admin_alert_claimed_at  TIMESTAMPTZ,
+    admin_alert_sent_at     TIMESTAMPTZ,
+    admin_alert_attempts    INTEGER NOT NULL DEFAULT 0,
+    last_alert_error        TEXT,
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (stripe_account_id, stripe_payout_id)
+);
+
+CREATE OR REPLACE FUNCTION claim_payout_admin_alert(
+    p_payout_row_id UUID,
+    p_lease_seconds INTEGER DEFAULT 300
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_count INTEGER;
+BEGIN
+    UPDATE stripe_connect_payouts p
+    SET admin_alert_status = 'sending',
+        admin_alert_claimed_at = NOW()
+    WHERE p.id = p_payout_row_id
+      AND (
+          p.admin_alert_status IN ('pending', 'failed')
+          OR (p.admin_alert_status = 'sending' AND p.admin_alert_claimed_at < NOW() - (p_lease_seconds || ' seconds')::interval)
+      );
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    RETURN v_count > 0;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- stripe_connect_account_status — current known readiness snapshot per
+-- connected account. A reliable, critically-written table (unlike
+-- audit_logs, which is fire-and-forget best-effort) so a capability
+-- regression can be detected even if the audit log write itself fails.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS stripe_connect_account_status (
+    stripe_account_id           TEXT PRIMARY KEY,
+    agent_id                    UUID REFERENCES agents(id) ON DELETE SET NULL,
+    charges_enabled             BOOLEAN NOT NULL,
+    payouts_enabled             BOOLEAN NOT NULL,
+    card_payments_status        TEXT NOT NULL,
+    sepa_debit_payments_status  TEXT NOT NULL,
+    transfers_status            TEXT NOT NULL,
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ============================================================
@@ -361,9 +455,10 @@ CREATE INDEX IF NOT EXISTS idx_task_reports_task       ON task_reports(task_id);
 CREATE INDEX IF NOT EXISTS idx_moderation_events_task  ON task_moderation_events(task_id);
 CREATE INDEX IF NOT EXISTS idx_moderation_appeals_task ON task_moderation_appeals(task_id);
 CREATE INDEX IF NOT EXISTS idx_moderation_appeals_status ON task_moderation_appeals(status);
-CREATE INDEX IF NOT EXISTS idx_stripe_connect_events_status  ON stripe_connect_events(status);
-CREATE INDEX IF NOT EXISTS idx_stripe_connect_payouts_agent  ON stripe_connect_payouts(agent_id);
-CREATE INDEX IF NOT EXISTS idx_stripe_connect_payouts_status ON stripe_connect_payouts(status);
+CREATE INDEX IF NOT EXISTS idx_stripe_connect_events_status         ON stripe_connect_events(status);
+CREATE INDEX IF NOT EXISTS idx_stripe_connect_payouts_agent         ON stripe_connect_payouts(agent_id);
+CREATE INDEX IF NOT EXISTS idx_stripe_connect_payouts_status        ON stripe_connect_payouts(status);
+CREATE INDEX IF NOT EXISTS idx_stripe_connect_account_status_agent  ON stripe_connect_account_status(agent_id);
 
 -- ============================================================
 -- Row Level Security (RLS) — základní politiky
@@ -378,8 +473,9 @@ ALTER TABLE reputation_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_reports            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_moderation_events  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_moderation_appeals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE stripe_connect_events   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE stripe_connect_payouts  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stripe_connect_events         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stripe_connect_payouts        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stripe_connect_account_status ENABLE ROW LEVEL SECURITY;
 
 -- Service role má plný přístup (backend vždy používá service_role_key)
 CREATE POLICY "service_role_all" ON organizations   TO service_role USING (true) WITH CHECK (true);
@@ -392,5 +488,6 @@ CREATE POLICY "service_role_all" ON reputation_events TO service_role USING (tru
 CREATE POLICY "service_role_all" ON task_reports            TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_all" ON task_moderation_events  TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_all" ON task_moderation_appeals TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY "service_role_all" ON stripe_connect_events   TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY "service_role_all" ON stripe_connect_payouts  TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_all" ON stripe_connect_events         TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_all" ON stripe_connect_payouts        TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_all" ON stripe_connect_account_status TO service_role USING (true) WITH CHECK (true);
