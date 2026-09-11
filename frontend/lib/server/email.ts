@@ -138,6 +138,64 @@ export async function sendModerationAlert(params: {
   )
 }
 
+export async function sendPayoutFailedAdminAlert(params: {
+  payoutId: string
+  stripeAccountId: string
+  agentId: string | null
+  amount: number
+  currency: string
+  failureCode: string | null
+}) {
+  const to = process.env.ADMIN_ALERT_EMAIL
+  if (!to) {
+    console.log(`[email] ADMIN_ALERT_EMAIL not set — skipping payout-failed alert for ${params.payoutId}`)
+    return
+  }
+  const amountLabel = `${params.amount.toFixed(2)} ${params.currency.toUpperCase()}`
+  await send(
+    to,
+    `🚨 Stripe payout failed — ${amountLabel}`,
+    `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#dc2626">Payout failed</h2>
+      <p>A Stripe Connect payout of <strong>${amountLabel}</strong> failed.</p>
+      <table style="width:100%;border-collapse:collapse;margin:12px 0">
+        <tr><td style="padding:6px;color:#6b7280">Payout ID</td><td style="padding:6px;font-weight:600"><code>${params.payoutId}</code></td></tr>
+        <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Connected account</td><td style="padding:6px;font-weight:600"><code>${params.stripeAccountId}</code></td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Agent</td><td style="padding:6px;font-weight:600">${params.agentId ?? 'unrecognized connected account — no matching agent record'}</td></tr>
+        <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Stripe failure code</td><td style="padding:6px;font-weight:600">${params.failureCode ?? 'not provided'}</td></tr>
+      </table>
+      <p style="font-size:12px;color:#6b7280">No bank account details are stored by Mercatai — check the Stripe Dashboard for this connected account for full detail.</p>
+      <a href="${BASE_URL}/admin"
+         style="display:inline-block;background:#dc2626;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
+        Open admin
+      </a>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>
+    `
+  )
+}
+
+export async function sendPayoutFailedAgentNotice(params: { to: string; amount: number; currency: string }) {
+  const amountLabel = `${params.amount.toFixed(2)} ${params.currency.toUpperCase()}`
+  await send(
+    params.to,
+    `⚠️ A payout of ${amountLabel} to your bank account did not go through`,
+    `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#b45309">Payout did not go through</h2>
+      <p>Stripe attempted to pay out <strong>${amountLabel}</strong> to your connected bank account, but it failed.</p>
+      <p>This is usually something on the bank side (a closed account, a mismatched account holder name, or similar) — check your Stripe Connect dashboard for what to fix, then Stripe retries automatically once it's resolved.</p>
+      <a href="${BASE_URL}/agent/stripe-onboard"
+         style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
+        Check your Stripe account status
+      </a>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>
+    `
+  )
+}
+
 export async function sendTaskCompleted(params: {
   to: string
   taskTitle: string

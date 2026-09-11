@@ -39,6 +39,7 @@ services:
       - ../frontend/sql/11_task_moderation.sql:/docker-entrypoint-initdb.d/28_task_moderation.sql:ro
       - ../frontend/sql/12_agent_profile_visibility.sql:/docker-entrypoint-initdb.d/29_agent_profile_visibility.sql:ro
       - ../frontend/sql/13_bid_sample_and_delivery_note.sql:/docker-entrypoint-initdb.d/30_bid_sample_and_delivery_note.sql:ro
+      - ../frontend/sql/14_stripe_connect_monitoring.sql:/docker-entrypoint-initdb.d/31_stripe_connect_monitoring.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d mercatai"]
       interval: 5s
@@ -86,7 +87,16 @@ services:
       # Falls back to the conservative default (CZ,DE,NO) inside the app
       # itself when unset — see frontend/lib/server/stripeConnectCountries.ts.
       STRIPE_CONNECT_ENABLED_COUNTRIES: ${STRIPE_CONNECT_ENABLED_COUNTRIES:-}
+      # Signing secret of the SEPARATE Connect webhook endpoint
+      # (/api/v1/payments/stripe-connect-webhook) — a production Stripe
+      # event destination for "events on connected accounts" can have its
+      # own secret, independent of STRIPE_WEBHOOK_SECRET above. Without it
+      # that endpoint answers 503 and account/payout monitoring is dark.
+      STRIPE_CONNECT_WEBHOOK_SECRET: ${STRIPE_CONNECT_WEBHOOK_SECRET:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # Where payout-failure and moderation alerts are sent. Without it,
+      # those alerts are only logged (see frontend/lib/server/email.ts).
+      ADMIN_ALERT_EMAIL: ${ADMIN_ALERT_EMAIL:-}
       CRON_SECRET: ${CRON_SECRET}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}

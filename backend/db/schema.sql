@@ -293,6 +293,44 @@ CREATE TABLE IF NOT EXISTS task_moderation_appeals (
 );
 
 -- ============================================================
+-- stripe_connect_events — idempotency ledger for the Connect webhook
+-- (POST /api/v1/payments/stripe-connect-webhook). See
+-- frontend/sql/14_stripe_connect_monitoring.sql for the full rationale.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS stripe_connect_events (
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    stripe_event_id   TEXT NOT NULL UNIQUE,
+    event_type        TEXT NOT NULL,
+    stripe_account_id TEXT,
+    status            TEXT NOT NULL DEFAULT 'processing'
+                      CHECK (status IN ('processing', 'completed', 'failed')),
+    created_at        TIMESTAMPTZ DEFAULT NOW(),
+    completed_at      TIMESTAMPTZ
+);
+
+-- ============================================================
+-- stripe_connect_payouts — payout STATE ONLY (never bank account number,
+-- account holder name, or any other field copied from Stripe's Payout
+-- object). No task_id/transaction_id: a payout can merge funds from many
+-- transactions, so it never maps to a single one.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS stripe_connect_payouts (
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    stripe_payout_id  TEXT NOT NULL,
+    stripe_account_id TEXT NOT NULL,
+    agent_id          UUID REFERENCES agents(id) ON DELETE SET NULL,
+    amount            DECIMAL(12,2) NOT NULL,
+    currency          TEXT NOT NULL,
+    status            TEXT NOT NULL
+                      CHECK (status IN ('pending', 'in_transit', 'paid', 'failed', 'canceled')),
+    arrival_date      TIMESTAMPTZ,
+    failure_code      TEXT,
+    created_at        TIMESTAMPTZ DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (stripe_account_id, stripe_payout_id)
+);
+
+-- ============================================================
 -- Indexes
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_agents_embedding
@@ -323,6 +361,9 @@ CREATE INDEX IF NOT EXISTS idx_task_reports_task       ON task_reports(task_id);
 CREATE INDEX IF NOT EXISTS idx_moderation_events_task  ON task_moderation_events(task_id);
 CREATE INDEX IF NOT EXISTS idx_moderation_appeals_task ON task_moderation_appeals(task_id);
 CREATE INDEX IF NOT EXISTS idx_moderation_appeals_status ON task_moderation_appeals(status);
+CREATE INDEX IF NOT EXISTS idx_stripe_connect_events_status  ON stripe_connect_events(status);
+CREATE INDEX IF NOT EXISTS idx_stripe_connect_payouts_agent  ON stripe_connect_payouts(agent_id);
+CREATE INDEX IF NOT EXISTS idx_stripe_connect_payouts_status ON stripe_connect_payouts(status);
 
 -- ============================================================
 -- Row Level Security (RLS) — základní politiky
@@ -337,6 +378,8 @@ ALTER TABLE reputation_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_reports            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_moderation_events  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_moderation_appeals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stripe_connect_events   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stripe_connect_payouts  ENABLE ROW LEVEL SECURITY;
 
 -- Service role má plný přístup (backend vždy používá service_role_key)
 CREATE POLICY "service_role_all" ON organizations   TO service_role USING (true) WITH CHECK (true);
@@ -349,3 +392,5 @@ CREATE POLICY "service_role_all" ON reputation_events TO service_role USING (tru
 CREATE POLICY "service_role_all" ON task_reports            TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_all" ON task_moderation_events  TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_all" ON task_moderation_appeals TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_all" ON stripe_connect_events   TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_all" ON stripe_connect_payouts  TO service_role USING (true) WITH CHECK (true);

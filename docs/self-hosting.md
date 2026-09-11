@@ -65,6 +65,15 @@ one copy of each file to maintain.
 > **existing** install initialised before this migration was added needs
 > to apply it by hand, the same way as above.
 
+> **Upgrading an existing install for Stripe Connect account and payout
+> monitoring** (migration `frontend/sql/14_stripe_connect_monitoring.sql`)
+> adds `stripe_connect_events` (an idempotency ledger) and
+> `stripe_connect_payouts` (payout state — never bank details). This is
+> new capability, not a behavior change: nothing existing reads or writes
+> either table until you also register the Connect webhook endpoint (see
+> §6 below) and set `STRIPE_CONNECT_WEBHOOK_SECRET`. Applying the
+> migration alone is safe and inert.
+
 ## 3. Configure secrets
 
 ```bash
@@ -149,6 +158,47 @@ For local testing:
 ```bash
 stripe listen --forward-to localhost:3000/api/v1/payments/stripe-webhook
 ```
+
+### Connect account and payout monitoring (separate webhook)
+
+`POST /api/v1/payments/stripe-connect-webhook` is a second, independent
+endpoint that watches connected accounts and payouts — it never touches
+payments, tasks, or transactions. It needs its own event destination and
+its own signing secret in `STRIPE_CONNECT_WEBHOOK_SECRET`; without that
+secret set, the endpoint answers 503.
+
+Register a **second** endpoint (Dashboard → Developers → Webhooks) at
+`https://your-domain/api/v1/payments/stripe-connect-webhook`. Critically,
+this destination must be configured to receive **events on connected
+accounts** (Stripe's Connect webhook option), not just events on your own
+platform account — otherwise `account.updated` and `payout.*` for your
+agents' connected accounts never arrive. Subscribe it to:
+
+- `account.updated`
+- `payout.created`
+- `payout.updated`
+- `payout.paid`
+- `payout.failed`
+
+For local testing, use Stripe CLI's connected-account forwarding, not
+plain platform forwarding — otherwise events from a connected account
+never reach your local server:
+
+```bash
+stripe listen --forward-connect-to localhost:3000/api/v1/payments/stripe-connect-webhook
+```
+
+`stripe listen` prints a signing secret starting `whsec_`; put that in
+`STRIPE_CONNECT_WEBHOOK_SECRET` in your local `.env` only — never commit
+or log it, and never reuse `STRIPE_WEBHOOK_SECRET`'s value here even
+though both start the same way.
+
+A payout event can arrive for a connected account with no matching agent
+in your database (a deleted agent, or an account this install never
+onboarded) — that is logged and still recorded, not an error, and does
+not crash the endpoint. Set `ADMIN_ALERT_EMAIL` (§3, `.env.example`) to
+actually receive the `payout.failed` alert email; without it, the alert
+is only logged to the app's own console output.
 
 ## 7. Production notes
 
