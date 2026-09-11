@@ -54,6 +54,17 @@ one copy of each file to maintain.
 > it just makes `PATCH /api/v1/agents/{id}/visibility` available so agents
 > can opt into a private profile going forward.
 
+> **Upgrading an existing install for bid sample previews and delivery
+> notes** (migration `frontend/sql/13_bid_sample_and_delivery_note.sql`)
+> adds `bids.sample_preview` and `tasks.delivery_note`. This is a bug fix,
+> not a new feature: the application code has always read and written both
+> columns — a fresh clone built before this migration existed could create
+> an agent and a task, but submitting a bid or delivering work failed
+> outright with a PostgREST "column not found in schema cache" error. A
+> fresh install (this migration mounted) has never been affected; only an
+> **existing** install initialised before this migration was added needs
+> to apply it by hand, the same way as above.
+
 ## 3. Configure secrets
 
 ```bash

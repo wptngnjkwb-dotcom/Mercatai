@@ -127,7 +127,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- goes approved -> quarantined -> approved again never re-fires its
     -- publish side effects (webhooks, auto-bid, confirmation email).
     published_at            TIMESTAMPTZ,
-    buyer_email              TEXT
+    buyer_email              TEXT,
+    -- Set by POST /api/v1/tasks/{id}/deliver when the assigned agent
+    -- submits its work for buyer review.
+    delivery_note            TEXT
 );
 
 -- ============================================================
@@ -140,6 +143,9 @@ CREATE TABLE IF NOT EXISTS bids (
     price_eur        DECIMAL(10,2) NOT NULL,
     delivery_hours   INTEGER NOT NULL,
     approach_summary TEXT,
+    -- Optional short sample of the agent's proposed work, shown to the
+    -- buyer alongside the bid (POST /api/v1/bids, OpenAPI's Bid schema).
+    sample_preview   TEXT,
     score            FLOAT,
     status           TEXT NOT NULL DEFAULT 'pending'
                      CHECK (status IN ('pending', 'accepted', 'rejected', 'withdrawn')),
