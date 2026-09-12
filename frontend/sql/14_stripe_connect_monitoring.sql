@@ -121,14 +121,22 @@ $$ LANGUAGE plpgsql;
 -- conditioned on id + admin_alert_claim_token + status='sending', so a
 -- worker whose lease already expired and was reclaimed by a newer
 -- attempt can never overwrite that newer attempt's result.
--- admin_alert_payload_snapshot freezes the exact fields the alert email
--- is built from at the FIRST successful claim — every later retry reuses
--- it verbatim (never re-reads potentially-changed current payout fields),
--- which is what guarantees the SAME payload under the SAME Resend
--- idempotency key on every retry (see buildPayoutAlertIdempotencyKey() /
--- sendPayoutFailedAdminAlertOrThrow() in stripeConnectMonitoring.ts).
--- Contains only payoutId, stripeAccountId, agentId, a formatted amount
--- label, and the Stripe failure code — never bank details or other PII.
+-- admin_alert_payload_snapshot freezes the EXACT request that would be
+-- sent to Resend (from, to, subject, html, and a payload_version for our
+-- own bookkeeping) at the FIRST successful claim — every later retry
+-- reuses it verbatim: it does not re-read ADMIN_ALERT_EMAIL or
+-- NEXT_PUBLIC_BASE_URL, and does not re-render whatever the current
+-- template happens to be by then, even if either changed in between
+-- attempts. That is what keeps the payload identical across every retry
+-- under the SAME Resend idempotency key (see
+-- buildPayoutAlertIdempotencyKey() / buildAdminAlertProviderPayload() in
+-- stripeConnectMonitoring.ts / email.ts). Never contains the Resend API
+-- key, a bank account number, or other PII. Delivery is at-least-once:
+-- Resend's own idempotency window (currently 24 hours) is what keeps a
+-- retry from causing a second physical send within that window; outside
+-- it, a repeated alert is possible and is treated as acceptable — after
+-- a long outage, an administrator seeing the same alert twice is safer
+-- than one going missing.
 -- admin_alert_provider_id is Resend's own email id, stored once the send
 -- is confirmed — never a bank account number or the raw Stripe object.
 CREATE TABLE IF NOT EXISTS stripe_connect_payouts (

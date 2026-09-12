@@ -3,7 +3,12 @@ import { createHash } from 'crypto'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
 import { computeStripeAccountReadiness, syncOnboardingCompletedFlag } from '@/lib/server/stripeAccountReadiness'
-import { sendPayoutFailedAdminAlertOrThrow, sendPayoutFailedAgentNotice } from '@/lib/server/email'
+import {
+  sendPayoutFailedAdminAlertOrThrow,
+  sendPayoutFailedAgentNotice,
+  buildAdminAlertProviderPayload,
+  type FrozenAdminAlertPayload,
+} from '@/lib/server/email'
 
 type Db = ReturnType<typeof getSupabase>
 
@@ -226,14 +231,6 @@ export function buildPayoutAlertIdempotencyKey(stripeAccountId: string, stripePa
   return `payout-failed-alert:${hash}`.slice(0, MAX_IDEMPOTENCY_KEY_LENGTH)
 }
 
-interface AdminAlertPayloadSnapshot {
-  payoutId: string
-  stripeAccountId: string
-  agentId: string | null
-  amountLabel: string
-  failureCode: string | null
-}
-
 /**
  * Records a successful send — but ONLY the row matching id AND
  * admin_alert_claim_token AND admin_alert_status='sending', the same
@@ -275,53 +272,67 @@ export async function markAdminAlertFailed(db: Db, payoutRowId: string, claimTok
  * Atomically claims the right to (re)send the critical payout.failed admin
  * alert for one payout row, via claim_payout_admin_alert. Retryable and
  * concurrency-safe: repeated or concurrent failure events for the same
- * payout must never both send — enforced twice over, first by the DB-level
- * claim/lease itself, and second by Resend's own idempotency key (every
- * attempt, however many claims it takes, sends the identical payload
- * under the identical key — see buildPayoutAlertIdempotencyKey — so even
- * a genuinely double-sent HTTP request only ever delivers one email).
+ * payout must never both send — enforced twice over. First by the DB-level
+ * claim/lease itself (below). Second by Resend's own idempotency window
+ * (currently 24 hours): every attempt, however many claims it takes,
+ * sends the byte-identical frozen payload under the identical key (see
+ * buildPayoutAlertIdempotencyKey and admin_alert_payload_snapshot), which
+ * is what Resend needs to recognize a retry as a duplicate of an
+ * already-accepted request rather than a new one. This makes delivery
+ * at-least-once, not exactly-once: a retry outside that window (after a
+ * genuinely long outage, say) can cause a second physical email, and that
+ * is accepted as the safer failure mode — a critical alert an
+ * administrator sees twice beats one that silently never arrives.
  *
- * The alert's content is frozen into admin_alert_payload_snapshot at the
- * FIRST successful claim and reused verbatim on every later retry,
- * regardless of what the payout row's own fields say by then — Resend
- * rejects (invalid_idempotent_request) a reused key with a changed
- * payload, so the payload must never drift between attempts.
+ * The exact provider request (from/to/subject/html) is frozen into
+ * admin_alert_payload_snapshot at the FIRST successful claim and reused
+ * verbatim on every later retry — never re-rendered from whatever
+ * ADMIN_ALERT_EMAIL, NEXT_PUBLIC_BASE_URL, or the template itself say by
+ * then. Resend rejects (invalid_idempotent_request) a reused key paired
+ * with a changed payload, so letting the payload drift between attempts
+ * would itself be a bug, not something Resend forgives.
  *
  * If this worker wins the claim but sending fails (including a missing
- * ADMIN_ALERT_EMAIL/RESEND_API_KEY, or Resend itself rejecting the
- * request — sendPayoutFailedAdminAlertOrThrow throws on all of these
- * rather than silently no-opping), admin_alert_status is set back to
- * 'failed' and this function re-throws — which the caller must propagate
- * so the whole webhook event is NOT marked completed, and Stripe retries
- * the delivery. If Resend actually accepted the email but the follow-up
- * DB write recording that fails, the same re-throw applies — a retry then
- * reuses the same idempotency key, so Resend does not send a second
- * email; it only needs the DB write to finally succeed.
+ * RESEND_API_KEY, or Resend itself rejecting the request —
+ * sendPayoutFailedAdminAlertOrThrow throws on all of these rather than
+ * silently no-opping), admin_alert_status is set back to 'failed' and
+ * this function re-throws — which the caller must propagate so the whole
+ * webhook event is NOT marked completed, and Stripe retries the
+ * delivery. If Resend actually accepted the email but the follow-up DB
+ * write recording that fails, the same re-throw applies — a retry then
+ * reuses the same key and payload, so (within Resend's idempotency
+ * window) it only needs the DB write to finally succeed, not a second
+ * send to go through.
  */
-export type PayoutAdminAlertClaim = { claimed: true; claimToken: string; attemptCount: number; payloadSnapshot: AdminAlertPayloadSnapshot } | { claimed: false }
+export type PayoutAdminAlertClaim =
+  | { claimed: true; claimToken: string; attemptCount: number; payloadSnapshot: FrozenAdminAlertPayload | null }
+  | { claimed: false }
 
 /**
  * Thin wrapper over the claim_payout_admin_alert RPC — see that function
  * (frontend/sql/14_stripe_connect_monitoring.sql) for the atomic
- * claim/lease/snapshot-freeze mechanics. Exported directly so its lease
+ * claim/lease/snapshot-freeze mechanics. `candidatePayload` is only ever
+ * ADOPTED when no snapshot exists yet; pass null when the caller already
+ * knows (via ensureAdminAlertSent's own check) that one does, so nothing
+ * is rendered or read for no reason. Exported directly so its lease
  * semantics (staleness, attempt counting, snapshot adoption) can be unit
  * tested the same way claimConnectEvent's are.
  */
 export async function claimPayoutAdminAlert(
   db: Db,
   payoutRowId: string,
-  candidateSnapshot: AdminAlertPayloadSnapshot,
+  candidatePayload: FrozenAdminAlertPayload | null,
   leaseSeconds = DEFAULT_LEASE_SECONDS
 ): Promise<PayoutAdminAlertClaim> {
   const { data, error } = await db.rpc('claim_payout_admin_alert', {
     p_payout_row_id: payoutRowId,
     p_lease_seconds: leaseSeconds,
-    p_payload_snapshot: candidateSnapshot,
+    p_payload_snapshot: candidatePayload,
   })
   if (error) throw new Error(`Failed to claim admin-alert delivery for payout ${payoutRowId}: ${error.message}`)
   const row = Array.isArray(data) ? data[0] : data
   if (!row) return { claimed: false }
-  return { claimed: true, claimToken: row.claim_token, attemptCount: row.attempt_count, payloadSnapshot: row.payload_snapshot ?? candidateSnapshot }
+  return { claimed: true, claimToken: row.claim_token, attemptCount: row.attempt_count, payloadSnapshot: row.payload_snapshot ?? candidatePayload }
 }
 
 async function ensureAdminAlertSent(
@@ -329,33 +340,59 @@ async function ensureAdminAlertSent(
   payoutRowId: string,
   details: { payoutId: string; stripeAccountId: string; agentId: string | null; amountMinor: number; currency: string; failureCode: string | null }
 ): Promise<void> {
-  const candidateSnapshot: AdminAlertPayloadSnapshot = {
-    payoutId: details.payoutId,
-    stripeAccountId: details.stripeAccountId,
-    agentId: details.agentId,
-    amountLabel: formatMinorAmount(details.amountMinor, details.currency),
-    failureCode: details.failureCode,
+  // Cheap read-only check: has a payload already been frozen for this
+  // payout? If so, this is a retry (or a concurrent attempt) — do NOT
+  // read ADMIN_ALERT_EMAIL/NEXT_PUBLIC_BASE_URL or render the current
+  // template just to build a candidate that would be discarded anyway.
+  const { data: existingRow, error: peekError } = await db
+    .from('stripe_connect_payouts')
+    .select('admin_alert_payload_snapshot')
+    .eq('id', payoutRowId)
+    .maybeSingle()
+  if (peekError) throw new Error(`Failed to check for an existing admin-alert payload for payout ${payoutRowId}: ${peekError.message}`)
+
+  let candidatePayload: FrozenAdminAlertPayload | null = null
+  let candidateBuildError: string | null = null
+  if (!existingRow?.admin_alert_payload_snapshot) {
+    try {
+      candidatePayload = buildAdminAlertProviderPayload({
+        payoutId: details.payoutId,
+        stripeAccountId: details.stripeAccountId,
+        agentId: details.agentId,
+        amountLabel: formatMinorAmount(details.amountMinor, details.currency),
+        failureCode: details.failureCode,
+      })
+    } catch (err) {
+      candidateBuildError = err instanceof Error ? err.message : 'failed to build the admin alert payload'
+    }
   }
 
-  const claim = await claimPayoutAdminAlert(db, payoutRowId, candidateSnapshot)
+  const claim = await claimPayoutAdminAlert(db, payoutRowId, candidatePayload)
   if (!claim.claimed) return // already 'sent', or another attempt currently owns a fresh 'sending' claim
 
   const claimToken = claim.claimToken
-  // Always the snapshot the FIRST claim froze — even when this is a
-  // retry and the "candidate" computed just above differs, because the
-  // underlying payout row's fields changed in the meantime.
-  const snapshot = claim.payloadSnapshot
+  // Always whatever the FIRST successful claim froze — never the
+  // candidate this specific call just built (which is only ever used to
+  // seed that first freeze, via the RPC's own COALESCE).
+  const payload = claim.payloadSnapshot
+
+  if (!payload) {
+    // Nothing was ever frozen — this attempt WAS the first claim, and
+    // building its candidate failed (most commonly: ADMIN_ALERT_EMAIL
+    // still not configured). Record why and let a later retry try again.
+    const message = candidateBuildError ?? 'no admin alert payload is available to send for this payout'
+    try {
+      await markAdminAlertFailed(db, payoutRowId, claimToken, message)
+    } catch (markErr) {
+      console.error(`Additionally failed to record admin-alert failure for payout ${payoutRowId}:`, markErr instanceof Error ? markErr.message : markErr)
+    }
+    throw new Error(`Admin alert delivery failed for payout ${payoutRowId}: ${message}`)
+  }
+
   const idempotencyKey = buildPayoutAlertIdempotencyKey(details.stripeAccountId, details.payoutId)
 
   try {
-    const providerId = await sendPayoutFailedAdminAlertOrThrow({
-      payoutId: snapshot.payoutId,
-      stripeAccountId: snapshot.stripeAccountId,
-      agentId: snapshot.agentId,
-      amountLabel: snapshot.amountLabel,
-      failureCode: snapshot.failureCode,
-      idempotencyKey,
-    })
+    const providerId = await sendPayoutFailedAdminAlertOrThrow(payload, idempotencyKey)
     await markAdminAlertSent(db, payoutRowId, claimToken, providerId)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error sending admin alert'

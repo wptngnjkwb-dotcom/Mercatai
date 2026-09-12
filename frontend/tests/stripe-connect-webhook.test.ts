@@ -13,6 +13,7 @@ import {
 
 process.env.JWT_SECRET_KEY = 'test-secret-for-stripe-connect-webhook-32ch'
 process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'
+process.env.ADMIN_ALERT_EMAIL = 'admin@example.com'
 process.env.STRIPE_CONNECT_WEBHOOK_SECRET = 'whsec_connect_test'
 
 // ─── Minimal in-memory Supabase + RPC mock ─────────────────────────────────
@@ -240,10 +241,17 @@ function makeDb() {
 vi.mock('@/lib/server/supabase', () => ({ getSupabase: () => makeDb() }))
 
 const { sendPayoutFailedAdminAlertOrThrow, sendPayoutFailedAgentNotice } = vi.hoisted(() => ({
-  sendPayoutFailedAdminAlertOrThrow: vi.fn(async (_params: Record<string, unknown>) => 'email-provider-id-1'),
+  sendPayoutFailedAdminAlertOrThrow: vi.fn(async (_payload: Record<string, unknown>, _idempotencyKey: string) => 'email-provider-id-1'),
   sendPayoutFailedAgentNotice: vi.fn(async (_params: Record<string, unknown>) => {}),
 }))
-vi.mock('@/lib/server/email', () => ({ sendPayoutFailedAdminAlertOrThrow, sendPayoutFailedAgentNotice }))
+// Only the two SEND functions are mocked — buildAdminAlertProviderPayload
+// (and ADMIN_ALERT_PAYLOAD_VERSION) stay the REAL implementation, since
+// this file's whole point is to exercise the genuine
+// "build once, freeze, never re-render on retry" behavior end to end.
+vi.mock('@/lib/server/email', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@/lib/server/email')>()
+  return { ...original, sendPayoutFailedAdminAlertOrThrow, sendPayoutFailedAgentNotice }
+})
 
 // ─── Stripe mock: signature verification + "fetch current state" ──────────
 // account/payout state is keyed by id and set per-test — this is what lets
@@ -572,7 +580,13 @@ describe('payout.failed — reliable, retryable, deduplicated admin alert', () =
     expect(row.admin_alert_sent_at).toBeTruthy()
 
     expect(sendPayoutFailedAdminAlertOrThrow).toHaveBeenCalledTimes(1)
-    expect(sendPayoutFailedAdminAlertOrThrow).toHaveBeenCalledWith(expect.objectContaining({ payoutId: 'po_1', stripeAccountId: 'acct_agent_1', agentId: AGENT_ID, failureCode: 'account_closed' }))
+    const [sentPayload, sentIdempotencyKey] = sendPayoutFailedAdminAlertOrThrow.mock.calls[0]
+    expect(sentPayload.to).toBe('admin@example.com')
+    expect(sentPayload.html).toContain('po_1')
+    expect(sentPayload.html).toContain('acct_agent_1')
+    expect(sentPayload.html).toContain(AGENT_ID)
+    expect(sentPayload.html).toContain('account_closed')
+    expect(sentIdempotencyKey).toBe('payout-failed-alert:acct_agent_1:po_1')
     expect(sendPayoutFailedAgentNotice).toHaveBeenCalledTimes(1)
     expect(sendPayoutFailedAgentNotice).toHaveBeenCalledWith(expect.objectContaining({ to: 'agent-owner@example.com' }))
   })
@@ -594,7 +608,8 @@ describe('payout.failed — reliable, retryable, deduplicated admin alert', () =
 
     const row = tables.stripe_connect_payouts[0]
     expect(row.agent_id).toBeNull()
-    expect(sendPayoutFailedAdminAlertOrThrow).toHaveBeenCalledWith(expect.objectContaining({ agentId: null }))
+    const [sentPayload] = sendPayoutFailedAdminAlertOrThrow.mock.calls[0]
+    expect(sentPayload.html).toContain('unrecognized connected account')
     expect(sendPayoutFailedAgentNotice).not.toHaveBeenCalled()
   })
 
@@ -652,16 +667,34 @@ describe('payout.failed — reliable, retryable, deduplicated admin alert', () =
     expect(tables.stripe_connect_payouts[0].admin_alert_status).toBe('sent')
   })
 
-  it('missing admin-alert configuration is never treated as success — the event is not completed', async () => {
+  it('a generic send failure is never treated as success — the event is not completed', async () => {
     payoutStates['po_1'] = defaultPayoutState({ status: 'failed' })
-    sendPayoutFailedAdminAlertOrThrow.mockRejectedValueOnce(new Error('ADMIN_ALERT_EMAIL is not configured — a critical payout-failure alert cannot be delivered'))
+    sendPayoutFailedAdminAlertOrThrow.mockRejectedValueOnce(new Error('Resend API unavailable'))
     const response = await POST(webhookRequest(payoutEnvelope('evt_1', 'payout.failed', 'acct_agent_1', 'po_1')))
     expect(response.status).toBe(500)
     expect(tables.stripe_connect_payouts[0].admin_alert_status).toBe('failed')
     expect(tables.stripe_connect_events[0].status).toBe('failed')
   })
 
-  it('Resend accepts the email but the DB write recording "sent" fails — a retry reuses the identical idempotency key and payload, and eventually corrects the status to sent', async () => {
+  it('a genuinely missing ADMIN_ALERT_EMAIL at the very first claim is recorded as a failure without ever reaching sendPayoutFailedAdminAlertOrThrow', async () => {
+    const original = process.env.ADMIN_ALERT_EMAIL
+    delete process.env.ADMIN_ALERT_EMAIL
+    try {
+      payoutStates['po_1'] = defaultPayoutState({ status: 'failed' })
+      const response = await POST(webhookRequest(payoutEnvelope('evt_1', 'payout.failed', 'acct_agent_1', 'po_1')))
+      expect(response.status).toBe(500)
+      expect(sendPayoutFailedAdminAlertOrThrow).not.toHaveBeenCalled()
+
+      const row = tables.stripe_connect_payouts[0]
+      expect(row.admin_alert_status).toBe('failed')
+      expect(row.admin_alert_payload_snapshot).toBeNull()
+      expect(row.last_alert_error).toMatch(/ADMIN_ALERT_EMAIL/)
+    } finally {
+      process.env.ADMIN_ALERT_EMAIL = original
+    }
+  })
+
+  it('Resend accepts the email but the DB write recording "sent" fails — a retry reuses the identical idempotency key and payload (within Resend\'s idempotency window this avoids a second physical send), and eventually corrects the status to sent', async () => {
     payoutStates['po_1'] = defaultPayoutState({ status: 'failed' })
     forceNextSentWriteToFail = true
 
@@ -676,21 +709,56 @@ describe('payout.failed — reliable, retryable, deduplicated admin alert', () =
     expect(row.admin_alert_status).toBe('failed')
     expect(row.admin_alert_provider_id).toBeNull()
 
-    const firstCallArgs = sendPayoutFailedAdminAlertOrThrow.mock.calls[0][0]
+    const [firstPayload, firstIdempotencyKey] = sendPayoutFailedAdminAlertOrThrow.mock.calls[0]
 
     const secondResponse = await POST(webhookRequest(payoutEnvelope('evt_1', 'payout.failed', 'acct_agent_1', 'po_1')))
     expect(secondResponse.status).toBe(200)
     expect(sendPayoutFailedAdminAlertOrThrow).toHaveBeenCalledTimes(2)
 
-    const secondCallArgs = sendPayoutFailedAdminAlertOrThrow.mock.calls[1][0]
-    // Identical idempotency key AND identical payload — this is exactly
-    // what lets Resend safely no-op the "duplicate" retry instead of
-    // sending a second physical email.
-    expect(secondCallArgs).toEqual(firstCallArgs)
+    const [secondPayload, secondIdempotencyKey] = sendPayoutFailedAdminAlertOrThrow.mock.calls[1]
+    // Identical idempotency key AND identical payload — within Resend's
+    // own idempotency window this is what lets it recognize the retry as
+    // a duplicate of the already-accepted request instead of sending a
+    // second physical email.
+    expect(secondPayload).toEqual(firstPayload)
+    expect(secondIdempotencyKey).toBe(firstIdempotencyKey)
 
     row = tables.stripe_connect_payouts[0]
     expect(row.admin_alert_status).toBe('sent')
     expect(row.admin_alert_provider_id).toBe('email-provider-id-1')
+  })
+
+  it('a retry sends the byte-for-byte identical payload and idempotency key even after ADMIN_ALERT_EMAIL changes and the "template" would render differently — the frozen snapshot is used, never a fresh build', async () => {
+    payoutStates['po_1'] = defaultPayoutState({ status: 'failed' })
+    sendPayoutFailedAdminAlertOrThrow.mockRejectedValueOnce(new Error('transient send failure'))
+
+    const originalAdminAlertEmail = process.env.ADMIN_ALERT_EMAIL
+    const originalBaseUrl = process.env.NEXT_PUBLIC_BASE_URL
+    try {
+      const firstResponse = await POST(webhookRequest(payoutEnvelope('evt_1', 'payout.failed', 'acct_agent_1', 'po_1')))
+      expect(firstResponse.status).toBe(500)
+      const [firstPayload, firstIdempotencyKey] = sendPayoutFailedAdminAlertOrThrow.mock.calls[0]
+      expect(firstPayload.to).toBe('admin@example.com')
+
+      // Simulate the world changing between the first attempt and the
+      // retry — a config edit AND, implicitly, a newer template version:
+      // if ensureAdminAlertSent ever re-rendered instead of reusing the
+      // frozen snapshot, at least one of these would show up below.
+      process.env.ADMIN_ALERT_EMAIL = 'changed-admin@example.com'
+      process.env.NEXT_PUBLIC_BASE_URL = 'https://a-completely-different-domain.example'
+
+      const secondResponse = await POST(webhookRequest(payoutEnvelope('evt_1', 'payout.failed', 'acct_agent_1', 'po_1')))
+      expect(secondResponse.status).toBe(200)
+      const [secondPayload, secondIdempotencyKey] = sendPayoutFailedAdminAlertOrThrow.mock.calls[1]
+
+      expect(secondPayload).toEqual(firstPayload) // byte-for-byte identical
+      expect(secondPayload.to).toBe('admin@example.com') // NOT 'changed-admin@example.com'
+      expect(secondPayload.html).not.toContain('a-completely-different-domain.example')
+      expect(secondIdempotencyKey).toBe(firstIdempotencyKey)
+    } finally {
+      process.env.ADMIN_ALERT_EMAIL = originalAdminAlertEmail
+      process.env.NEXT_PUBLIC_BASE_URL = originalBaseUrl
+    }
   })
 })
 
@@ -718,7 +786,7 @@ describe('claimPayoutAdminAlert — real lease semantics (mirrors claimConnectEv
     return row
   }
 
-  const snapshotA = { payoutId: 'po_x', stripeAccountId: 'acct_agent_1', agentId: AGENT_ID, amountLabel: '50.00 EUR', failureCode: 'account_closed' }
+  const snapshotA = { from: 'Mercatai <noreply@mercatai.eu>', to: 'admin@example.com', subject: 'Payout failed — 50.00 EUR', html: '<p>50.00 EUR</p>', payloadVersion: 1 }
 
   it('claim atomically increments admin_alert_attempts on every successful claim, minting a new token each time', async () => {
     const db = makeDb() as any
@@ -729,7 +797,7 @@ describe('claimPayoutAdminAlert — real lease semantics (mirrors claimConnectEv
     expect((first as any).attemptCount).toBe(1)
 
     row.admin_alert_status = 'failed' // a send failed — reclaimable
-    const second = await claimPayoutAdminAlert(db, row.id, { ...snapshotA, amountLabel: 'CHANGED' })
+    const second = await claimPayoutAdminAlert(db, row.id, { ...snapshotA, html: '<p>CHANGED</p>' })
     expect(second.claimed).toBe(true)
     expect((second as any).attemptCount).toBe(2)
     expect((second as any).claimToken).not.toBe((first as any).claimToken)
@@ -741,7 +809,7 @@ describe('claimPayoutAdminAlert — real lease semantics (mirrors claimConnectEv
 
     await claimPayoutAdminAlert(db, row.id, snapshotA)
     row.admin_alert_status = 'failed'
-    const second = await claimPayoutAdminAlert(db, row.id, { ...snapshotA, amountLabel: 'CHANGED', failureCode: 'different_code' })
+    const second = await claimPayoutAdminAlert(db, row.id, { ...snapshotA, html: '<p>CHANGED</p>', subject: 'a different subject' })
     expect((second as any).payloadSnapshot).toEqual(snapshotA)
   })
 

@@ -363,7 +363,10 @@ $$ LANGUAGE plpgsql;
 -- Stripe's own smallest-currency-unit integer, never divided by 100 here
 -- — see formatMinorAmount() in stripeConnectMonitoring.ts. admin_alert_*
 -- tracks delivery of the critical payout.failed admin alert as its own
--- durable, retryable claim, independent of the webhook event's lease.
+-- durable, retryable claim, independent of the webhook event's lease —
+-- delivery is at-least-once, relying on Resend's own idempotency window
+-- (see frontend/sql/14_stripe_connect_monitoring.sql for the full
+-- rationale), not an absolute guarantee of exactly one email.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS stripe_connect_payouts (
     id                           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
