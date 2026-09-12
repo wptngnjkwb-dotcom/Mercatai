@@ -120,7 +120,10 @@ $$ LANGUAGE plpgsql;
 -- stripe_connect_events.claim_token is: the 'sent'/'failed' write is
 -- conditioned on id + admin_alert_claim_token + status='sending', so a
 -- worker whose lease already expired and was reclaimed by a newer
--- attempt can never overwrite that newer attempt's result.
+-- attempt can never overwrite that newer attempt's result. Cleared back
+-- to NULL by markAdminAlertSent once 'sent' — a 'sent' row can never be
+-- reclaimed (see claim_payout_admin_alert below), so the token has no
+-- further purpose once it gets there.
 -- admin_alert_payload_snapshot freezes the EXACT request that would be
 -- sent to Resend (from, to, subject, html, and a payload_version for our
 -- own bookkeeping) at the FIRST successful claim — every later retry
@@ -131,11 +134,20 @@ $$ LANGUAGE plpgsql;
 -- under the SAME Resend idempotency key (see
 -- buildPayoutAlertIdempotencyKey() / buildAdminAlertProviderPayload() in
 -- stripeConnectMonitoring.ts / email.ts). Never contains the Resend API
--- key, a bank account number, or other PII. Delivery is at-least-once:
--- Resend's own idempotency window (currently 24 hours) is what keeps a
--- retry from causing a second physical send within that window; outside
--- it, a repeated alert is possible and is treated as acceptable — after
--- a long outage, an administrator seeing the same alert twice is safer
+-- key or bank account details — but its `to` field IS the administrator's
+-- own email address, which is real PII, not nothing. That is exactly why
+-- markAdminAlertSent clears this column (and admin_alert_claim_token and
+-- admin_alert_claimed_at) back to NULL once the send is confirmed: a
+-- 'sent' row never needs its snapshot again (it can never be reclaimed),
+-- so there is no reason to keep an administrator's email address sitting
+-- here once delivery is done. admin_alert_status, admin_alert_sent_at,
+-- admin_alert_attempts, and admin_alert_provider_id are untouched by that
+-- clear — they are the durable delivery record. Delivery is
+-- at-least-once: Resend's own idempotency window (currently 24 hours) is
+-- what keeps a retry from causing a second physical send within that
+-- window; outside it, a repeated alert is possible and is treated as
+-- acceptable — after a long outage, an administrator seeing the same
+-- alert twice is safer
 -- than one going missing.
 -- admin_alert_provider_id is Resend's own email id, stored once the send
 -- is confirmed — never a bank account number or the raw Stripe object.

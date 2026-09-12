@@ -238,11 +238,30 @@ export function buildPayoutAlertIdempotencyKey(stripeAccountId: string, stripePa
  * database error OR zero rows affected (the lease was reclaimed by a
  * newer attempt in the meantime), so a stale worker can never mark a
  * newer claim's alert as sent.
+ *
+ * Also clears admin_alert_payload_snapshot, admin_alert_claim_token, and
+ * admin_alert_claimed_at back to NULL, in the SAME conditional update —
+ * a 'sent' row can never be reclaimed (see claim_payout_admin_alert),
+ * so none of the three serve any further purpose once delivery is
+ * confirmed. This matters beyond tidiness: the snapshot's `to` field is
+ * the administrator's own email address — real PII — so there is no
+ * reason to keep it sitting in the database once the alert it was for
+ * has actually been delivered. admin_alert_status, admin_alert_sent_at,
+ * admin_alert_attempts, and admin_alert_provider_id (set here) are the
+ * durable delivery record and are left untouched.
  */
 export async function markAdminAlertSent(db: Db, payoutRowId: string, claimToken: string, providerId: string): Promise<void> {
   const { data, error } = await db
     .from('stripe_connect_payouts')
-    .update({ admin_alert_status: 'sent', admin_alert_sent_at: new Date().toISOString(), admin_alert_provider_id: providerId })
+    .update({
+      admin_alert_status: 'sent',
+      admin_alert_sent_at: new Date().toISOString(),
+      admin_alert_provider_id: providerId,
+      admin_alert_payload_snapshot: null,
+      admin_alert_claim_token: null,
+      admin_alert_claimed_at: null,
+      last_alert_error: null,
+    })
     .eq('id', payoutRowId)
     .eq('admin_alert_claim_token', claimToken)
     .eq('admin_alert_status', 'sending')

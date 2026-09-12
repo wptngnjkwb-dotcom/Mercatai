@@ -61,7 +61,7 @@ describe('buildAdminAlertProviderPayload — the only place ADMIN_ALERT_EMAIL / 
     expect(payload.html).toContain('100.00 EUR')
   })
 
-  it('never includes the Resend API key, a bank account number, or other PII in the built payload', () => {
+  it('never includes the Resend API key or bank-account details in the built payload — note its `to` field is the administrator\'s own email address, which IS PII, and is why markAdminAlertSent clears the stored snapshot once sent (see stripeConnectMonitoring.ts)', () => {
     process.env.ADMIN_ALERT_EMAIL = 'admin@example.com'
     process.env.RESEND_API_KEY = 'sk-should-never-appear'
     const payload = buildAdminAlertProviderPayload(buildParams)

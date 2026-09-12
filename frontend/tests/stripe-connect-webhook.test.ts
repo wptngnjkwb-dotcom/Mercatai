@@ -863,6 +863,38 @@ describe('claimPayoutAdminAlert — real lease semantics (mirrors claimConnectEv
     forcedErrors.stripe_connect_payouts = true
     await expect(claimPayoutAdminAlert(db, row.id, snapshotA)).rejects.toThrow(/connection reset/)
   })
+
+  it('marking sent clears the payload snapshot, claim token, and claimed-at timestamp — their job is done and a sent row can never be reclaimed — but keeps status, sent_at, provider_id, and attempts', async () => {
+    const db = makeDb() as any
+    const row = seedPayoutRow()
+
+    const claim = await claimPayoutAdminAlert(db, row.id, snapshotA)
+    expect(claim.claimed).toBe(true)
+    expect(row.admin_alert_payload_snapshot).toEqual(snapshotA)
+    expect(row.admin_alert_claim_token).toBeTruthy()
+
+    await markAdminAlertSent(db, row.id, (claim as any).claimToken, 'provider-id-x')
+
+    // Kept — the durable delivery record.
+    expect(row.admin_alert_status).toBe('sent')
+    expect(row.admin_alert_sent_at).toBeTruthy()
+    expect(row.admin_alert_provider_id).toBe('provider-id-x')
+    expect(row.admin_alert_attempts).toBe(1)
+
+    // Cleared — snapshotA.to is the administrator's own email address
+    // (real PII), and the claim token/timestamp are now meaningless: a
+    // 'sent' row can never be reclaimed, so none of the three still
+    // serve any purpose once delivery is confirmed.
+    expect(row.admin_alert_payload_snapshot).toBeNull()
+    expect(row.admin_alert_claim_token).toBeNull()
+    expect(row.admin_alert_claimed_at).toBeNull()
+    expect(row.last_alert_error).toBeNull()
+
+    // And the clearing doesn't accidentally make the row look claimable
+    // again — 'sent' still can't be reclaimed regardless.
+    const laterClaim = await claimPayoutAdminAlert(db, row.id, snapshotA)
+    expect(laterClaim.claimed).toBe(false)
+  })
 })
 
 describe('markAdminAlertSent / markAdminAlertFailed — real Supabase error handling', () => {

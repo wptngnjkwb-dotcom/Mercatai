@@ -148,7 +148,10 @@ export const ADMIN_ALERT_PAYLOAD_VERSION = 1
  * frontend/sql/14_stripe_connect_monitoring.sql). Deliberately excludes
  * the Resend API key: that is a runtime credential, never part of the
  * "payload" that must stay identical across retries, and must never be
- * persisted.
+ * persisted. `to` IS the administrator's own email address — real PII,
+ * not a credential — which is exactly why markAdminAlertSent clears the
+ * stored snapshot back to NULL once the send is confirmed rather than
+ * keeping it around indefinitely.
  */
 export interface FrozenAdminAlertPayload {
   from: string
