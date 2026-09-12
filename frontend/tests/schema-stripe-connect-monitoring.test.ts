@@ -55,13 +55,16 @@ for (const [label, SQL] of [['canonical schema.sql', SCHEMA_SQL], ['frontend/sql
       expect(body).not.toMatch(/DECIMAL\(12,\s*2\)/)
     })
 
-    it('has admin_alert_status/claimed_at/sent_at/attempts/last_alert_error', () => {
+    it('has admin_alert_status/claim_token/claimed_at/sent_at/attempts/payload_snapshot/provider_id/last_alert_error', () => {
       const body = extractTableBody(SQL, 'stripe_connect_payouts')
       expect(body).toMatch(/admin_alert_status\s+TEXT NOT NULL DEFAULT 'pending'/)
       expect(body).toMatch(/CHECK \(admin_alert_status IN \('pending', 'sending', 'sent', 'failed'\)\)/)
+      expect(body).toMatch(/admin_alert_claim_token\s+UUID/)
       expect(body).toMatch(/admin_alert_claimed_at\s+TIMESTAMPTZ/)
       expect(body).toMatch(/admin_alert_sent_at\s+TIMESTAMPTZ/)
       expect(body).toMatch(/admin_alert_attempts\s+INTEGER NOT NULL DEFAULT 0/)
+      expect(body).toMatch(/admin_alert_payload_snapshot\s+JSONB/)
+      expect(body).toMatch(/admin_alert_provider_id\s+TEXT/)
       expect(body).toMatch(/last_alert_error\s+TEXT/)
     })
 
@@ -90,6 +93,17 @@ for (const [label, SQL] of [['canonical schema.sql', SCHEMA_SQL], ['frontend/sql
       expect(body).toMatch(/admin_alert_status IN \('pending', 'failed'\)/)
       expect(body).toMatch(/admin_alert_status = 'sending' AND p\.admin_alert_claimed_at < NOW\(\)/)
       expect(body).toMatch(/admin_alert_status = 'sending'/)
+    })
+
+    it('claim_payout_admin_alert mints a new claim_token, atomically increments admin_alert_attempts, and only adopts a payload snapshot when none exists yet', () => {
+      const start = SQL.indexOf('CREATE OR REPLACE FUNCTION claim_payout_admin_alert(')
+      const end = SQL.indexOf('$$ LANGUAGE plpgsql;', start)
+      const body = SQL.slice(start, end)
+      expect(body).toMatch(/p_payload_snapshot JSONB DEFAULT NULL/)
+      expect(body).toMatch(/admin_alert_claim_token = v_token/)
+      expect(body).toMatch(/admin_alert_attempts = p\.admin_alert_attempts \+ 1/)
+      expect(body).toMatch(/admin_alert_payload_snapshot = COALESCE\(p\.admin_alert_payload_snapshot, p_payload_snapshot\)/)
+      expect(body).toMatch(/RETURNS TABLE \(claim_token UUID, attempt_count INTEGER, payload_snapshot JSONB\)/)
     })
   })
 

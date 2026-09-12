@@ -147,6 +147,16 @@ export async function sendModerationAlert(params: {
  * on a thrown error here to keep the underlying webhook event un-completed
  * so it gets retried, and to keep the payout row's own admin_alert_status
  * at 'failed' rather than incorrectly 'sent'.
+ *
+ * `idempotencyKey` and the exact payload it is paired with must be
+ * identical across every retry for the same payout (the caller derives
+ * the key deterministically and freezes the payload — see
+ * buildPayoutAlertIdempotencyKey / admin_alert_payload_snapshot in
+ * stripeConnectMonitoring.ts) — that is what lets a retry safely call
+ * this again without ever causing Resend to deliver a second email:
+ * Resend recognizes the repeated key+payload and returns the ORIGINAL
+ * send's result instead of sending again. Returns the id Resend assigned
+ * to the (possibly pre-existing) email on success.
  */
 export async function sendPayoutFailedAdminAlertOrThrow(params: {
   payoutId: string
@@ -154,7 +164,8 @@ export async function sendPayoutFailedAdminAlertOrThrow(params: {
   agentId: string | null
   amountLabel: string
   failureCode: string | null
-}): Promise<void> {
+  idempotencyKey: string
+}): Promise<string> {
   const to = process.env.ADMIN_ALERT_EMAIL
   if (!to) {
     throw new Error('ADMIN_ALERT_EMAIL is not configured — a critical payout-failure alert cannot be delivered')
@@ -165,36 +176,58 @@ export async function sendPayoutFailedAdminAlertOrThrow(params: {
   }
   const { Resend } = await import('resend')
   const resend = new Resend(apiKey)
-  const { error } = await resend.emails.send({
-    from: FROM,
-    to,
-    subject: `🚨 Stripe payout failed — ${params.amountLabel}`,
-    html: `
-    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
-      <h2 style="color:#dc2626">Payout failed</h2>
-      <p>A Stripe Connect payout of <strong>${params.amountLabel}</strong> failed.</p>
-      <table style="width:100%;border-collapse:collapse;margin:12px 0">
-        <tr><td style="padding:6px;color:#6b7280">Payout ID</td><td style="padding:6px;font-weight:600"><code>${params.payoutId}</code></td></tr>
-        <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Connected account</td><td style="padding:6px;font-weight:600"><code>${params.stripeAccountId}</code></td></tr>
-        <tr><td style="padding:6px;color:#6b7280">Agent</td><td style="padding:6px;font-weight:600">${params.agentId ?? 'unrecognized connected account — no matching agent record'}</td></tr>
-        <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Stripe failure code</td><td style="padding:6px;font-weight:600">${params.failureCode ?? 'not provided'}</td></tr>
-      </table>
-      <p style="font-size:12px;color:#6b7280">No bank account details are stored by Mercatai — check the Stripe Dashboard for this connected account for full detail.</p>
-      <a href="${BASE_URL}/admin"
-         style="display:inline-block;background:#dc2626;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
-        Open admin
-      </a>
-      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
-    </div>
-    `,
-  })
+  const { data, error } = await resend.emails.send(
+    {
+      from: FROM,
+      to,
+      subject: `🚨 Stripe payout failed — ${params.amountLabel}`,
+      html: `
+      <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+        <h2 style="color:#dc2626">Payout failed</h2>
+        <p>A Stripe Connect payout of <strong>${params.amountLabel}</strong> failed.</p>
+        <table style="width:100%;border-collapse:collapse;margin:12px 0">
+          <tr><td style="padding:6px;color:#6b7280">Payout ID</td><td style="padding:6px;font-weight:600"><code>${params.payoutId}</code></td></tr>
+          <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Connected account</td><td style="padding:6px;font-weight:600"><code>${params.stripeAccountId}</code></td></tr>
+          <tr><td style="padding:6px;color:#6b7280">Agent</td><td style="padding:6px;font-weight:600">${params.agentId ?? 'unrecognized connected account — no matching agent record'}</td></tr>
+          <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Stripe failure code</td><td style="padding:6px;font-weight:600">${params.failureCode ?? 'not provided'}</td></tr>
+        </table>
+        <p style="font-size:12px;color:#6b7280">No bank account details are stored by Mercatai — check the Stripe Dashboard for this connected account for full detail.</p>
+        <a href="${BASE_URL}/admin"
+           style="display:inline-block;background:#dc2626;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
+          Open admin
+        </a>
+        <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+      </div>
+      `,
+    },
+    { idempotencyKey: params.idempotencyKey }
+  )
   // Resend's SDK does not throw on an API-level failure (invalid key,
-  // rate limit, suppressed recipient, ...) — it resolves with { error }
-  // instead. Checking this explicitly is the entire point of this
-  // function existing separately from `send()` above.
+  // rate limit, suppressed recipient, an idempotency conflict, ...) — it
+  // resolves with { error } instead. Checking this explicitly is the
+  // entire point of this function existing separately from `send()` above.
   if (error) {
+    if (error.name === 'invalid_idempotent_request') {
+      // The same idempotencyKey was reused with a DIFFERENT payload —
+      // this must never be treated as success, and retrying with the
+      // same (still-mismatched) payload will just keep failing; it is
+      // not a transient condition the way concurrent_idempotent_requests
+      // below is.
+      throw new Error(`Resend rejected the payout-failure alert — idempotency key reused with a different payload (invalid_idempotent_request): ${error.message}`)
+    }
+    if (error.name === 'concurrent_idempotent_requests') {
+      // A different request with the SAME key is still being processed
+      // by Resend right now — a genuinely transient, retryable state
+      // (the caller's normal retry-via-lease path handles it like any
+      // other failure), not a permanent rejection.
+      throw new Error(`Resend is still processing a concurrent request with this idempotency key (concurrent_idempotent_requests): ${error.message}`)
+    }
     throw new Error(`Resend rejected the payout-failure alert: ${error.message}`)
   }
+  if (!data?.id) {
+    throw new Error('Resend accepted the payout-failure alert but returned no email id')
+  }
+  return data.id
 }
 
 export async function sendPayoutFailedAgentNotice(params: { to: string; amountLabel: string }) {

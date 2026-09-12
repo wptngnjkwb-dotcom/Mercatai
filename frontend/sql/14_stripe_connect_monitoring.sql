@@ -116,30 +116,48 @@ $$ LANGUAGE plpgsql;
 -- below) — independent of the webhook event's own claim/lease, so a
 -- retry of a DIFFERENT later event for the same payout can still finish
 -- delivering an alert an earlier event's attempt failed to send.
+-- admin_alert_claim_token is this claim's own token, checked the same way
+-- stripe_connect_events.claim_token is: the 'sent'/'failed' write is
+-- conditioned on id + admin_alert_claim_token + status='sending', so a
+-- worker whose lease already expired and was reclaimed by a newer
+-- attempt can never overwrite that newer attempt's result.
+-- admin_alert_payload_snapshot freezes the exact fields the alert email
+-- is built from at the FIRST successful claim — every later retry reuses
+-- it verbatim (never re-reads potentially-changed current payout fields),
+-- which is what guarantees the SAME payload under the SAME Resend
+-- idempotency key on every retry (see buildPayoutAlertIdempotencyKey() /
+-- sendPayoutFailedAdminAlertOrThrow() in stripeConnectMonitoring.ts).
+-- Contains only payoutId, stripeAccountId, agentId, a formatted amount
+-- label, and the Stripe failure code — never bank details or other PII.
+-- admin_alert_provider_id is Resend's own email id, stored once the send
+-- is confirmed — never a bank account number or the raw Stripe object.
 CREATE TABLE IF NOT EXISTS stripe_connect_payouts (
-    id                     UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    stripe_payout_id       TEXT NOT NULL,
-    stripe_account_id      TEXT NOT NULL,
+    id                          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    stripe_payout_id            TEXT NOT NULL,
+    stripe_account_id           TEXT NOT NULL,
     -- Nullable: a payout can arrive for a connected account this database
     -- has no matching agent for (a deleted agent record, or an account
     -- Mercatai never onboarded) — see the "unknown connected account"
     -- handling in stripeConnectMonitoring.ts. Still recorded and still
     -- alerted on, just without agent attribution.
-    agent_id               UUID REFERENCES agents(id) ON DELETE SET NULL,
-    amount_minor           BIGINT NOT NULL,
-    currency               TEXT NOT NULL,
-    status                 TEXT NOT NULL
-                           CHECK (status IN ('pending', 'in_transit', 'paid', 'failed', 'canceled')),
-    arrival_date           TIMESTAMPTZ,
-    failure_code           TEXT,
-    admin_alert_status     TEXT NOT NULL DEFAULT 'pending'
-                           CHECK (admin_alert_status IN ('pending', 'sending', 'sent', 'failed')),
-    admin_alert_claimed_at TIMESTAMPTZ,
-    admin_alert_sent_at    TIMESTAMPTZ,
-    admin_alert_attempts   INTEGER NOT NULL DEFAULT 0,
-    last_alert_error       TEXT,
-    created_at             TIMESTAMPTZ DEFAULT NOW(),
-    updated_at             TIMESTAMPTZ DEFAULT NOW(),
+    agent_id                    UUID REFERENCES agents(id) ON DELETE SET NULL,
+    amount_minor                BIGINT NOT NULL,
+    currency                    TEXT NOT NULL,
+    status                      TEXT NOT NULL
+                                CHECK (status IN ('pending', 'in_transit', 'paid', 'failed', 'canceled')),
+    arrival_date                TIMESTAMPTZ,
+    failure_code                TEXT,
+    admin_alert_status          TEXT NOT NULL DEFAULT 'pending'
+                                CHECK (admin_alert_status IN ('pending', 'sending', 'sent', 'failed')),
+    admin_alert_claim_token     UUID,
+    admin_alert_claimed_at      TIMESTAMPTZ,
+    admin_alert_sent_at         TIMESTAMPTZ,
+    admin_alert_attempts        INTEGER NOT NULL DEFAULT 0,
+    admin_alert_payload_snapshot JSONB,
+    admin_alert_provider_id     TEXT,
+    last_alert_error            TEXT,
+    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (stripe_account_id, stripe_payout_id)
 );
 
@@ -151,25 +169,43 @@ CREATE INDEX IF NOT EXISTS idx_stripe_connect_payouts_status ON stripe_connect_p
 -- and a 'sending' claim whose own lease has expired (a worker crashed
 -- between claiming and recording success/failure) — never a fresh
 -- 'sending' claim or an already-'sent' one, so concurrent or repeated
--- failure events for the same payout never both send. Returns whether
--- THIS call won the claim.
+-- failure events for the same payout never both send. Every successful
+-- claim mints a brand-new admin_alert_claim_token and atomically
+-- increments admin_alert_attempts (the increment is part of the same
+-- UPDATE, so it can never race with a concurrent claim attempt on the
+-- same row). p_payload_snapshot is only ever ADOPTED when no snapshot
+-- exists yet (COALESCE keeps whatever was frozen by the very first
+-- claim) — the RETURNED payload_snapshot is therefore always the
+-- authoritative one every caller must actually send, regardless of which
+-- attempt this is.
 CREATE OR REPLACE FUNCTION claim_payout_admin_alert(
     p_payout_row_id UUID,
-    p_lease_seconds INTEGER DEFAULT 300
-) RETURNS BOOLEAN AS $$
+    p_lease_seconds INTEGER DEFAULT 300,
+    p_payload_snapshot JSONB DEFAULT NULL
+) RETURNS TABLE (claim_token UUID, attempt_count INTEGER, payload_snapshot JSONB) AS $$
 DECLARE
-    v_count INTEGER;
+    v_token UUID := uuid_generate_v4();
+    v_attempts INTEGER;
+    v_snapshot JSONB;
 BEGIN
     UPDATE stripe_connect_payouts p
     SET admin_alert_status = 'sending',
-        admin_alert_claimed_at = NOW()
+        admin_alert_claimed_at = NOW(),
+        admin_alert_claim_token = v_token,
+        admin_alert_attempts = p.admin_alert_attempts + 1,
+        admin_alert_payload_snapshot = COALESCE(p.admin_alert_payload_snapshot, p_payload_snapshot)
     WHERE p.id = p_payout_row_id
       AND (
           p.admin_alert_status IN ('pending', 'failed')
           OR (p.admin_alert_status = 'sending' AND p.admin_alert_claimed_at < NOW() - (p_lease_seconds || ' seconds')::interval)
-      );
-    GET DIAGNOSTICS v_count = ROW_COUNT;
-    RETURN v_count > 0;
+      )
+    RETURNING p.admin_alert_attempts, p.admin_alert_payload_snapshot INTO v_attempts, v_snapshot;
+
+    IF v_attempts IS NOT NULL THEN
+        RETURN QUERY SELECT v_token, v_attempts, v_snapshot;
+    END IF;
+
+    RETURN;
 END;
 $$ LANGUAGE plpgsql;
 

@@ -5,6 +5,10 @@ import {
   claimConnectEvent,
   markConnectEventCompleted,
   markConnectEventFailed,
+  claimPayoutAdminAlert,
+  markAdminAlertSent,
+  markAdminAlertFailed,
+  buildPayoutAlertIdempotencyKey,
 } from '@/lib/server/stripeConnectMonitoring'
 
 process.env.JWT_SECRET_KEY = 'test-secret-for-stripe-connect-webhook-32ch'
@@ -35,12 +39,17 @@ let idCounter = 0
 // used to prove a genuine DB failure produces a 500 rather than being
 // silently swallowed.
 let forcedErrors: Record<string, boolean>
+// One-shot: the NEXT update that sets admin_alert_status to 'sent' fails
+// with a real Supabase error, then clears itself — used to simulate
+// "Resend accepted the email but recording that in the DB failed".
+let forceNextSentWriteToFail = false
 
 function resetDb() {
   tables = { agents: [], audit_logs: [], stripe_connect_events: [], stripe_connect_payouts: [], stripe_connect_account_status: [] }
   dbCalls = []
   idCounter = 0
   forcedErrors = {}
+  forceNextSentWriteToFail = false
 }
 resetDb()
 
@@ -81,18 +90,28 @@ function claimStripeConnectEventMock(args: Row) {
   return { data: [], error: null }
 }
 
+// Mirrors claim_payout_admin_alert() in frontend/sql/14_stripe_connect_monitoring.sql:
+// mints a new token and atomically increments admin_alert_attempts on
+// every successful claim, and only ever ADOPTS the passed payload
+// snapshot when none is stored yet (COALESCE) — every subsequent claim
+// returns whatever was frozen by the very first one, unchanged.
 function claimPayoutAdminAlertMock(args: Row) {
   if (forcedErrors.stripe_connect_payouts) return { data: null, error: { code: 'XX000', message: 'connection reset' } }
   const row = tables.stripe_connect_payouts.find((r) => r.id === args.p_payout_row_id)
-  if (!row) return { data: false, error: null }
+  if (!row) return { data: [], error: null }
   const leaseMs = (args.p_lease_seconds ?? 300) * 1000
   const staleSending = row.admin_alert_status === 'sending' && row.admin_alert_claimed_at && Date.now() - new Date(row.admin_alert_claimed_at).getTime() > leaseMs
   if (row.admin_alert_status === 'pending' || row.admin_alert_status === 'failed' || staleSending) {
+    idCounter += 1
+    const newToken = `alert-token-${idCounter}`
     row.admin_alert_status = 'sending'
     row.admin_alert_claimed_at = new Date().toISOString()
-    return { data: true, error: null }
+    row.admin_alert_claim_token = newToken
+    row.admin_alert_attempts = (row.admin_alert_attempts ?? 0) + 1
+    if (row.admin_alert_payload_snapshot == null) row.admin_alert_payload_snapshot = args.p_payload_snapshot ?? null
+    return { data: [{ claim_token: newToken, attempt_count: row.admin_alert_attempts, payload_snapshot: row.admin_alert_payload_snapshot }], error: null }
   }
-  return { data: false, error: null }
+  return { data: [], error: null }
 }
 
 // Mirrors real Postgres column DEFAULTs — the mock's insert() only stores
@@ -103,9 +122,12 @@ function claimPayoutAdminAlertMock(args: Row) {
 const TABLE_INSERT_DEFAULTS: Record<string, Row> = {
   stripe_connect_payouts: {
     admin_alert_status: 'pending',
+    admin_alert_claim_token: null,
     admin_alert_claimed_at: null,
     admin_alert_sent_at: null,
     admin_alert_attempts: 0,
+    admin_alert_payload_snapshot: null,
+    admin_alert_provider_id: null,
     last_alert_error: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -186,6 +208,10 @@ function makeDb() {
         },
         then(resolve: (v: unknown) => unknown) {
           if (forcedErrors[table]) return resolve({ data: null, error: { code: 'XX000', message: 'connection reset' } })
+          if (table === 'stripe_connect_payouts' && pendingUpdate?.admin_alert_status === 'sent' && forceNextSentWriteToFail) {
+            forceNextSentWriteToFail = false
+            return resolve({ data: null, error: { code: 'XX000', message: 'connection reset while recording sent' } })
+          }
           if (pendingUpdate) {
             const rows = rowsMatchingFilters()
             for (const r of rows) Object.assign(r, pendingUpdate)
@@ -214,8 +240,8 @@ function makeDb() {
 vi.mock('@/lib/server/supabase', () => ({ getSupabase: () => makeDb() }))
 
 const { sendPayoutFailedAdminAlertOrThrow, sendPayoutFailedAgentNotice } = vi.hoisted(() => ({
-  sendPayoutFailedAdminAlertOrThrow: vi.fn(async () => {}),
-  sendPayoutFailedAgentNotice: vi.fn(async () => {}),
+  sendPayoutFailedAdminAlertOrThrow: vi.fn(async (_params: Record<string, unknown>) => 'email-provider-id-1'),
+  sendPayoutFailedAgentNotice: vi.fn(async (_params: Record<string, unknown>) => {}),
 }))
 vi.mock('@/lib/server/email', () => ({ sendPayoutFailedAdminAlertOrThrow, sendPayoutFailedAgentNotice }))
 
@@ -460,7 +486,8 @@ describe('payout events — always re-fetches current state from Stripe', () => 
     expect(Object.keys(row).sort()).toEqual(
       [
         'agent_id', 'amount_minor', 'arrival_date', 'currency', 'failure_code', 'id', 'status', 'stripe_account_id', 'stripe_payout_id',
-        'admin_alert_status', 'admin_alert_claimed_at', 'admin_alert_sent_at', 'admin_alert_attempts', 'last_alert_error', 'created_at', 'updated_at',
+        'admin_alert_status', 'admin_alert_claim_token', 'admin_alert_claimed_at', 'admin_alert_sent_at', 'admin_alert_attempts',
+        'admin_alert_payload_snapshot', 'admin_alert_provider_id', 'last_alert_error', 'created_at', 'updated_at',
       ].sort()
     )
   })
@@ -632,6 +659,187 @@ describe('payout.failed — reliable, retryable, deduplicated admin alert', () =
     expect(response.status).toBe(500)
     expect(tables.stripe_connect_payouts[0].admin_alert_status).toBe('failed')
     expect(tables.stripe_connect_events[0].status).toBe('failed')
+  })
+
+  it('Resend accepts the email but the DB write recording "sent" fails — a retry reuses the identical idempotency key and payload, and eventually corrects the status to sent', async () => {
+    payoutStates['po_1'] = defaultPayoutState({ status: 'failed' })
+    forceNextSentWriteToFail = true
+
+    const firstResponse = await POST(webhookRequest(payoutEnvelope('evt_1', 'payout.failed', 'acct_agent_1', 'po_1')))
+    expect(firstResponse.status).toBe(500)
+    expect(sendPayoutFailedAdminAlertOrThrow).toHaveBeenCalledTimes(1)
+
+    let row = tables.stripe_connect_payouts[0]
+    // Resend "succeeded" (our mock returned an id) but the sent-write
+    // itself failed, so the catch block's markAdminAlertFailed ran —
+    // the row is 'failed', not stuck at 'sending'.
+    expect(row.admin_alert_status).toBe('failed')
+    expect(row.admin_alert_provider_id).toBeNull()
+
+    const firstCallArgs = sendPayoutFailedAdminAlertOrThrow.mock.calls[0][0]
+
+    const secondResponse = await POST(webhookRequest(payoutEnvelope('evt_1', 'payout.failed', 'acct_agent_1', 'po_1')))
+    expect(secondResponse.status).toBe(200)
+    expect(sendPayoutFailedAdminAlertOrThrow).toHaveBeenCalledTimes(2)
+
+    const secondCallArgs = sendPayoutFailedAdminAlertOrThrow.mock.calls[1][0]
+    // Identical idempotency key AND identical payload — this is exactly
+    // what lets Resend safely no-op the "duplicate" retry instead of
+    // sending a second physical email.
+    expect(secondCallArgs).toEqual(firstCallArgs)
+
+    row = tables.stripe_connect_payouts[0]
+    expect(row.admin_alert_status).toBe('sent')
+    expect(row.admin_alert_provider_id).toBe('email-provider-id-1')
+  })
+})
+
+describe('claimPayoutAdminAlert — real lease semantics (mirrors claimConnectEvent)', () => {
+  function seedPayoutRow(overrides: Row = {}) {
+    const row: Row = {
+      id: 'payout-row-x',
+      stripe_payout_id: 'po_x',
+      stripe_account_id: 'acct_agent_1',
+      agent_id: AGENT_ID,
+      amount_minor: 5000,
+      currency: 'eur',
+      status: 'failed',
+      admin_alert_status: 'pending',
+      admin_alert_claim_token: null,
+      admin_alert_claimed_at: null,
+      admin_alert_sent_at: null,
+      admin_alert_attempts: 0,
+      admin_alert_payload_snapshot: null,
+      admin_alert_provider_id: null,
+      last_alert_error: null,
+      ...overrides,
+    }
+    tables.stripe_connect_payouts.push(row)
+    return row
+  }
+
+  const snapshotA = { payoutId: 'po_x', stripeAccountId: 'acct_agent_1', agentId: AGENT_ID, amountLabel: '50.00 EUR', failureCode: 'account_closed' }
+
+  it('claim atomically increments admin_alert_attempts on every successful claim, minting a new token each time', async () => {
+    const db = makeDb() as any
+    const row = seedPayoutRow()
+
+    const first = await claimPayoutAdminAlert(db, row.id, snapshotA)
+    expect(first.claimed).toBe(true)
+    expect((first as any).attemptCount).toBe(1)
+
+    row.admin_alert_status = 'failed' // a send failed — reclaimable
+    const second = await claimPayoutAdminAlert(db, row.id, { ...snapshotA, amountLabel: 'CHANGED' })
+    expect(second.claimed).toBe(true)
+    expect((second as any).attemptCount).toBe(2)
+    expect((second as any).claimToken).not.toBe((first as any).claimToken)
+  })
+
+  it('only ever adopts the payload snapshot from the FIRST successful claim — a later claim\'s candidate is ignored', async () => {
+    const db = makeDb() as any
+    const row = seedPayoutRow()
+
+    await claimPayoutAdminAlert(db, row.id, snapshotA)
+    row.admin_alert_status = 'failed'
+    const second = await claimPayoutAdminAlert(db, row.id, { ...snapshotA, amountLabel: 'CHANGED', failureCode: 'different_code' })
+    expect((second as any).payloadSnapshot).toEqual(snapshotA)
+  })
+
+  it('a fresh "sending" claim (within its lease) is never reclaimed', async () => {
+    const db = makeDb() as any
+    const row = seedPayoutRow()
+
+    await claimPayoutAdminAlert(db, row.id, snapshotA)
+    const second = await claimPayoutAdminAlert(db, row.id, snapshotA)
+    expect(second.claimed).toBe(false)
+  })
+
+  it('an already-"sent" alert is never reclaimed', async () => {
+    const db = makeDb() as any
+    const row = seedPayoutRow({ admin_alert_status: 'sent' })
+    const claim = await claimPayoutAdminAlert(db, row.id, snapshotA)
+    expect(claim.claimed).toBe(false)
+  })
+
+  it('two workers crossing the lease boundary: the old worker whose lease expired and was reclaimed can never mark sent or failed for the newer claim — only one delivery is ever recorded', async () => {
+    const db = makeDb() as any
+    const row = seedPayoutRow()
+
+    const claimA = await claimPayoutAdminAlert(db, row.id, snapshotA)
+    expect(claimA.claimed).toBe(true)
+    const tokenA = (claimA as any).claimToken
+
+    // Worker A's lease expires (it crashed without finishing).
+    row.admin_alert_claimed_at = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+
+    const claimB = await claimPayoutAdminAlert(db, row.id, snapshotA)
+    expect(claimB.claimed).toBe(true)
+    const tokenB = (claimB as any).claimToken
+    expect(tokenB).not.toBe(tokenA)
+
+    // Worker B completes normally — this is the ONE delivery that counts.
+    await markAdminAlertSent(db, row.id, tokenB, 'provider-id-b')
+    expect(row.admin_alert_status).toBe('sent')
+
+    // Worker A, unaware it was ever reclaimed, tries to record its own
+    // (stale) outcome afterward — neither write may succeed or disturb B's result.
+    await expect(markAdminAlertSent(db, row.id, tokenA, 'provider-id-a')).rejects.toThrow(/no longer matches/)
+    await expect(markAdminAlertFailed(db, row.id, tokenA, 'A thinks it failed')).rejects.toThrow(/no longer matches/)
+    expect(row.admin_alert_status).toBe('sent') // untouched by A
+    expect(row.admin_alert_provider_id).toBe('provider-id-b')
+  })
+
+  it('a database error while claiming is thrown, not returned as a false negative', async () => {
+    const db = makeDb() as any
+    const row = seedPayoutRow()
+    forcedErrors.stripe_connect_payouts = true
+    await expect(claimPayoutAdminAlert(db, row.id, snapshotA)).rejects.toThrow(/connection reset/)
+  })
+})
+
+describe('markAdminAlertSent / markAdminAlertFailed — real Supabase error handling', () => {
+  function dbReturning(result: { data: unknown; error: unknown }) {
+    return {
+      from: () => ({
+        update: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ select: async () => result }) }) }) }),
+      }),
+    } as any
+  }
+
+  it('markAdminAlertSent throws when Supabase returns a real error', async () => {
+    const db = dbReturning({ data: null, error: { message: 'connection reset' } })
+    await expect(markAdminAlertSent(db, 'row-1', 'token-1', 'provider-1')).rejects.toThrow(/connection reset/)
+  })
+
+  it('markAdminAlertFailed throws when Supabase returns a real error', async () => {
+    const db = dbReturning({ data: null, error: { message: 'timeout' } })
+    await expect(markAdminAlertFailed(db, 'row-1', 'token-1', 'boom')).rejects.toThrow(/timeout/)
+  })
+
+  it('markAdminAlertSent throws when zero rows match (a plain try/catch around the caller is not enough — the actual Supabase result must be checked)', async () => {
+    const db = dbReturning({ data: [], error: null })
+    await expect(markAdminAlertSent(db, 'row-1', 'stale-token', 'provider-1')).rejects.toThrow(/no longer matches/)
+  })
+
+  it('markAdminAlertFailed throws when zero rows match', async () => {
+    const db = dbReturning({ data: [], error: null })
+    await expect(markAdminAlertFailed(db, 'row-1', 'stale-token', 'boom')).rejects.toThrow(/no longer matches/)
+  })
+})
+
+describe('buildPayoutAlertIdempotencyKey', () => {
+  it('is deterministic for the same (stripeAccountId, stripePayoutId) pair', () => {
+    expect(buildPayoutAlertIdempotencyKey('acct_1', 'po_1')).toBe(buildPayoutAlertIdempotencyKey('acct_1', 'po_1'))
+  })
+
+  it('differs for a different payout or a different account', () => {
+    expect(buildPayoutAlertIdempotencyKey('acct_1', 'po_1')).not.toBe(buildPayoutAlertIdempotencyKey('acct_1', 'po_2'))
+    expect(buildPayoutAlertIdempotencyKey('acct_1', 'po_1')).not.toBe(buildPayoutAlertIdempotencyKey('acct_2', 'po_1'))
+  })
+
+  it('never exceeds Resend\'s 256-character limit, even for pathologically long ids', () => {
+    const key = buildPayoutAlertIdempotencyKey('acct_' + 'x'.repeat(500), 'po_' + 'y'.repeat(500))
+    expect(key.length).toBeLessThanOrEqual(256)
   })
 })
 

@@ -366,44 +366,60 @@ $$ LANGUAGE plpgsql;
 -- durable, retryable claim, independent of the webhook event's lease.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS stripe_connect_payouts (
-    id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    stripe_payout_id        TEXT NOT NULL,
-    stripe_account_id       TEXT NOT NULL,
-    agent_id                UUID REFERENCES agents(id) ON DELETE SET NULL,
-    amount_minor            BIGINT NOT NULL,
-    currency                TEXT NOT NULL,
-    status                  TEXT NOT NULL
-                            CHECK (status IN ('pending', 'in_transit', 'paid', 'failed', 'canceled')),
-    arrival_date            TIMESTAMPTZ,
-    failure_code            TEXT,
-    admin_alert_status      TEXT NOT NULL DEFAULT 'pending'
-                            CHECK (admin_alert_status IN ('pending', 'sending', 'sent', 'failed')),
-    admin_alert_claimed_at  TIMESTAMPTZ,
-    admin_alert_sent_at     TIMESTAMPTZ,
-    admin_alert_attempts    INTEGER NOT NULL DEFAULT 0,
-    last_alert_error        TEXT,
-    created_at              TIMESTAMPTZ DEFAULT NOW(),
-    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+    id                           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    stripe_payout_id             TEXT NOT NULL,
+    stripe_account_id            TEXT NOT NULL,
+    agent_id                     UUID REFERENCES agents(id) ON DELETE SET NULL,
+    amount_minor                 BIGINT NOT NULL,
+    currency                     TEXT NOT NULL,
+    status                       TEXT NOT NULL
+                                 CHECK (status IN ('pending', 'in_transit', 'paid', 'failed', 'canceled')),
+    arrival_date                 TIMESTAMPTZ,
+    failure_code                 TEXT,
+    admin_alert_status           TEXT NOT NULL DEFAULT 'pending'
+                                 CHECK (admin_alert_status IN ('pending', 'sending', 'sent', 'failed')),
+    admin_alert_claim_token      UUID,
+    admin_alert_claimed_at       TIMESTAMPTZ,
+    admin_alert_sent_at          TIMESTAMPTZ,
+    admin_alert_attempts         INTEGER NOT NULL DEFAULT 0,
+    admin_alert_payload_snapshot JSONB,
+    admin_alert_provider_id      TEXT,
+    last_alert_error             TEXT,
+    created_at                   TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                   TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (stripe_account_id, stripe_payout_id)
 );
 
+-- See frontend/sql/14_stripe_connect_monitoring.sql for the full
+-- rationale on the lease/token/snapshot mechanics below.
 CREATE OR REPLACE FUNCTION claim_payout_admin_alert(
     p_payout_row_id UUID,
-    p_lease_seconds INTEGER DEFAULT 300
-) RETURNS BOOLEAN AS $$
+    p_lease_seconds INTEGER DEFAULT 300,
+    p_payload_snapshot JSONB DEFAULT NULL
+) RETURNS TABLE (claim_token UUID, attempt_count INTEGER, payload_snapshot JSONB) AS $$
 DECLARE
-    v_count INTEGER;
+    v_token UUID := uuid_generate_v4();
+    v_attempts INTEGER;
+    v_snapshot JSONB;
 BEGIN
     UPDATE stripe_connect_payouts p
     SET admin_alert_status = 'sending',
-        admin_alert_claimed_at = NOW()
+        admin_alert_claimed_at = NOW(),
+        admin_alert_claim_token = v_token,
+        admin_alert_attempts = p.admin_alert_attempts + 1,
+        admin_alert_payload_snapshot = COALESCE(p.admin_alert_payload_snapshot, p_payload_snapshot)
     WHERE p.id = p_payout_row_id
       AND (
           p.admin_alert_status IN ('pending', 'failed')
           OR (p.admin_alert_status = 'sending' AND p.admin_alert_claimed_at < NOW() - (p_lease_seconds || ' seconds')::interval)
-      );
-    GET DIAGNOSTICS v_count = ROW_COUNT;
-    RETURN v_count > 0;
+      )
+    RETURNING p.admin_alert_attempts, p.admin_alert_payload_snapshot INTO v_attempts, v_snapshot;
+
+    IF v_attempts IS NOT NULL THEN
+        RETURN QUERY SELECT v_token, v_attempts, v_snapshot;
+    END IF;
+
+    RETURN;
 END;
 $$ LANGUAGE plpgsql;
 
