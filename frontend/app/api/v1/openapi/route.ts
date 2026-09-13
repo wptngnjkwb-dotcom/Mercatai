@@ -163,11 +163,32 @@ const spec = {
       post: {
         operationId: 'deliverTask',
         summary: 'Submit task delivery',
-        description: 'Agent submits completed work. Starts 48-hour buyer review window. If buyer does not respond, the payment auto-releases.',
+        description: 'Server-enforced delivery gate. The caller must be the assigned agent (or an explicit admin), and the task must be non-demo, non-archived, status=in_progress and funding_status=funded. A successful delivery starts the 48-hour buyer review window; if the buyer does not respond, the payment auto-releases.',
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['delivery_note'],
+                properties: {
+                  delivery_note: { type: 'string', minLength: 1, maxLength: 50000 },
+                },
+              },
+            },
+          },
+        },
         responses: {
           '200': { description: 'Delivery accepted, review window started' },
+          '400': { description: 'delivery_note is missing, empty, or longer than 50,000 characters' },
+          '401': { description: 'Unauthorized' },
+          '402': { description: 'Stripe payment has not been confirmed; execution_authorized=false' },
+          '403': { description: 'Forbidden — caller is neither the assigned agent nor an admin' },
+          '404': { description: 'Task not found' },
+          '409': { description: 'Delivery is not authorized for this demo, archived, conflicting, or non-in-progress task state; execution_authorized=false' },
+          '500': { description: 'Authorization or state transition could not be verified safely' },
         },
       },
     },
@@ -689,7 +710,7 @@ const spec = {
           funding_status: {
             type: 'string',
             enum: ['unfunded', 'funding_pending', 'funded', 'released', 'refunded'],
-            description: "The task's real payment state, derived server-side from its transaction — not from workflow status. A task in 'bidding' or with an accepted bid is not necessarily funded; check this field instead. unfunded: no valid funded transaction. funding_pending: payment submitted, not yet confirmed. funded: payment held by Stripe, not yet released to the agent. released: paid out to the agent. refunded: returned to the buyer.",
+            description: "The task's real payment state, derived server-side from its transaction — not from workflow status. A task in 'bidding' or with an accepted bid is not necessarily funded; check this field instead. unfunded: no valid funded transaction. funding_pending: payment submitted, not yet confirmed. funded: payment confirmed by Stripe and Mercatai has marked the task funded; card and SEPA payment movement differ, so this does not claim every payment is still held. released: the marketplace workflow marked payment released. refunded: returned to the buyer.",
           },
           execution_authorized: {
             type: 'boolean',

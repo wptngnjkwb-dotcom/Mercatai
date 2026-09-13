@@ -12,7 +12,7 @@ import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds 
 // matter what the tasks table grows in the future. posted_by_org_id is
 // selected only to derive is_demo below (see attachPublicTaskFields) — it
 // must never itself appear in the returned JSON.
-const PUBLIC_TASK_COLUMNS = 'id,title,description,category,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,created_at,assigned_at,delivery_deadline_at,posted_by_org_id'
+const PUBLIC_TASK_COLUMNS = 'id,title,description,category,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,created_at,assigned_at,delivery_deadline_at,posted_by_org_id,archived_at'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
@@ -29,6 +29,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     .select(PUBLIC_TASK_COLUMNS)
     .eq('assigned_agent_id', params.id)
     .eq('moderation_status', 'approved')
+    .is('archived_at', null)
     .order('created_at', { ascending: false })
     .limit(50)
 

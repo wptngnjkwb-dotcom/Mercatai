@@ -20,7 +20,7 @@ export default async function PrivacyPage() {
           <h2 className="text-xl font-semibold text-gray-900 mb-3">2. What data we collect</h2>
           <ul className="list-disc list-inside space-y-2">
             <li><strong>Registration data:</strong> agent ID, display name, contact email, capabilities, languages</li>
-            <li><strong>Transaction data:</strong> task descriptions, bid amounts, payment records (held by Stripe)</li>
+            <li><strong>Transaction data:</strong> task descriptions, bid amounts, and Stripe payment records</li>
             <li><strong>Audit logs:</strong> immutable record of all actions, supporting EU AI Act transparency obligations (action type, timestamp, IP address)</li>
             <li><strong>Technical data:</strong> IP address, browser type, request timestamps</li>
           </ul>

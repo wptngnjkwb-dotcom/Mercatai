@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { signToken } from '@/lib/server/auth'
 
@@ -20,6 +20,7 @@ const rawTask = {
   created_at: '2026-08-01T00:00:00.000Z',
   assigned_at: '2026-08-01T01:00:00.000Z',
   delivery_deadline_at: '2026-08-03T00:00:00.000Z',
+  archived_at: null as string | null,
   moderation_status: 'approved',
   // Must never leak through this public, unauthenticated endpoint.
   buyer_email: 'buyer@example.com',
@@ -38,6 +39,7 @@ let agentProfileVisibility = 'public'
 let seedOrgRows: { id: string; is_platform_seed: boolean }[] = []
 let transactionRows: { id: string; task_id: string; escrow_status: string; created_at: string }[] = []
 let bidsQueryCount = 0
+let taskQueryOperations: string[] = []
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
@@ -51,9 +53,10 @@ vi.mock('@/lib/server/supabase', () => ({
           return builder
         },
         eq: (field: string, value: unknown) => { eqFilters.push([field, value]); return builder },
+        is: (field: string, value: unknown) => { taskQueryOperations.push(`is:${field}`); eqFilters.push([field, value]); return builder },
         in: (field: string, values: unknown[]) => { inFilters.push([field, values]); return builder },
-        order: () => builder,
-        limit: () => builder,
+        order: () => { taskQueryOperations.push('order'); return builder },
+        limit: () => { taskQueryOperations.push('limit'); return builder },
         // fetchAgentVisibilityRow's single lookup, keyed by params.id.
         single: async () => (table === 'agents' ? { data: { id: AGENT_ID, profile_visibility: agentProfileVisibility }, error: null } : { data: null, error: null }),
         then: (resolve: (v: unknown) => unknown) => {
@@ -80,6 +83,10 @@ vi.mock('@/lib/server/supabase', () => ({
 }))
 
 describe('GET /api/v1/agents/[id]/tasks', () => {
+  beforeEach(() => {
+    taskQueryOperations = []
+    rawTask.archived_at = null
+  })
   it('returns only public fields for an approved task, filtered to that agent', async () => {
     const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')
     const request = new NextRequest(`http://localhost/api/v1/agents/${AGENT_ID}/tasks`)
@@ -139,6 +146,26 @@ describe('GET /api/v1/agents/[id]/tasks', () => {
       expect(body.tasks).toEqual([])
     } finally {
       ;(rawTask as any).moderation_status = original
+    }
+  })
+
+  it('excludes an archived assigned demo task before order/limit is applied', async () => {
+    const originalOrg = rawTask.posted_by_org_id
+    rawTask.archived_at = '2026-09-01T00:00:00.000Z'
+    rawTask.posted_by_org_id = 'org-seed'
+    seedOrgRows = [{ id: 'org-seed', is_platform_seed: true }]
+    try {
+      const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')
+      const response = await GET(new NextRequest(`http://localhost/api/v1/agents/${AGENT_ID}/tasks`), { params: { id: AGENT_ID } })
+      const body = await response.json()
+      expect(body.tasks).toEqual([])
+      expect(selectedColumns).toContain('archived_at')
+      expect(taskQueryOperations.indexOf('is:archived_at')).toBeGreaterThanOrEqual(0)
+      expect(taskQueryOperations.indexOf('is:archived_at')).toBeLessThan(taskQueryOperations.indexOf('limit'))
+    } finally {
+      rawTask.archived_at = null
+      rawTask.posted_by_org_id = originalOrg
+      seedOrgRows = []
     }
   })
 

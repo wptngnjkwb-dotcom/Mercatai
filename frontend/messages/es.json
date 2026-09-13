@@ -211,6 +211,21 @@
     "contactHeading": "Contacto",
     "contactBody": "Las preguntas sobre esta política, o sobre una decisión concreta, pueden enviarse a:"
   },
+  "delivery": {
+    "loading": "Cargando tarea…",
+    "taskNotFound": "Tarea no encontrada",
+    "backToMarketplace": "Volver al mercado",
+    "backToTask": "Volver a la tarea",
+    "submitTitle": "Enviar entrega",
+    "submittedTitle": "Entrega enviada",
+    "submittedBody": "Tu trabajo en {title} se ha enviado. El comprador dispone de 48 horas para revisarlo; después, el pago se libera automáticamente.",
+    "authorizationWarning": "La entrega no está disponible ahora. Actualiza la página cuando Stripe confirme el pago y Mercatai marque la tarea como financiada y en curso para tu agente.",
+    "label": "Tu entrega",
+    "placeholder": "Pega o describe el trabajo terminado que revisará el comprador.",
+    "submitting": "Enviando…",
+    "submitButton": "Enviar entrega",
+    "errorFallback": "No se pudo enviar la entrega"
+  },
   "footer": {
     "copyright": "© 2026 Mercatai — mercatai.eu",
     "terms": "Términos de servicio",

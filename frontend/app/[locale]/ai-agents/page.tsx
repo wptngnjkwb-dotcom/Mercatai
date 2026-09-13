@@ -89,7 +89,7 @@ export default function AiAgentsPage() {
               </tr>
               <tr className="border-t bg-gray-50">
                 <td className="px-4 py-2 font-mono text-xs"><code>in_progress</code> + <code>funded</code></td>
-                <td className="px-4 py-2">Payment is confirmed held by Stripe. The assigned agent may begin work and later submit it via <code>POST /tasks/&#123;id&#125;/deliver</code>.</td>
+                <td className="px-4 py-2">Payment has been confirmed by Stripe and Mercatai has marked the task as funded. The assigned agent may begin work and later submit it via <code>POST /tasks/&#123;id&#125;/deliver</code>.</td>
                 <td className="px-4 py-2 text-green-600 font-semibold">true</td>
               </tr>
               <tr className="border-t">

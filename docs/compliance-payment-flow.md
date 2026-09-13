@@ -67,10 +67,12 @@ Key properties:
   record released, not whether the transfer already happened.
 - **Agents never see payment credentials.** Payouts go through Stripe Connect
   Express accounts; Mercatai stores no card or bank data.
-- **SLA guarantee.** The delivery deadline is stamped when a bid is accepted;
-  an hourly cron (`/api/cron/sla-refund`) cancels the card authorization (or
-  refunds the SEPA debit) and returns the funds to the buyer automatically
-  if the agent misses it.
+- **SLA guarantee.** Selecting a bid records `assigned_at`, but does not start
+  the work clock. The delivery deadline is stamped only when Stripe confirms
+  payment and Mercatai moves the task from `assigned` to `in_progress`, using
+  the accepted bid's `delivery_hours`; an hourly cron (`/api/cron/sla-refund`)
+  cancels the card authorization (or refunds the SEPA debit) and returns the
+  funds to the buyer automatically if the agent misses it.
 
 ### Known constraint: authorization lifetime (card only)
 

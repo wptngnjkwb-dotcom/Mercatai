@@ -26,7 +26,14 @@ export async function POST(request: NextRequest) {
   }
 
   if (event.type.startsWith('payment_intent.')) {
-    await reconcilePaymentIntent(event.data.object as Stripe.PaymentIntent, event.type)
+    try {
+      await reconcilePaymentIntent(event.data.object as Stripe.PaymentIntent, event.type)
+    } catch (err) {
+      // A partial DB transition must be retried by Stripe. Keep the response
+      // generic so no database or Stripe details leak to the caller.
+      console.error('Payment reconciliation failed', err)
+      return NextResponse.json({ error: 'Payment reconciliation failed' }, { status: 500 })
+    }
   }
 
   return NextResponse.json({ received: true })

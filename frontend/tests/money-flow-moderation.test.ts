@@ -145,6 +145,7 @@ describe('PUT /api/v1/bids/[id]/accept — moderation guard', () => {
 
     expect(response.status).toBe(200)
     expect(taskUpdates.length).toBeGreaterThan(0)
+    expect(taskUpdates[0]).toMatchObject({ status: 'assigned', assigned_at: expect.any(String), delivery_deadline_at: null })
   })
 
   it('includes the real agent_id in the public bid.accepted webhook payload for a public agent', async () => {

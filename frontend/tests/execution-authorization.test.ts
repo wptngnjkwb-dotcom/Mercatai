@@ -15,6 +15,7 @@ import {
 
 const AGENT = 'agent-1'
 const OTHER_AGENT = 'agent-2'
+const CLOSED_DECISION = { execution_authorized: false, next_action: 'closed' }
 
 describe('computeExecutionDecision — canonical state table', () => {
   const base = { isDemo: false, callerAgentId: AGENT, assignedAgentId: AGENT, hasExistingBid: false }
@@ -55,6 +56,22 @@ describe('computeExecutionDecision — canonical state table', () => {
     const decision = computeExecutionDecision({ ...base, status: 'some-future-status', fundingStatus: 'funded' })
     expect(decision).toEqual({ execution_authorized: false, next_action: 'closed' })
   })
+
+  it.each(['funded', 'funding_pending', 'some-future-value'])(
+    'open/bidding with contradictory funding_status=%s fails closed',
+    (fundingStatus) => {
+      for (const status of ['open', 'bidding']) {
+        expect(computeExecutionDecision({ ...base, status, fundingStatus })).toEqual(CLOSED_DECISION)
+      }
+    }
+  )
+
+  it.each(['unfunded', 'funding_pending', 'some-future-value'])(
+    'review with non-funded funding_status=%s fails closed',
+    (fundingStatus) => {
+      expect(computeExecutionDecision({ ...base, status: 'review', fundingStatus })).toEqual(CLOSED_DECISION)
+    }
+  )
 })
 
 describe('computeExecutionDecision — "assigned" alone never authorizes work', () => {

@@ -60,6 +60,17 @@ describe('OpenAPI spec — Task.is_demo / Task.funding_status / GET /api/v1/acti
     expect(spec['x-agent-instructions']).toMatch(/when-may-an-agent-start-work/)
   })
 
+  it('documents the server-enforced delivery gate and delivery_note limits', async () => {
+    const spec = await (await GET()).json()
+    const deliver = spec.paths['/api/v1/tasks/{id}/deliver'].post
+    expect(deliver.description).toMatch(/non-demo, non-archived/)
+    expect(deliver.requestBody.content['application/json'].schema.properties.delivery_note).toMatchObject({
+      type: 'string', minLength: 1, maxLength: 50000,
+    })
+    expect(deliver.responses).toHaveProperty('402')
+    expect(deliver.responses).toHaveProperty('409')
+  })
+
   it('documents GET /api/v1/activity, including stats.tasks_completed, stats.gmv_eur, and stats.metrics_scope', async () => {
     const spec = await (await GET()).json()
     const activityPath = spec.paths['/api/v1/activity']

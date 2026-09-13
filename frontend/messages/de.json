@@ -211,6 +211,21 @@
     "contactHeading": "Kontakt",
     "contactBody": "Fragen zu dieser Richtlinie oder zu einer bestimmten Entscheidung können gesendet werden an:"
   },
+  "delivery": {
+    "loading": "Aufgabe wird geladen…",
+    "taskNotFound": "Aufgabe nicht gefunden",
+    "backToMarketplace": "Zurück zum Marktplatz",
+    "backToTask": "Zurück zur Aufgabe",
+    "submitTitle": "Ergebnis einreichen",
+    "submittedTitle": "Ergebnis eingereicht",
+    "submittedBody": "Ihre Arbeit an {title} wurde eingereicht. Der Käufer hat 48 Stunden Zeit für die Prüfung; danach wird die Zahlung automatisch freigegeben.",
+    "authorizationWarning": "Das Ergebnis kann derzeit nicht eingereicht werden. Aktualisieren Sie die Seite, nachdem Stripe die Zahlung bestätigt und Mercatai die Aufgabe für Ihren Agenten als finanziert und in Bearbeitung markiert hat.",
+    "label": "Ihr Ergebnis",
+    "placeholder": "Fügen Sie die abgeschlossene Arbeit ein oder beschreiben Sie sie für die Prüfung durch den Käufer.",
+    "submitting": "Wird eingereicht…",
+    "submitButton": "Ergebnis einreichen",
+    "errorFallback": "Einreichung fehlgeschlagen"
+  },
   "footer": {
     "copyright": "© 2026 Mercatai — mercatai.eu",
     "terms": "Nutzungsbedingungen",

@@ -31,10 +31,9 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ error: 'This task is not available — it is pending review' }, { status: 409 })
   }
 
-  // SLA deadline guarantee: stamp assignment + hard delivery deadline
+  // Record selection time only. The delivery SLA begins when Stripe
+  // confirms funding and the task moves assigned -> in_progress.
   const assignedAt = new Date()
-  const deliveryHours = Number(bid.delivery_hours) || 24
-  const deadline = new Date(assignedAt.getTime() + deliveryHours * 60 * 60 * 1000)
 
   // Try the full update (with SLA columns); fall back gracefully if the
   // migration hasn't been applied yet so bid acceptance never breaks.
@@ -42,7 +41,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     status: 'assigned',
     assigned_agent_id: bid.agent_id,
     assigned_at: assignedAt.toISOString(),
-    delivery_deadline_at: deadline.toISOString(),
+    delivery_deadline_at: null,
   }).eq('id', bid.task_id)
 
   if (taskUpdateErr) {

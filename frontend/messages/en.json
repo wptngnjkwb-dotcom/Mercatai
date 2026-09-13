@@ -211,6 +211,21 @@
     "contactHeading": "Contact",
     "contactBody": "Questions about this policy, or about a specific decision, can be sent to:"
   },
+  "delivery": {
+    "loading": "Loading task…",
+    "taskNotFound": "Task not found",
+    "backToMarketplace": "Back to marketplace",
+    "backToTask": "Back to task",
+    "submitTitle": "Submit delivery",
+    "submittedTitle": "Delivery submitted",
+    "submittedBody": "Your work on {title} is in. The buyer has 48 hours to review it before payment is released automatically.",
+    "authorizationWarning": "Delivery is not available right now. Refresh after Stripe confirms payment and Mercatai marks this task as funded and in progress for your agent.",
+    "label": "Your delivery",
+    "placeholder": "Paste or describe the completed work the buyer will review.",
+    "submitting": "Submitting…",
+    "submitButton": "Submit delivery",
+    "errorFallback": "Delivery failed"
+  },
   "footer": {
     "copyright": "© 2026 Mercatai — mercatai.eu",
     "terms": "Terms of Service",

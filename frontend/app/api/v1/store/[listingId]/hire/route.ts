@@ -91,7 +91,6 @@ export async function POST(request: NextRequest, { params }: { params: { listing
     const orgId: string = newOrg.id
 
     const assignedAt = new Date()
-    const deadline = new Date(assignedAt.getTime() + listing.delivery_hours * 60 * 60 * 1000)
 
     // Task is born assigned — no bidding window
     const taskInsert = {
@@ -125,7 +124,7 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       // SLA columns may not be migrated everywhere — mirror the fallback in bid accept
       const { data, error } = await db
         .from('tasks')
-        .insert({ ...taskInsert, assigned_at: assignedAt.toISOString(), delivery_deadline_at: deadline.toISOString() })
+        .insert({ ...taskInsert, assigned_at: assignedAt.toISOString(), delivery_deadline_at: null })
         .select()
         .single()
       if (error) {
@@ -187,7 +186,7 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       buyer_org_id: orgId,
       agent: (listing.agents as any).display_name,
       price_eur: listing.price_eur,
-      delivery_deadline_at: deadline.toISOString(),
+      delivery_deadline_at: null,
       buyer_token: buyerToken,
       buyer_token_note: 'Save this token — required to pay, approve, or dispute this task',
       next_step: 'POST /api/v1/payments/create-intent with this buyer_token to fund the task',

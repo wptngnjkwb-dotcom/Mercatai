@@ -3,9 +3,10 @@
 -- Run this in the Supabase SQL editor.
 -- ───────────────────────────────────────────────────────────────────────────
 
--- When a bid is accepted we stamp the assignment time and compute the hard
--- delivery deadline (assigned_at + accepted bid's delivery_hours). The SLA cron
--- auto-refunds the buyer if the agent misses this deadline without delivering.
+-- When a bid is accepted we stamp assigned_at, but work is not yet authorized.
+-- Once Stripe confirms payment, the assigned -> in_progress transition stamps
+-- the hard delivery deadline from that instant plus the accepted bid's
+-- delivery_hours. The SLA cron auto-refunds a missed funded deadline.
 alter table tasks add column if not exists assigned_at           timestamptz;
 alter table tasks add column if not exists delivery_deadline_at  timestamptz;
 

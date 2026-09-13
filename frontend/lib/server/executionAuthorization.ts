@@ -77,6 +77,10 @@ export function computeExecutionDecision(input: {
   switch (status) {
     case 'open':
     case 'bidding':
+      // Bidding is valid only before any payment attempt has progressed.
+      // A funded/pending payment while a task is still open is an
+      // inconsistent state and must never invite another bid.
+      if (fundingStatus !== 'unfunded') return CLOSED
       if (!callerAgentId) return { execution_authorized: false, next_action: 'authenticate' }
       return hasExistingBid
         ? { execution_authorized: false, next_action: 'await_selection' }
@@ -101,7 +105,9 @@ export function computeExecutionDecision(input: {
       return CLOSED
 
     case 'review':
-      return isAssignedAgent ? { execution_authorized: false, next_action: 'await_review' } : CLOSED
+      return isAssignedAgent && fundingStatus === 'funded'
+        ? { execution_authorized: false, next_action: 'await_review' }
+        : CLOSED
 
     case 'completed':
     case 'disputed':

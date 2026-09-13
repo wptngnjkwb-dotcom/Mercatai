@@ -20,9 +20,10 @@ type Row = Record<string, any>
 
 let tables: Record<string, Row[]>
 let dbCalls: string[]
+let failNextTaskTransition = false
 
 function resetDb() {
-  tables = { transactions: [], tasks: [] }
+  tables = { transactions: [], tasks: [], bids: [] }
   dbCalls = []
 }
 resetDb()
@@ -48,12 +49,18 @@ function makeDb() {
           pendingUpdate = values
           return builder
         },
+        order: () => builder,
+        limit: () => builder,
         insert(row: Row) {
           pendingInsert = row
           return builder
         },
         async maybeSingle() {
           if (pendingUpdate) {
+            if (table === 'tasks' && pendingUpdate.status === 'in_progress' && failNextTaskTransition) {
+              failNextTaskTransition = false
+              return { data: null, error: new Error('simulated task update failure') }
+            }
             const rows = rowsMatchingFilters()
             for (const r of rows) Object.assign(r, pendingUpdate)
             return { data: rows[0] ?? null, error: null }
@@ -116,9 +123,11 @@ function paymentIntentEvent(id: string, type: string, status: string, paymentInt
 beforeEach(() => {
   resetDb()
   auditLog.mockClear()
+  failNextTaskTransition = false
   constructEvent.mockClear()
   tables.transactions.push({ id: 'tx-1', task_id: 'task-1', escrow_status: 'pending', stripe_payment_intent_id: 'pi_1' })
-  tables.tasks.push({ id: 'task-1', status: 'assigned' })
+  tables.tasks.push({ id: 'task-1', status: 'assigned', delivery_deadline_at: null })
+  tables.bids.push({ id: 'bid-1', task_id: 'task-1', status: 'accepted', delivery_hours: 36, submitted_at: '2026-09-01T00:00:00.000Z' })
 })
 
 describe('POST /api/v1/payments/stripe-webhook — configuration and signature', () => {
@@ -162,10 +171,14 @@ describe('POST /api/v1/payments/stripe-webhook — configuration and signature',
 
 describe('payment_intent.succeeded / payment_intent.payment_failed — correct transaction state', () => {
   it('payment_intent.succeeded (requires_capture or succeeded) moves a pending transaction to held and the task to in_progress', async () => {
+    const startedAt = Date.now()
     const response = await POST(webhookRequest(paymentIntentEvent('evt_1', 'payment_intent.succeeded', 'succeeded')))
     expect(response.status).toBe(200)
     expect(tables.transactions[0].escrow_status).toBe('held')
     expect(tables.tasks[0].status).toBe('in_progress')
+    const deadline = new Date(tables.tasks[0].delivery_deadline_at).getTime()
+    expect(deadline).toBeGreaterThanOrEqual(startedAt + 36 * 60 * 60 * 1000)
+    expect(deadline).toBeLessThanOrEqual(Date.now() + 36 * 60 * 60 * 1000)
     expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'payment_funded' }))
   })
 
@@ -190,17 +203,37 @@ describe('payment_intent.succeeded / payment_intent.payment_failed — correct t
 })
 
 describe('idempotent redelivery', () => {
+  it('repairs task=assigned when a prior attempt already left transaction=held', async () => {
+    failNextTaskTransition = true
+    const event = paymentIntentEvent('evt_repair', 'payment_intent.succeeded', 'succeeded')
+
+    const failedAttempt = await POST(webhookRequest(event))
+    expect(failedAttempt.status).toBe(500)
+    expect(await failedAttempt.json()).toEqual({ error: 'Payment reconciliation failed' })
+    expect(tables.transactions[0].escrow_status).toBe('held')
+    expect(tables.tasks[0].status).toBe('assigned')
+    expect(auditLog).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'payment_funded' }))
+
+    const retry = await POST(webhookRequest(event))
+    expect(retry.status).toBe(200)
+    expect(tables.tasks[0].status).toBe('in_progress')
+    expect(tables.tasks[0].delivery_deadline_at).toEqual(expect.any(String))
+    expect(auditLog).toHaveBeenCalledTimes(1)
+  })
+
   it('redelivering the exact same payment_intent.succeeded event twice only funds the transaction once', async () => {
     const event = paymentIntentEvent('evt_1', 'payment_intent.succeeded', 'succeeded')
     const first = await POST(webhookRequest(event))
     expect(first.status).toBe(200)
     expect(tables.transactions[0].escrow_status).toBe('held')
+    const deadlineAfterFirst = tables.tasks[0].delivery_deadline_at
     const auditCallsAfterFirst = auditLog.mock.calls.length
 
     const second = await POST(webhookRequest(event))
     expect(second.status).toBe(200)
     expect(tables.transactions[0].escrow_status).toBe('held') // unchanged, not double-applied
     expect(auditLog.mock.calls.length).toBe(auditCallsAfterFirst) // no duplicate audit entry
+    expect(tables.tasks[0].delivery_deadline_at).toBe(deadlineAfterFirst)
   })
 
   it('a payout_failed-style redelivery after the transaction already succeeded does not flip it back to failed', async () => {

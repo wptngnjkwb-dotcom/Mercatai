@@ -79,10 +79,12 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     // row defaulted to 'pending' in the database despite this 201 response
     // and the accepted bid created below telling the buyer it was live.
     expect(insertedTasks[0]).toMatchObject({ moderation_status: 'approved' })
+    expect(insertedTasks[0]).toMatchObject({ assigned_at: expect.any(String), delivery_deadline_at: null })
     expect(insertedTasks[0]).toHaveProperty('published_at')
     expect((insertedTasks[0] as any).published_at).not.toBeNull()
     expect(insertedBids).toHaveLength(1)
     expect(body).toHaveProperty('task_id')
+    expect(body.delivery_deadline_at).toBeNull()
   })
 
   it('blocks a listing whose content fails moderation, creating nothing', async () => {
