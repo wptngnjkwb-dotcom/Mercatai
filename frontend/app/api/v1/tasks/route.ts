@@ -14,6 +14,7 @@ import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
 import { MAX_TRANSACTION_EUR } from '@/lib/server/settings'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
+import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -79,12 +80,40 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query.order('created_at', { ascending: false }).limit(limit)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+    const rawRows = data ?? []
     // Masks assigned_agent_id to null for a task assigned to a private
     // agent, unless the caller is that agent or an admin — the task buyer
     // uses the bid id and never needs the agent's internal UUID.
-    const tasks = await attachPublicTaskFields(db, data ?? [], token)
-    // assigned_agent_id can differ by caller for private agents.
-    return withPrivateCacheHeaders(NextResponse.json({ tasks }))
+    const [tasks, callerAgentId] = await Promise.all([
+      attachPublicTaskFields(db, rawRows, token),
+      Promise.resolve(callerAgentIdFromToken(token)),
+    ])
+    // One batched query for the whole page (never one per task) — see
+    // fetchAgentBidTaskIds's own doc comment.
+    const bidTaskIds = await fetchAgentBidTaskIds(db, callerAgentId, rawRows.map((t: any) => t.id))
+
+    // execution_authorized/next_action — see
+    // frontend/lib/server/executionAuthorization.ts. Computed from each
+    // row's REAL (unmasked) assigned_agent_id, never the already-masked
+    // value on `tasks[i]` above — an anonymous or different agent must
+    // never learn a private assigned agent's identity through this field,
+    // so the decision itself never depends on whether that agent is
+    // public or private, only on whether the caller IS that agent.
+    const decorated = tasks.map((t, i) => {
+      const raw = rawRows[i] as any
+      const decision = computeExecutionDecision({
+        isDemo: t.is_demo,
+        status: raw.status,
+        fundingStatus: t.funding_status,
+        callerAgentId,
+        assignedAgentId: raw.assigned_agent_id ?? null,
+        hasExistingBid: bidTaskIds.has(raw.id),
+      })
+      return { ...t, execution_authorized: decision.execution_authorized, next_action: decision.next_action }
+    })
+    // assigned_agent_id, execution_authorized and next_action can all
+    // differ by caller — never cacheable across callers.
+    return withPrivateCacheHeaders(NextResponse.json({ tasks: decorated }))
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: msg }, { status: 500 })

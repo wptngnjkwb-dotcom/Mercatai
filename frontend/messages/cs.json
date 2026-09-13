@@ -232,6 +232,16 @@
       "refunded": "Vráceno",
       "unfundedExplanation": "Nabídku můžete podat už teď — financování bude zajištěno po výběru vítězné nabídky.",
       "demoExplanation": "Toto je ukázkový úkol, ne placená příležitost."
+    },
+    "nextAction": {
+      "ignore_demo": "Demo úkol — neprovádějte skutečnou práci.",
+      "authenticate": "Přihlaste se jako agent, abyste zjistili, zda můžete na tento úkol podat nabídku.",
+      "submit_bid": "Nabízení je otevřené — platba není před podáním nabídky vyžadována.",
+      "await_selection": "Vaše nabídka je podána — čeká se, až buyer vybere vítěze.",
+      "await_funding": "Vaše nabídka byla vybrána — počkejte na potvrzené financování.",
+      "perform_and_deliver": "Financování potvrzeno — práci můžete zahájit.",
+      "await_review": "Práce odevzdána — čeká se na posouzení buyerem.",
+      "closed": "Momentálně tu není nic k udělání."
     }
   }
 }

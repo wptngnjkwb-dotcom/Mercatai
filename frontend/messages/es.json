@@ -232,6 +232,16 @@
       "refunded": "Reembolsado",
       "unfundedExplanation": "Puedes enviar una puja ahora — la financiación se asegura una vez que el comprador selecciona una puja ganadora.",
       "demoExplanation": "Esta es una tarea de muestra, no una oportunidad remunerada."
+    },
+    "nextAction": {
+      "ignore_demo": "Tarea de demostración — no realices trabajo sustantivo.",
+      "authenticate": "Inicia sesión como agente para ver si puedes pujar por esta tarea.",
+      "submit_bid": "Las pujas están abiertas — no se requiere pago antes de enviar una puja.",
+      "await_selection": "Tu puja está enviada — esperando a que el comprador elija un ganador.",
+      "await_funding": "Tu puja fue seleccionada — espera la financiación confirmada.",
+      "perform_and_deliver": "Financiación confirmada — el trabajo puede comenzar.",
+      "await_review": "Entrega enviada — esperando la revisión del comprador.",
+      "closed": "No hay nada que hacer aquí ahora."
     }
   }
 }

@@ -44,6 +44,16 @@ let activityBidRows: { id: string; price_eur: number; submitted_at: string; task
 // task_id: 'task-1' to stay consistent with what that lookup will resolve to.
 let activityTransactionRows: { task_id: string; escrow_status: string; gross_amount_eur?: number; released_at?: string | null; created_at?: string }[] = []
 let activityOrganizationRows: { id: string; is_platform_seed: boolean }[] = []
+// Task ids the CALLING agent (whichever token a test's request carries)
+// has already bid on — backs fetchAgentBidTaskIds' `.eq('agent_id',
+// …).in('task_id', …)` query, distinguished from the unrelated bids
+// dispatch above (the activity feed's plain, unfiltered bids listing) by
+// the presence of an agent_id eq-filter — see the 'bids' branch below.
+let agentOwnBidTaskIds: string[] = []
+// Counts every db.from('bids') call across a single request — the N+1
+// guard is "this stays <= 1 no matter how many tasks are on the page",
+// not any particular row-level assertion.
+let bidsFromCallCount = 0
 // When non-empty, backs settledCompletions' per-page `.in('id', taskIds)`
 // task lookup with real, distinct rows instead of the single cannedTask —
 // needed to test pagination across many different tasks. Left empty, the
@@ -58,6 +68,7 @@ let taskListAgentVisibilityRows: { id: string; profile_visibility?: string }[] =
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
     from(table: string) {
+      if (table === 'bids') bidsFromCallCount += 1
       // Real filters, tracked per query chain — so an isolation test that
       // asserts "excluded" only passes if the route actually applied the
       // .eq('moderation_status', 'approved') filter, not because the mock
@@ -138,6 +149,13 @@ vi.mock('@/lib/server/supabase', () => ({
             return resolve({ data: matches ? [project(cannedTask)] : [], count: matches ? 1 : 0, error: null })
           }
           if (table === 'bids') {
+            const agentIdFilter = eqFilters.find(([f]) => f === 'agent_id')
+            if (agentIdFilter) {
+              // fetchAgentBidTaskIds' own query shape — never the activity
+              // feed's plain, unfiltered listing below.
+              const matched = (inFilterIds ?? []).filter((id) => agentOwnBidTaskIds.includes(id))
+              return resolve({ data: matched.map((task_id) => ({ task_id })), error: null })
+            }
             return resolve({ data: applyPaging(activityBidRows), count: activityBidRows.length, error: null })
           }
           if (table === 'agents') return resolve({ data: taskListAgentVisibilityRows, count: taskListAgentVisibilityRows.length, error: null })
@@ -174,6 +192,7 @@ beforeEach(() => {
   activityOrganizationRows = []
   activitySettledTaskRows = []
   taskListAgentVisibilityRows = []
+  agentOwnBidTaskIds = []
 })
 
 describe('POST /api/v1/tasks — moderation publish flow', () => {
@@ -411,6 +430,98 @@ describe('GET /api/v1/tasks — archived tasks (reversible demo takedown)', () =
     expect(body.tasks).toHaveLength(1)
     expect(body.tasks[0].id).toBe('task-1')
     expect(body.tasks[0].archived_reason).toBe('demo_cleanup')
+  })
+})
+
+describe('GET /api/v1/tasks — execution_authorized / next_action', () => {
+  it('an anonymous caller on an open task gets next_action=authenticate, execution_authorized=false', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/tasks'))
+    const body = await response.json()
+    expect(body.tasks[0]).toMatchObject({ execution_authorized: false, next_action: 'authenticate' })
+  })
+
+  it('an authenticated agent with no existing bid gets next_action=submit_bid', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const agentToken = await signToken({ agent_id: 'agent-1', tier: 1 }, '15m')
+    const response = await GET(new NextRequest('http://localhost/api/v1/tasks', { headers: { authorization: `Bearer ${agentToken}` } }))
+    const body = await response.json()
+    expect(body.tasks[0]).toMatchObject({ execution_authorized: false, next_action: 'submit_bid' })
+  })
+
+  it('an authenticated agent who already bid gets next_action=await_selection, resolved via one batched bids query', async () => {
+    agentOwnBidTaskIds = ['task-1']
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const agentToken = await signToken({ agent_id: 'agent-1', tier: 1 }, '15m')
+    const response = await GET(new NextRequest('http://localhost/api/v1/tasks', { headers: { authorization: `Bearer ${agentToken}` } }))
+    const body = await response.json()
+    expect(body.tasks[0]).toMatchObject({ execution_authorized: false, next_action: 'await_selection' })
+  })
+
+  it('a demo task always yields ignore_demo/false, even for an authenticated agent with an existing bid', async () => {
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: true }]
+    agentOwnBidTaskIds = ['task-1']
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const agentToken = await signToken({ agent_id: 'agent-1', tier: 1 }, '15m')
+    const response = await GET(new NextRequest('http://localhost/api/v1/tasks', { headers: { authorization: `Bearer ${agentToken}` } }))
+    const body = await response.json()
+    expect(body.tasks[0]).toMatchObject({ is_demo: true, execution_authorized: false, next_action: 'ignore_demo' })
+  })
+
+  it('the truly assigned agent gets execution_authorized=true once in_progress and funded', async () => {
+    cannedTask = { ...cannedTask, status: 'in_progress', assigned_agent_id: 'agent-1' }
+    activityTransactionRows = [{ task_id: 'task-1', escrow_status: 'held' }]
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const agentToken = await signToken({ agent_id: 'agent-1', tier: 1 }, '15m')
+    const response = await GET(new NextRequest('http://localhost/api/v1/tasks?status=in_progress', { headers: { authorization: `Bearer ${agentToken}` } }))
+    const body = await response.json()
+    expect(body.tasks[0]).toMatchObject({ execution_authorized: true, next_action: 'perform_and_deliver' })
+  })
+
+  it('a different agent never gets execution_authorized=true for the same in_progress+funded task, and never learns the real assigned_agent_id', async () => {
+    cannedTask = { ...cannedTask, status: 'in_progress', assigned_agent_id: 'agent-1' }
+    activityTransactionRows = [{ task_id: 'task-1', escrow_status: 'held' }]
+    taskListAgentVisibilityRows = [{ id: 'agent-1', profile_visibility: 'private' }]
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const otherAgentToken = await signToken({ agent_id: 'agent-2', tier: 1 }, '15m')
+    const response = await GET(new NextRequest('http://localhost/api/v1/tasks?status=in_progress', { headers: { authorization: `Bearer ${otherAgentToken}` } }))
+    const body = await response.json()
+    expect(body.tasks[0]).toMatchObject({ execution_authorized: false, next_action: 'closed', assigned_agent_id: null })
+  })
+
+  it('an anonymous caller on the same in_progress+funded task also gets closed/false and no assigned_agent_id, identically to a different agent — next_action never reveals whether the assigned agent is public or private', async () => {
+    cannedTask = { ...cannedTask, status: 'in_progress', assigned_agent_id: 'agent-1' }
+    activityTransactionRows = [{ task_id: 'task-1', escrow_status: 'held' }]
+    taskListAgentVisibilityRows = [{ id: 'agent-1', profile_visibility: 'private' }]
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const anonResponse = await GET(new NextRequest('http://localhost/api/v1/tasks?status=in_progress'))
+    const anonBody = await anonResponse.json()
+
+    taskListAgentVisibilityRows = [{ id: 'agent-1', profile_visibility: 'public' }]
+    const publicResponse = await GET(new NextRequest('http://localhost/api/v1/tasks?status=in_progress'))
+    const publicBody = await publicResponse.json()
+
+    // Same next_action/execution_authorized whether the real assigned
+    // agent is private or public — only assigned_agent_id itself (already
+    // covered by attachPublicTaskFields' own masking) differs.
+    expect(anonBody.tasks[0].execution_authorized).toBe(publicBody.tasks[0].execution_authorized)
+    expect(anonBody.tasks[0].next_action).toBe(publicBody.tasks[0].next_action)
+    expect(anonBody.tasks[0]).toMatchObject({ execution_authorized: false, next_action: 'closed' })
+  })
+
+  it('sets Cache-Control: private, no-store and Vary: Authorization — execution_authorized/next_action depend on the caller', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/tasks'))
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+    expect(response.headers.get('Vary')).toBe('Authorization')
+  })
+
+  it('queries the bids table at most once for the page, never once per task (no N+1)', async () => {
+    bidsFromCallCount = 0
+    const agentToken = await signToken({ agent_id: 'agent-1', tier: 1 }, '15m')
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    await GET(new NextRequest('http://localhost/api/v1/tasks', { headers: { authorization: `Bearer ${agentToken}` } }))
+    expect(bidsFromCallCount).toBeLessThanOrEqual(1)
   })
 })
 

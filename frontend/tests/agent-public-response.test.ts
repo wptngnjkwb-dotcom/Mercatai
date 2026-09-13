@@ -50,11 +50,17 @@ let rawTransactions: { task_id: string; escrow_status: string }[] = []
 // its visibility lookup via .in(...), which resolves an array of rows, not
 // one object.
 let rawAgentVisibilityRows: { id: string; profile_visibility?: string }[] = []
+// Task ids the CALLING agent (from the request's own token) has already
+// bid on — backs fetchAgentBidTaskIds' query. Empty by default, so every
+// pre-existing test in this file (none of which cared about bidding) is
+// unaffected.
+let rawAgentBidTaskIds: string[] = []
 
 beforeEach(() => {
   rawOrganizations = []
   rawTransactions = []
   rawAgentVisibilityRows = []
+  rawAgentBidTaskIds = []
 })
 
 const rawTask = {
@@ -94,11 +100,11 @@ vi.mock('@/lib/server/supabase', () => ({
         : table === 'tasks' ? { data: rawTask, error: null }
         : table === 'organizations' ? { data: rawOrganizations, error: null }
         : table === 'transactions' ? { data: rawTransactions, error: null }
+        : table === 'bids' ? { data: [], error: null }
         : { data: [{ rating: 5 }], error: null }
       // A bare-awaited (no .single()) 'agents' query is the batched
       // visibility lookup — see the comment on rawAgentVisibilityRows above.
-      const listResult = table === 'agents' ? { data: rawAgentVisibilityRows, error: null } : result
-
+      let bidTaskIdFilter: string[] | null = null
       const builder: Record<string, any> = {
         select(columns: string) {
           if (table === 'agents') selectedAgentColumns = columns
@@ -106,10 +112,18 @@ vi.mock('@/lib/server/supabase', () => ({
           return builder
         },
         eq: () => builder,
-        in: () => builder,
+        in: (_field: string, ids: string[]) => { bidTaskIdFilter = ids; return builder },
         single: async () => result,
-        then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
-          Promise.resolve(listResult).then(resolve, reject),
+        then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => {
+          // Evaluated lazily, at await-time — after any .eq()/.in() in the
+          // chain has already run and set bidTaskIdFilter above, unlike a
+          // plain value captured at from()-call time.
+          const listResult =
+            table === 'agents' ? { data: rawAgentVisibilityRows, error: null }
+            : table === 'bids' ? { data: rawAgentBidTaskIds.filter((id) => !bidTaskIdFilter || bidTaskIdFilter.includes(id)).map((task_id) => ({ task_id })), error: null }
+            : result
+          return Promise.resolve(listResult).then(resolve, reject)
+        },
       }
       return builder
     },
@@ -445,5 +459,165 @@ describe('GET /api/v1/tasks/[id] — assigned_agent_id visibility', () => {
       rawTask.assigned_agent_id = originalAssignedAgentId
       rawAgentVisibilityRows = []
     }
+  })
+})
+
+describe('GET /api/v1/tasks/[id] — execution_authorized / next_action', () => {
+  it('an anonymous caller on an open task gets next_action=authenticate, execution_authorized=false', async () => {
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`)
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(body).toMatchObject({ execution_authorized: false, next_action: 'authenticate' })
+  })
+
+  it('an authenticated agent with no existing bid gets next_action=submit_bid', async () => {
+    const agentToken = await signToken({ agent_id: OTHER_AGENT_ID, tier: 1 }, '15m')
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, { headers: { authorization: `Bearer ${agentToken}` } })
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(body).toMatchObject({ execution_authorized: false, next_action: 'submit_bid' })
+  })
+
+  it('an authenticated agent who already bid gets next_action=await_selection', async () => {
+    rawAgentBidTaskIds = [TASK_ID]
+    try {
+      const agentToken = await signToken({ agent_id: OTHER_AGENT_ID, tier: 1 }, '15m')
+      const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, { headers: { authorization: `Bearer ${agentToken}` } })
+      const response = await getTask(request, { params: { id: TASK_ID } })
+      const body = await response.json()
+      expect(body).toMatchObject({ execution_authorized: false, next_action: 'await_selection' })
+    } finally {
+      rawAgentBidTaskIds = []
+    }
+  })
+
+  it('a demo task always yields ignore_demo/false, even with an existing bid from the caller', async () => {
+    rawOrganizations = [{ id: rawTask.posted_by_org_id, is_platform_seed: true }]
+    rawAgentBidTaskIds = [TASK_ID]
+    try {
+      const agentToken = await signToken({ agent_id: OTHER_AGENT_ID, tier: 1 }, '15m')
+      const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, { headers: { authorization: `Bearer ${agentToken}` } })
+      const response = await getTask(request, { params: { id: TASK_ID } })
+      const body = await response.json()
+      expect(body).toMatchObject({ is_demo: true, execution_authorized: false, next_action: 'ignore_demo' })
+    } finally {
+      rawAgentBidTaskIds = []
+    }
+  })
+
+  it('the truly assigned agent gets execution_authorized=true once in_progress and funded', async () => {
+    const originalStatus = rawTask.status
+    const originalAssigned = rawTask.assigned_agent_id
+    rawTask.status = 'in_progress'
+    rawTask.assigned_agent_id = OTHER_AGENT_ID
+    rawTransactions = [{ task_id: TASK_ID, escrow_status: 'held' }]
+    try {
+      const ownToken = await signToken({ agent_id: OTHER_AGENT_ID, tier: 1 }, '15m')
+      const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, { headers: { authorization: `Bearer ${ownToken}` } })
+      const response = await getTask(request, { params: { id: TASK_ID } })
+      const body = await response.json()
+      expect(body).toMatchObject({ execution_authorized: true, next_action: 'perform_and_deliver' })
+    } finally {
+      rawTask.status = originalStatus
+      rawTask.assigned_agent_id = originalAssigned
+      rawTransactions = []
+    }
+  })
+
+  it('a different agent, an anonymous caller, and a buyer token all get execution_authorized=false/closed for the same in_progress+funded task — never true, never a different signal from each other', async () => {
+    const originalStatus = rawTask.status
+    const originalAssigned = rawTask.assigned_agent_id
+    rawTask.status = 'in_progress'
+    rawTask.assigned_agent_id = OTHER_AGENT_ID
+    rawTransactions = [{ task_id: TASK_ID, escrow_status: 'held' }]
+    rawAgentVisibilityRows = [{ id: OTHER_AGENT_ID, profile_visibility: 'private' }]
+    try {
+      const otherAgentToken = await signToken({ agent_id: 'some-third-agent', tier: 1 }, '15m')
+      const buyerToken = await signToken({ role: 'buyer', task_id: TASK_ID, org_id: 'org-1' }, '30d')
+
+      const [otherAgentResp, anonResp, buyerResp] = await Promise.all([
+        getTask(new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, { headers: { authorization: `Bearer ${otherAgentToken}` } }), { params: { id: TASK_ID } }),
+        getTask(new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`), { params: { id: TASK_ID } }),
+        getTask(new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, { headers: { authorization: `Bearer ${buyerToken}` } }), { params: { id: TASK_ID } }),
+      ])
+      for (const resp of [otherAgentResp, anonResp, buyerResp]) {
+        const body = await resp.json()
+        expect(body).toMatchObject({ execution_authorized: false, next_action: 'closed', assigned_agent_id: null })
+      }
+    } finally {
+      rawTask.status = originalStatus
+      rawTask.assigned_agent_id = originalAssigned
+      rawTransactions = []
+      rawAgentVisibilityRows = []
+    }
+  })
+
+  it('review status: the assigned agent gets await_review, execution_authorized stays false', async () => {
+    const originalStatus = rawTask.status
+    const originalAssigned = rawTask.assigned_agent_id
+    rawTask.status = 'review'
+    rawTask.assigned_agent_id = OTHER_AGENT_ID
+    rawTransactions = [{ task_id: TASK_ID, escrow_status: 'held' }]
+    try {
+      const ownToken = await signToken({ agent_id: OTHER_AGENT_ID, tier: 1 }, '15m')
+      const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, { headers: { authorization: `Bearer ${ownToken}` } })
+      const response = await getTask(request, { params: { id: TASK_ID } })
+      const body = await response.json()
+      expect(body).toMatchObject({ execution_authorized: false, next_action: 'await_review' })
+    } finally {
+      rawTask.status = originalStatus
+      rawTask.assigned_agent_id = originalAssigned
+      rawTransactions = []
+    }
+  })
+
+  it('completed + released always yields closed/false, even for the formerly-assigned agent', async () => {
+    const originalStatus = rawTask.status
+    const originalAssigned = rawTask.assigned_agent_id
+    rawTask.status = 'completed'
+    rawTask.assigned_agent_id = OTHER_AGENT_ID
+    rawTransactions = [{ task_id: TASK_ID, escrow_status: 'released' }]
+    try {
+      const ownToken = await signToken({ agent_id: OTHER_AGENT_ID, tier: 1 }, '15m')
+      const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, { headers: { authorization: `Bearer ${ownToken}` } })
+      const response = await getTask(request, { params: { id: TASK_ID } })
+      const body = await response.json()
+      expect(body).toMatchObject({ execution_authorized: false, next_action: 'closed' })
+    } finally {
+      rawTask.status = originalStatus
+      rawTask.assigned_agent_id = originalAssigned
+      rawTransactions = []
+    }
+  })
+
+  it('an unrecognized/contradictory status+funding combination fails closed rather than authorizing on a guess', async () => {
+    const originalStatus = rawTask.status
+    const originalAssigned = rawTask.assigned_agent_id
+    // 'assigned' + a held (funded) transaction is exactly the
+    // contradiction reconcilePaymentIntent should prevent in practice
+    // (status should already have moved to in_progress) — this proves the
+    // route fails closed even if that invariant is ever violated.
+    rawTask.status = 'assigned'
+    rawTask.assigned_agent_id = OTHER_AGENT_ID
+    rawTransactions = [{ task_id: TASK_ID, escrow_status: 'held' }]
+    try {
+      const ownToken = await signToken({ agent_id: OTHER_AGENT_ID, tier: 1 }, '15m')
+      const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, { headers: { authorization: `Bearer ${ownToken}` } })
+      const response = await getTask(request, { params: { id: TASK_ID } })
+      const body = await response.json()
+      expect(body.execution_authorized).toBe(false)
+      expect(body.next_action).toBe('closed')
+    } finally {
+      rawTask.status = originalStatus
+      rawTask.assigned_agent_id = originalAssigned
+      rawTransactions = []
+    }
+  })
+
+  it('sets Cache-Control: private, no-store and Vary: Authorization — execution_authorized/next_action depend on the caller', async () => {
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`)
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+    expect(response.headers.get('Vary')).toBe('Authorization')
   })
 })

@@ -63,6 +63,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reason_code, ...(details ? { details } : {}) }),
     }),
+  // Authorized by the calling agent's own access_token (default header) —
+  // never call this unless the task response showed execution_authorized:
+  // true, see frontend/lib/server/executionAuthorization.ts.
+  deliverTask: (id: string, delivery_note: string) =>
+    request(`/api/v1/tasks/${id}/deliver`, { method: 'POST', body: JSON.stringify({ delivery_note }) }),
 
   // Bids
   submitBid: (body: object) => request('/api/v1/bids', { method: 'POST', body: JSON.stringify(body) }),

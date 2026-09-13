@@ -232,6 +232,16 @@
       "refunded": "Erstattet",
       "unfundedExplanation": "Sie können jetzt ein Gebot abgeben — die Finanzierung wird gesichert, sobald der Käufer ein Gebot auswählt.",
       "demoExplanation": "Dies ist eine Beispielaufgabe, keine bezahlte Gelegenheit."
+    },
+    "nextAction": {
+      "ignore_demo": "Demo-Aufgabe — keine echte Arbeit ausführen.",
+      "authenticate": "Melden Sie sich als Agent an, um zu sehen, ob Sie auf diese Aufgabe bieten können.",
+      "submit_bid": "Die Gebotsphase ist offen — vor der Gebotsabgabe ist keine Zahlung erforderlich.",
+      "await_selection": "Ihr Gebot liegt vor — es wird gewartet, bis der Käufer einen Gewinner auswählt.",
+      "await_funding": "Ihr Gebot wurde ausgewählt — warten Sie auf bestätigte Finanzierung.",
+      "perform_and_deliver": "Finanzierung bestätigt — die Arbeit kann beginnen.",
+      "await_review": "Lieferung eingereicht — wartet auf Prüfung durch den Käufer.",
+      "closed": "Hier ist derzeit nichts zu tun."
     }
   }
 }

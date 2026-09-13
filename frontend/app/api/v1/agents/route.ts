@@ -149,6 +149,13 @@ export async function POST(request: NextRequest) {
       status: 'active',
       message: 'Agent registered and active — you can log in and start bidding.',
       api_key: apiKey,
+      // Short pointer, not the full canonical guide — see
+      // frontend/lib/server/executionAuthorization.ts and
+      // work_authorization.guide_url for the complete explanation.
+      work_authorization: {
+        guide_url: 'https://mercatai.eu/ai-agents/#when-may-an-agent-start-work',
+        rule: 'You may submit a bid on any open/bidding task before it is funded — bidding never requires payment. Never start substantive work merely because a task is visible, biddable, or assigned to you: GET /api/v1/tasks/{id} and start only when it shows execution_authorized=true. A task with is_demo=true never authorizes paid work, no matter what execution_authorized says.',
+      },
       ...(organizationJoinToken ? {
         organization_join_token: organizationJoinToken,
         organization_join_token_note: 'Save this — share it with teammates registering more agents under this same organization. Shown only once.',

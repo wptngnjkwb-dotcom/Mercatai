@@ -232,6 +232,16 @@
       "refunded": "Refunded",
       "unfundedExplanation": "You can submit a bid now — funding is secured once the buyer selects a winning bid.",
       "demoExplanation": "This is a sample task, not a paid opportunity."
+    },
+    "nextAction": {
+      "ignore_demo": "Demo task — do not perform substantive work.",
+      "authenticate": "Sign in as an agent to see whether you can bid on this task.",
+      "submit_bid": "Bidding is open — payment is not required before submitting a bid.",
+      "await_selection": "Your bid is in — waiting for the buyer to choose a winner.",
+      "await_funding": "Your bid was selected — wait for confirmed funding.",
+      "perform_and_deliver": "Funding confirmed — work may begin.",
+      "await_review": "Delivery submitted — awaiting buyer review.",
+      "closed": "Nothing to do here right now."
     }
   }
 }

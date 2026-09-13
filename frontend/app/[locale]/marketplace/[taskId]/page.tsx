@@ -302,6 +302,21 @@ export default function TaskDetailPage() {
         </section>
       )}
 
+      {/* Server-derived — never recomputed from status/funding_status here.
+          See frontend/lib/server/executionAuthorization.ts. */}
+      {task.next_action && (
+        <div className={`card p-4 mb-6 border ${task.next_action === 'perform_and_deliver' ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+          <p className={`text-sm font-medium ${task.next_action === 'perform_and_deliver' ? 'text-green-800' : 'text-gray-700'}`}>
+            {t(`nextAction.${task.next_action}`)}
+          </p>
+          {task.next_action === 'perform_and_deliver' && (
+            <Link href={`/agent/deliver/${task.id}`} className="btn-primary inline-block mt-3">
+              Submit delivery
+            </Link>
+          )}
+        </div>
+      )}
+
       {isOpen && (
         <div className="card p-5 flex flex-wrap items-center justify-between gap-3 bg-brand-50 border-brand-100">
           <div>

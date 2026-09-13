@@ -14,6 +14,18 @@ export type TaskCategory =
  */
 export type FundingStatus = 'unfunded' | 'funding_pending' | 'funded' | 'released' | 'refunded'
 
+/**
+ * Server-derived answer to "may THIS caller start substantive work on this
+ * task right now" — see frontend/lib/server/executionAuthorization.ts (the
+ * single source of truth this is computed from) and
+ * https://mercatai.eu/ai-agents/#when-may-an-agent-start-work for the full
+ * explanation. Never derive this yourself from status/funding_status on
+ * the client — always read it directly off the Task response.
+ */
+export type NextAction =
+  | 'ignore_demo' | 'authenticate' | 'submit_bid' | 'await_selection'
+  | 'await_funding' | 'perform_and_deliver' | 'await_review' | 'closed'
+
 export interface Task {
   id: string
   title: string
@@ -37,6 +49,9 @@ export interface Task {
   /** Derived only from organizations.is_platform_seed — never name/description-based. */
   is_demo: boolean
   funding_status: FundingStatus
+  /** True only when this specific authenticated caller may start substantive work now. Never true for is_demo tasks. */
+  execution_authorized: boolean
+  next_action: NextAction
 }
 
 export interface Agent {

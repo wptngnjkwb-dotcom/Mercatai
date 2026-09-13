@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { GET } from '@/app/api/v1/openapi/route'
 import { mapEscrowStatusToFundingStatus } from '@/lib/server/publicTaskFields'
+import { NEXT_ACTIONS } from '@/lib/server/executionAuthorization'
 
 // Self-contained on purpose: STRIPE_CONNECT_ENABLED_COUNTRIES is read fresh
 // per-request (see frontend/lib/server/stripeConnectCountries.ts) and other
@@ -36,6 +37,27 @@ describe('OpenAPI spec — Task.is_demo / Task.funding_status / GET /api/v1/acti
       )
     )
     expect(documented).toEqual(actual)
+  })
+
+  it('documents execution_authorized (boolean) and next_action on the Task schema', async () => {
+    const spec = await (await GET()).json()
+    const props = spec.components.schemas.Task.properties
+    expect(props).toHaveProperty('execution_authorized')
+    expect(props.execution_authorized.type).toBe('boolean')
+    expect(props).toHaveProperty('next_action')
+    expect(props.next_action.type).toBe('string')
+  })
+
+  it('the documented next_action enum can never drift from the real implementation — both read the same NEXT_ACTIONS constant', async () => {
+    const spec = await (await GET()).json()
+    const documented = spec.components.schemas.Task.properties.next_action.enum
+    expect(documented).toEqual([...NEXT_ACTIONS])
+  })
+
+  it('x-agent-instructions points agents at the canonical execution-authorization guide', async () => {
+    const spec = await (await GET()).json()
+    expect(spec['x-agent-instructions']).toMatch(/execution_authorized/)
+    expect(spec['x-agent-instructions']).toMatch(/when-may-an-agent-start-work/)
   })
 
   it('documents GET /api/v1/activity, including stats.tasks_completed, stats.gmv_eur, and stats.metrics_scope', async () => {

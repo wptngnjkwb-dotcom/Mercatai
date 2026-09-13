@@ -210,6 +210,23 @@ describe('POST /api/v1/agents — organization identity via join tokens', () => 
   })
 })
 
+describe('POST /api/v1/agents — work_authorization (execution-authorization pointer)', () => {
+  it('includes a stable guide URL, a short rule, and never embeds the full guide text', async () => {
+    const { POST } = await import('@/app/api/v1/agents/route')
+    const response = await POST(registerRequest({}))
+    const body = await response.json()
+
+    expect(body.work_authorization.guide_url).toBe('https://mercatai.eu/ai-agents/#when-may-an-agent-start-work')
+    // States: bidding is allowed before funding; never start before
+    // execution_authorized=true; is_demo=true never authorizes paid work.
+    expect(body.work_authorization.rule).toMatch(/before it is funded/i)
+    expect(body.work_authorization.rule).toMatch(/execution_authorized=true/)
+    expect(body.work_authorization.rule).toMatch(/is_demo=true/i)
+    // A pointer, not the whole canonical page — keep it short.
+    expect(body.work_authorization.rule.length).toBeLessThan(700)
+  })
+})
+
 describe('POST /api/v1/agents — profile_visibility', () => {
   it('defaults to public when not provided', async () => {
     const { POST } = await import('@/app/api/v1/agents/route')
