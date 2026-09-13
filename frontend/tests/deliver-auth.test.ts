@@ -24,6 +24,7 @@ let seedOrg = false
 let transactionRows: Record<string, any>[] = []
 let taskWriteCount = 0
 let transactionWriteCount = 0
+let failAtomicDelivery = false
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
@@ -65,6 +66,32 @@ vi.mock('@/lib/server/supabase', () => ({
       }
       return builder
     },
+    async rpc(name: string, args: Record<string, any>) {
+      if (name !== 'submit_funded_task_delivery') throw new Error(`unexpected RPC ${name}`)
+      if (failAtomicDelivery) {
+        return { data: null, error: { code: 'XX000', message: 'simulated transactional failure' } }
+      }
+      const latestTx = [...transactionRows].sort((a, b) =>
+        String(b.created_at).localeCompare(String(a.created_at)) || String(b.id).localeCompare(String(a.id))
+      )[0]
+      if (
+        taskRow.status !== 'in_progress'
+        || taskRow.archived_at
+        || seedOrg
+        || taskRow.assigned_agent_id !== args.p_expected_agent_id
+        || latestTx?.escrow_status !== 'held'
+      ) {
+        return { data: null, error: { code: 'P0001', message: 'not authorized' } }
+      }
+
+      const reviewDeadline = '2026-09-03T00:00:00.000Z'
+      Object.assign(latestTx, { review_deadline_at: reviewDeadline })
+      Object.assign(taskRow, { status: 'review', delivery_note: String(args.p_delivery_note).trim() })
+      taskUpdates.push({ status: 'review', delivery_note: String(args.p_delivery_note).trim() })
+      taskWriteCount += 1
+      transactionWriteCount += 1
+      return { data: [{ task_id: TASK_ID, task_status: 'review', review_deadline_at: reviewDeadline }], error: null }
+    },
   }),
 }))
 
@@ -90,6 +117,7 @@ describe('POST /api/v1/tasks/[id]/deliver auth', () => {
     seedOrg = false
     taskWriteCount = 0
     transactionWriteCount = 0
+    failAtomicDelivery = false
     auditLog.mockClear()
     fireWebhooks.mockClear()
   })
@@ -137,6 +165,18 @@ describe('POST /api/v1/tasks/[id]/deliver auth', () => {
     const response = await POST(deliverRequest(token), { params: { id: TASK_ID } })
     expect(response.status).toBe(409)
     expect(taskWriteCount + transactionWriteCount).toBe(0)
+    expect(fireWebhooks).not.toHaveBeenCalled()
+  })
+
+  it('rolls back both rows and runs no effects when the atomic delivery fails', async () => {
+    failAtomicDelivery = true
+    const token = await signToken({ agent_id: ASSIGNED_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(deliverRequest(token), { params: { id: TASK_ID } })
+    expect(response.status).toBe(500)
+    expect(taskRow).toMatchObject({ status: 'in_progress', delivery_note: null })
+    expect(transactionRows[0].review_deadline_at).toBeUndefined()
+    expect(taskWriteCount + transactionWriteCount).toBe(0)
+    expect(auditLog).not.toHaveBeenCalled()
     expect(fireWebhooks).not.toHaveBeenCalled()
   })
 

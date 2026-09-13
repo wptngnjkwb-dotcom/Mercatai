@@ -181,6 +181,78 @@ CREATE TABLE IF NOT EXISTS transactions (
     released_at              TIMESTAMPTZ
 );
 
+-- Atomically moves a genuinely funded, non-demo, non-archived task from
+-- in_progress to review and starts its 48-hour review window. See
+-- frontend/sql/16_atomic_task_delivery.sql for the full rationale.
+CREATE OR REPLACE FUNCTION submit_funded_task_delivery(
+    p_task_id UUID,
+    p_expected_agent_id UUID,
+    p_delivery_note TEXT
+) RETURNS TABLE (
+    task_id UUID,
+    task_status TEXT,
+    review_deadline_at TIMESTAMPTZ
+) AS $$
+DECLARE
+    v_task tasks%ROWTYPE;
+    v_transaction_id UUID;
+    v_escrow_status TEXT;
+    v_review_deadline TIMESTAMPTZ;
+BEGIN
+    IF p_delivery_note IS NULL OR BTRIM(p_delivery_note) = '' THEN
+        RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'delivery_note must not be empty';
+    END IF;
+    IF CHAR_LENGTH(BTRIM(p_delivery_note)) > 50000 THEN
+        RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'delivery_note is too long';
+    END IF;
+
+    SELECT t.* INTO v_task FROM tasks t WHERE t.id = p_task_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'task not found';
+    END IF;
+
+    IF v_task.archived_at IS NOT NULL
+       OR EXISTS (
+           SELECT 1 FROM organizations o
+            WHERE o.id = v_task.posted_by_org_id AND o.is_platform_seed = TRUE
+       )
+       OR v_task.status <> 'in_progress'
+       OR v_task.assigned_agent_id IS DISTINCT FROM p_expected_agent_id THEN
+        RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'task execution is not authorized';
+    END IF;
+
+    SELECT tr.id, tr.escrow_status
+      INTO v_transaction_id, v_escrow_status
+      FROM transactions tr
+     WHERE tr.task_id = p_task_id
+     ORDER BY tr.created_at DESC NULLS LAST, tr.id DESC
+     LIMIT 1
+     FOR UPDATE;
+    IF NOT FOUND OR v_escrow_status <> 'held' THEN
+        RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'task payment is not funded';
+    END IF;
+
+    v_review_deadline := CLOCK_TIMESTAMP() + INTERVAL '48 hours';
+    UPDATE transactions tr SET review_deadline_at = v_review_deadline
+     WHERE tr.id = v_transaction_id AND tr.escrow_status = 'held';
+    IF NOT FOUND THEN
+        RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'funded transaction changed during delivery';
+    END IF;
+
+    UPDATE tasks t SET status = 'review', delivery_note = BTRIM(p_delivery_note)
+     WHERE t.id = p_task_id AND t.status = 'in_progress'
+       AND t.archived_at IS NULL AND t.assigned_agent_id = p_expected_agent_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'task changed during delivery';
+    END IF;
+
+    RETURN QUERY SELECT p_task_id, 'review'::TEXT, v_review_deadline;
+END;
+$$ LANGUAGE plpgsql;
+
+REVOKE ALL ON FUNCTION submit_funded_task_delivery(UUID, UUID, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION submit_funded_task_delivery(UUID, UUID, TEXT) TO service_role;
+
 -- ============================================================
 -- audit_logs  — APPEND ONLY
 -- ============================================================

@@ -65,38 +65,45 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       }, { status: waitingForFunding ? 402 : 409 })
     }
 
-    // The status predicate is the concurrency lock: only one of two
-    // simultaneous deliveries can win this transition and therefore only
-    // that request may run the effects below.
-    const { data, error } = await db
-      .from('tasks')
-      .update({ status: 'review', delivery_note: deliveryNote })
-      .eq('id', params.id)
-      .eq('status', 'in_progress')
-      .select()
-      .maybeSingle()
+    // The RPC locks the task and its newest funded transaction and commits
+    // task->review + transaction.review_deadline_at atomically. It repeats
+    // the critical demo/archive/status/funding checks inside PostgreSQL, so
+    // a state change between the read above and this write fails closed.
+    const { data, error } = await db.rpc('submit_funded_task_delivery', {
+      p_task_id: params.id,
+      p_expected_agent_id: task.assigned_agent_id,
+      p_delivery_note: deliveryNote,
+    })
 
-    if (error) return NextResponse.json({ error: 'Delivery could not be recorded' }, { status: 500 })
-    if (!data) {
-      return NextResponse.json({
-        error: 'Task state changed before delivery could be recorded',
-        execution_authorized: false,
-        next_action: 'closed',
-      }, { status: 409 })
+    if (error) {
+      if (error.code === 'P0002') return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+      if (error.code === '22023') return NextResponse.json({ error: 'Invalid delivery_note' }, { status: 400 })
+      if (error.code === 'P0001') {
+        return NextResponse.json({
+          error: 'Task state changed before delivery could be recorded',
+          execution_authorized: false,
+          next_action: 'closed',
+        }, { status: 409 })
+      }
+      return NextResponse.json({ error: 'Delivery could not be recorded' }, { status: 500 })
     }
 
-    const reviewDeadline = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
-    const { error: txError } = await db.from('transactions')
-      .update({ review_deadline_at: reviewDeadline })
-      .eq('task_id', params.id)
-      .eq('escrow_status', 'held')
-    if (txError) return NextResponse.json({ error: 'Delivery review window could not be recorded' }, { status: 500 })
+    const result = Array.isArray(data) ? data[0] : data
+    if (!result) {
+      return NextResponse.json({
+        error: 'Delivery transition was not confirmed',
+      }, { status: 500 })
+    }
 
     await auditLog({ action: 'task_delivered', resource_type: 'task', resource_id: params.id })
     // Third-party developer webhooks never learn a private agent's identity
     // — see frontend/lib/server/agentVisibility.ts.
     void fireWebhooks('task.delivered', { task_id: params.id, ...(await agentIdentityForWebhook(db, task.assigned_agent_id)) })
-    return NextResponse.json(data)
+    return NextResponse.json({
+      id: result.task_id,
+      status: result.task_status,
+      review_deadline_at: result.review_deadline_at,
+    })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: 'Delivery authorization could not be verified' }, { status: 500 })

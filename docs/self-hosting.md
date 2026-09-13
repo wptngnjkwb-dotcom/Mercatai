@@ -98,6 +98,14 @@ one copy of each file to maintain.
 > = NULL WHERE moderated_by = 'system:seed' AND archived_reason =
 > 'demo_cleanup';` (also given at the top of the script itself).
 
+> **Upgrading an existing install for atomic delivery** (migration
+> `frontend/sql/16_atomic_task_delivery.sql`) installs the service-role-only
+> `submit_funded_task_delivery` function. Apply it before deploying the
+> matching application code: delivery now uses this function so the task's
+> `in_progress → review` transition and the funded transaction's 48-hour
+> review deadline either both commit or both roll back. The migration changes
+> no existing rows and is safe to run repeatedly.
+
 ## 3. Configure secrets
 
 ```bash

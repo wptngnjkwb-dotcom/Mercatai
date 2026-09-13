@@ -41,6 +41,7 @@ services:
       - ../frontend/sql/13_bid_sample_and_delivery_note.sql:/docker-entrypoint-initdb.d/30_bid_sample_and_delivery_note.sql:ro
       - ../frontend/sql/14_stripe_connect_monitoring.sql:/docker-entrypoint-initdb.d/31_stripe_connect_monitoring.sql:ro
       - ../frontend/sql/15_task_archival.sql:/docker-entrypoint-initdb.d/32_task_archival.sql:ro
+      - ../frontend/sql/16_atomic_task_delivery.sql:/docker-entrypoint-initdb.d/33_atomic_task_delivery.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d mercatai"]
       interval: 5s
