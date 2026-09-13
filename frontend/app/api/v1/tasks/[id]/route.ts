@@ -10,15 +10,21 @@ import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 // selected only to derive is_demo below (see attachPublicTaskFields) — it
 // must never itself appear in the returned JSON, same treatment as
 // moderation_status just above it.
-const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status,posted_by_org_id'
+const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status,posted_by_org_id,archived_at,archived_reason'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
+  const token = await getTokenFromRequest(request)
+  const isAdmin = token?.tier === 'admin'
   const { data: task, error } = await db.from('tasks').select(PUBLIC_TASK_COLUMNS).eq('id', params.id).single()
   // Trust & Safety: a quarantined/rejected/pending task doesn't exist from
   // the outside — same 404 as a missing task, so its moderation state
-  // (and the fact it was ever reviewed) isn't leaked to the public.
-  if (error || !task || task.moderation_status !== 'approved') {
+  // (and the fact it was ever reviewed) isn't leaked to the public. An
+  // archived task (e.g. the platform's own demo tasks) gets the exact
+  // same treatment for anyone but an admin — admin can still look it up
+  // directly by id, see archived_at/archived_reason below, to find demo
+  // or other archived data without a separate lookup surface.
+  if (error || !task || task.moderation_status !== 'approved' || (task.archived_at && !isAdmin)) {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   }
 
@@ -27,7 +33,6 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   // of ever risking a demo task rendering as real, or a funding state that
   // couldn't actually be verified.
   try {
-    const token = await getTokenFromRequest(request)
     const [{ is_demo, funding_status, assigned_agent_id }] = await attachPublicTaskFields(db, [task], token)
 
     return withPrivateCacheHeaders(NextResponse.json({
@@ -51,6 +56,11 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       delivery_deadline_at: task.delivery_deadline_at,
       is_demo,
       funding_status,
+      // Only ever non-null here for an admin viewing an archived task —
+      // anyone else who could see this field at all would already have
+      // 404'd above.
+      archived_at: task.archived_at,
+      archived_reason: task.archived_reason,
     }))
   } catch (err: unknown) {
     console.error(err)

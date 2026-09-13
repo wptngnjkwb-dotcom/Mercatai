@@ -34,7 +34,7 @@ let cannedTask: Record<string, unknown> = {
 // Rows for the activity feed's recentBids query — each carries its own
 // embedded task moderation_status/posted_by_org_id, independent of
 // cannedTask above.
-let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string; posted_by_org_id?: string } | null; agents: { display_name: string; profile_visibility?: string } }[] = []
+let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string; posted_by_org_id?: string; archived_at?: string | null } | null; agents: { display_name: string; profile_visibility?: string } }[] = []
 
 // Seedable transactions/organizations rows for is_demo + funding_status +
 // settled-GMV coverage. The shared `tasks` dispatch below only ever returns
@@ -44,6 +44,12 @@ let activityBidRows: { id: string; price_eur: number; submitted_at: string; task
 // task_id: 'task-1' to stay consistent with what that lookup will resolve to.
 let activityTransactionRows: { task_id: string; escrow_status: string; gross_amount_eur?: number; released_at?: string | null; created_at?: string }[] = []
 let activityOrganizationRows: { id: string; is_platform_seed: boolean }[] = []
+// When non-empty, backs settledCompletions' per-page `.in('id', taskIds)`
+// task lookup with real, distinct rows instead of the single cannedTask —
+// needed to test pagination across many different tasks. Left empty, the
+// 'tasks' dispatch below falls back to its original cannedTask behavior
+// exactly as before, so no existing test is affected.
+let activitySettledTaskRows: { id: string; title?: string; category?: string; posted_by_org_id?: string | null; archived_at?: string | null }[] = []
 // Backs the batched agents visibility lookup attachPublicTaskFields makes
 // for GET /api/v1/tasks (list) — separate from cannedTask so a task's
 // assigned_agent_id can be tested against both a public and a private agent.
@@ -57,16 +63,33 @@ vi.mock('@/lib/server/supabase', () => ({
       // .eq('moderation_status', 'approved') filter, not because the mock
       // assumed it would.
       const eqFilters: [string, unknown][] = []
+      const isFilters: [string, unknown][] = []
+      const notFilters: [string, string, unknown][] = []
       let insertedRow: Record<string, unknown> | null = null
       let selectedColumns: string | null = null
+      let inFilterIds: string[] | null = null
+      // Tracks .range(from, to) so 'bids'/'transactions' dispatch below can
+      // slice deterministically — real regression coverage for "LIMIT must
+      // apply only to visible rows" needs the mock to actually paginate,
+      // not just ignore range/limit and hand back everything.
+      let rangeArgs: [number, number] | null = null
+      // Tracks .limit(n) the same way — real enforcement, not a no-op, so a
+      // regression test can distinguish "the route still calls .limit()
+      // before filtering" (would truncate to hidden rows) from the fixed
+      // .range()-paginated version.
+      let limitValue: number | null = null
+      const applyPaging = <R,>(rows: R[]) =>
+        rangeArgs ? rows.slice(rangeArgs[0], rangeArgs[1] + 1) : limitValue != null ? rows.slice(0, limitValue) : rows
       const builder: Record<string, any> = {
         select: (columns?: string) => { if (columns) selectedColumns = columns; return builder },
         eq: (field: string, value: unknown) => { eqFilters.push([field, value]); return builder },
-        in: () => builder,
+        is: (field: string, value: unknown) => { isFilters.push([field, value]); return builder },
+        not: (field: string, operator: string, value: unknown) => { notFilters.push([field, operator, value]); return builder },
+        in: (_field: string, ids: unknown[]) => { inFilterIds = ids as string[]; return builder },
         gte: () => builder,
         order: () => builder,
-        limit: () => builder,
-        range: () => builder,
+        limit: (n: number) => { limitValue = n; return builder },
+        range: (from: number, to: number) => { rangeArgs = [from, to]; return builder },
         maybeSingle: async () => {
           if (table === 'organizations') return { data: orgLookupResult, error: null }
           return { data: null, error: null }
@@ -90,7 +113,18 @@ vi.mock('@/lib/server/supabase', () => ({
         update: () => builder,
         then: (resolve: (v: unknown) => unknown) => {
           if (table === 'tasks') {
+            // A page-scoped .in('id', taskIds) lookup (settledCompletions'
+            // pagination) is served from activitySettledTaskRows when a
+            // test has seeded it, so multiple distinct tasks can be tested
+            // — otherwise fall through to the original single-cannedTask
+            // behavior below, unchanged for every other existing test.
+            if (inFilterIds && activitySettledTaskRows.length > 0) {
+              const matched = activitySettledTaskRows.filter((t) => inFilterIds!.includes(t.id))
+              return resolve({ data: matched, count: matched.length, error: null })
+            }
             const matches = eqFilters.every(([f, v]) => (cannedTask as Record<string, unknown>)[f] === v)
+              && isFilters.every(([f, v]) => ((cannedTask as Record<string, unknown>)[f] ?? null) === v)
+              && notFilters.every(([f, op, v]) => (op === 'is' ? ((cannedTask as Record<string, unknown>)[f] ?? null) !== v : true))
             // Project down to the actually-selected columns, same as a real
             // Postgres/PostgREST query would — a column used only in .eq()
             // (like moderation_status here) is never returned unless it was
@@ -103,13 +137,15 @@ vi.mock('@/lib/server/supabase', () => ({
                 : row
             return resolve({ data: matches ? [project(cannedTask)] : [], count: matches ? 1 : 0, error: null })
           }
-          if (table === 'bids') return resolve({ data: activityBidRows, count: activityBidRows.length, error: null })
+          if (table === 'bids') {
+            return resolve({ data: applyPaging(activityBidRows), count: activityBidRows.length, error: null })
+          }
           if (table === 'agents') return resolve({ data: taskListAgentVisibilityRows, count: taskListAgentVisibilityRows.length, error: null })
           if (table === 'transactions') {
             const matches = activityTransactionRows.filter((row) =>
               eqFilters.every(([f, v]) => (row as Record<string, unknown>)[f] === v)
             )
-            return resolve({ data: matches, count: matches.length, error: null })
+            return resolve({ data: applyPaging(matches), count: matches.length, error: null })
           }
           if (table === 'organizations') return resolve({ data: activityOrganizationRows, count: activityOrganizationRows.length, error: null })
           return resolve({ data: [], count: 0, error: null })
@@ -132,10 +168,11 @@ beforeEach(() => {
   insertedOrgs.length = 0
   moderationEvents.length = 0
   orgLookupResult = null
-  cannedTask = { ...cannedTask, moderation_status: 'approved' }
+  cannedTask = { ...cannedTask, moderation_status: 'approved', archived_at: null, archived_reason: null }
   activityBidRows = []
   activityTransactionRows = []
   activityOrganizationRows = []
+  activitySettledTaskRows = []
   taskListAgentVisibilityRows = []
 })
 
@@ -318,6 +355,62 @@ describe('GET /api/v1/tasks — moderation isolation', () => {
     // The mocked query always filters server-side via .eq('moderation_status','approved')
     // before returning — a quarantined task never reaches the response.
     expect(body.tasks).toEqual([])
+  })
+})
+
+describe('GET /api/v1/tasks — archived tasks (reversible demo takedown)', () => {
+  it('excludes an archived task from the default public list', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    cannedTask = { ...cannedTask, archived_at: '2026-01-01T00:00:00.000Z' }
+    const request = new NextRequest('http://localhost/api/v1/tasks')
+    const response = await GET(request)
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.tasks).toEqual([])
+  })
+
+  it('a real, non-archived, approved task remains visible — archiving demo content does not hide genuine listings', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    const request = new NextRequest('http://localhost/api/v1/tasks')
+    const response = await GET(request)
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.tasks).toHaveLength(1)
+    expect(body.tasks[0].id).toBe('task-1')
+  })
+
+  it('?archived=true is silently ignored for a caller with no admin token — never a public re-reveal parameter', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    cannedTask = { ...cannedTask, archived_at: '2026-01-01T00:00:00.000Z' }
+    const request = new NextRequest('http://localhost/api/v1/tasks?archived=true')
+    const response = await GET(request)
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.tasks).toEqual([])
+  })
+
+  it('?archived=true is silently ignored for a non-admin agent token too', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    cannedTask = { ...cannedTask, archived_at: '2026-01-01T00:00:00.000Z' }
+    const agentToken = await signToken({ agent_id: 'agent-1', tier: 1 }, '15m')
+    const request = new NextRequest('http://localhost/api/v1/tasks?archived=true', { headers: { authorization: `Bearer ${agentToken}` } })
+    const response = await GET(request)
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.tasks).toEqual([])
+  })
+
+  it('?archived=true reveals the archived task to an admin token, including its archived_reason — admin can still find demo/archived data', async () => {
+    const { GET } = await import('@/app/api/v1/tasks/route')
+    cannedTask = { ...cannedTask, archived_at: '2026-01-01T00:00:00.000Z', archived_reason: 'demo_cleanup' }
+    const adminToken = await signToken({ tier: 'admin' }, '12h')
+    const request = new NextRequest('http://localhost/api/v1/tasks?archived=true', { headers: { authorization: `Bearer ${adminToken}` } })
+    const response = await GET(request)
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.tasks).toHaveLength(1)
+    expect(body.tasks[0].id).toBe('task-1')
+    expect(body.tasks[0].archived_reason).toBe('demo_cleanup')
   })
 })
 
@@ -604,5 +697,94 @@ describe('GET /api/v1/activity — events feed: demo marking and real completion
     const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
     const body = await response.json()
     expect(body.events.some((e: any) => e.type === 'completed')).toBe(false)
+  })
+
+  it('excludes an archived task from the "New task posted" events, even though it would otherwise be approved and from a real (non-demo) org', async () => {
+    cannedTask = { ...cannedTask, archived_at: '2026-01-01T00:00:00.000Z' }
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: false }]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(body.events.some((e: any) => e.id === 'task-task-1')).toBe(false)
+  })
+
+  it('excludes a bid on an archived task from the events feed, even though the bid and agent are otherwise public', async () => {
+    activityBidRows = [{
+      id: 'bid-1', price_eur: 15, submitted_at: '2026-08-22T10:00:00.000Z',
+      tasks: { title: 'Archived task', category: 'research', moderation_status: 'approved', posted_by_org_id: 'org-1', archived_at: '2026-01-01T00:00:00.000Z' },
+      agents: { display_name: 'Agent A', profile_visibility: 'public' },
+    }]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(body.events.some((e: any) => e.id === 'bid-bid-1')).toBe(false)
+  })
+
+  it('excludes an archived task from the "completed" event even with a released transaction — archived is broader than just demo', async () => {
+    cannedTask = { ...cannedTask, archived_at: '2026-01-01T00:00:00.000Z' }
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: false }]
+    activityTransactionRows = [{ task_id: 'task-1', escrow_status: 'released', gross_amount_eur: 500, released_at: '2026-08-25T18:00:00.000Z' }]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(body.events.some((e: any) => e.type === 'completed')).toBe(false)
+  })
+})
+
+describe('GET /api/v1/activity — LIMIT applies only to visible events (no hidden backlog can push out a real one)', () => {
+  it('recentBids: when the 15 newest bids all belong to archived demo tasks, the 16th (real, public) bid still appears', async () => {
+    const hiddenBid = (n: number) => ({
+      id: `hidden-${n}`,
+      price_eur: 999,
+      submitted_at: `2026-09-01T${String(23 - n).padStart(2, '0')}:00:00.000Z`,
+      tasks: { title: `Archived demo task ${n}`, category: 'research', moderation_status: 'approved', posted_by_org_id: 'org-seed', archived_at: '2026-01-01T00:00:00.000Z' },
+      agents: { display_name: `Demo Agent ${n}`, profile_visibility: 'public' },
+    })
+    // 15 hidden (archived) bids, newest-first, followed by one real, fully
+    // visible bid as the 16th/oldest row — a raw `.limit(15)` applied
+    // before filtering would return only the 15 hidden rows and the real
+    // bid would never be seen.
+    activityBidRows = [
+      ...Array.from({ length: 15 }, (_, i) => hiddenBid(i)),
+      {
+        id: 'real-bid', price_eur: 42, submitted_at: '2026-09-01T07:00:00.000Z',
+        tasks: { title: 'Real buyer-funded task', category: 'finance', moderation_status: 'approved', posted_by_org_id: 'org-real', archived_at: null },
+        agents: { display_name: 'Real Agent', profile_visibility: 'public' },
+      },
+    ]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    const realEvent = body.events.find((e: any) => e.id === 'bid-real-bid')
+    expect(realEvent).toMatchObject({ detail: 'Real buyer-funded task', amount_eur: 42 })
+    expect(body.events.some((e: any) => e.id?.startsWith('bid-hidden-'))).toBe(false)
+  })
+
+  it('settledCompletions: when the 15 newest released transactions all belong to archived demo tasks, the 16th (real) completion still appears', async () => {
+    activitySettledTaskRows = [
+      ...Array.from({ length: 15 }, (_, i) => ({
+        id: `hidden-task-${i}`, title: `Archived demo task ${i}`, category: 'research',
+        posted_by_org_id: 'org-seed', archived_at: '2026-01-01T00:00:00.000Z',
+      })),
+      { id: 'real-task', title: 'Real completed task', category: 'finance', posted_by_org_id: 'org-real', archived_at: null },
+    ]
+    activityOrganizationRows = [{ id: 'org-seed', is_platform_seed: true }, { id: 'org-real', is_platform_seed: false }]
+    // 15 released transactions on archived demo tasks, newest-first,
+    // followed by one real completed transaction as the 16th/oldest row.
+    activityTransactionRows = [
+      ...Array.from({ length: 15 }, (_, i) => ({
+        task_id: `hidden-task-${i}`, escrow_status: 'released', gross_amount_eur: 999,
+        released_at: `2026-09-01T${String(23 - i).padStart(2, '0')}:00:00.000Z`,
+      })),
+      { task_id: 'real-task', escrow_status: 'released', gross_amount_eur: 88, released_at: '2026-09-01T07:00:00.000Z' },
+    ]
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    const realEvent = body.events.find((e: any) => e.id === 'completed-real-task')
+    expect(realEvent).toMatchObject({ detail: 'Real completed task', amount_eur: 88, is_demo: false })
+    expect(body.events.some((e: any) => e.id?.startsWith('completed-hidden-task-'))).toBe(false)
   })
 })

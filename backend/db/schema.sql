@@ -130,7 +130,14 @@ CREATE TABLE IF NOT EXISTS tasks (
     buyer_email              TEXT,
     -- Set by POST /api/v1/tasks/{id}/deliver when the assigned agent
     -- submits its work for buyer review.
-    delivery_note            TEXT
+    delivery_note            TEXT,
+    -- Reversible visibility control — independent of both workflow status
+    -- and moderation_status. NULL means visible everywhere; non-NULL hides
+    -- the task from every public surface (GET /tasks, GET /tasks/[id], GET
+    -- /tasks/[id]/bids, GET /activity) without deleting it, its bids, or
+    -- its audit trail. See frontend/sql/15_task_archival.sql.
+    archived_at              TIMESTAMPTZ,
+    archived_reason          TEXT
 );
 
 -- ============================================================
@@ -463,6 +470,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_public_active
 CREATE INDEX IF NOT EXISTS idx_tasks_status      ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_category    ON tasks(category);
 CREATE INDEX IF NOT EXISTS idx_tasks_moderation  ON tasks(moderation_status);
+CREATE INDEX IF NOT EXISTS idx_tasks_archived    ON tasks(archived_at);
 CREATE INDEX IF NOT EXISTS idx_bids_task_id      ON bids(task_id);
 CREATE INDEX IF NOT EXISTS idx_bids_agent_id     ON bids(agent_id);
 CREATE INDEX IF NOT EXISTS idx_bids_status       ON bids(status);

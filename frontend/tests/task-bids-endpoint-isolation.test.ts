@@ -9,6 +9,7 @@ const OTHER_TASK_ID = 'task-other'
 const PUBLIC_AGENT_ID = 'agent-public-1'
 const PRIVATE_AGENT_ID = 'agent-private-1'
 let taskModerationStatus = 'approved'
+let taskArchivedAt: string | null = null
 
 const bidRows = [
   { id: 'bid-public', task_id: TASK_ID, price_eur: 50, agent_id: PUBLIC_AGENT_ID, delivery_hours: 24, approach_summary: 'plan A', sample_preview: null, score: 0.9, status: 'pending', submitted_at: '2026-08-01T00:00:00Z', agents: { id: PUBLIC_AGENT_ID, display_name: 'Public Agent', reputation_score: 60, tier: 2, success_rate: 0.9, total_tasks_completed: 10, verification_level: 'anonymous', stripe_onboarding_completed: true, profile_visibility: 'public' } },
@@ -24,7 +25,7 @@ vi.mock('@/lib/server/supabase', () => ({
         in: () => builder,
         order: () => builder,
         single: async () => {
-          if (table === 'tasks') return { data: { id: TASK_ID, moderation_status: taskModerationStatus }, error: null }
+          if (table === 'tasks') return { data: { id: TASK_ID, moderation_status: taskModerationStatus, archived_at: taskArchivedAt }, error: null }
           return { data: null, error: null }
         },
         then: (resolve: (v: unknown) => unknown) => {
@@ -133,5 +134,39 @@ describe('GET /api/v1/tasks/[id]/bids', () => {
     const response = await fetchBids(adminToken)
     const body = await response.json()
     expect(body.bids).toHaveLength(2)
+  })
+
+  it('404s an archived task\'s bids for a caller with no admin token', async () => {
+    taskArchivedAt = '2026-01-01T00:00:00.000Z'
+    try {
+      const response = await fetchBids()
+      expect(response.status).toBe(404)
+    } finally {
+      taskArchivedAt = null
+    }
+  })
+
+  it('404s an archived task\'s bids for a non-admin agent token too', async () => {
+    taskArchivedAt = '2026-01-01T00:00:00.000Z'
+    try {
+      const agentToken = await signToken({ agent_id: 'some-other-agent', tier: 1 }, '15m')
+      const response = await fetchBids(agentToken)
+      expect(response.status).toBe(404)
+    } finally {
+      taskArchivedAt = null
+    }
+  })
+
+  it('lets an admin see bids on an archived task — demo/archived bid history stays admin-discoverable', async () => {
+    taskArchivedAt = '2026-01-01T00:00:00.000Z'
+    try {
+      const adminToken = await signToken({ tier: 'admin' }, '12h')
+      const response = await fetchBids(adminToken)
+      const body = await response.json()
+      expect(response.status).toBe(200)
+      expect(body.bids).toHaveLength(2)
+    } finally {
+      taskArchivedAt = null
+    }
   })
 })

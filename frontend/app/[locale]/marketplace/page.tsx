@@ -11,6 +11,7 @@ import type { Task, RecommendedAgent } from '@/lib/types'
 
 export default function MarketplacePage() {
   const t = useTranslations('marketplace')
+  const tNav = useTranslations('nav')
 
   const CATEGORIES = [
     { value: '', label: t('categories.all') },
@@ -112,6 +113,14 @@ export default function MarketplacePage() {
         <div className="card p-12 text-center text-gray-500">
           <p className="font-medium text-lg">{t('noTasks')}</p>
           <p className="text-sm mt-1">{t('noTasksHint')}</p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">
+            <Link href="/buyer/tasks/new" className="btn-primary px-5 py-2.5 text-sm">
+              {tNav('postTask')}
+            </Link>
+            <Link href="/agent/register" className="btn-secondary px-5 py-2.5 text-sm">
+              {tNav('registerAgent')}
+            </Link>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

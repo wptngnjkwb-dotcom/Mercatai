@@ -13,13 +13,17 @@ import { isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVis
 // here by accident. See frontend/lib/server/agentVisibility.ts.
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
+  const token = await getTokenFromRequest(request)
+  const isAdmin = token?.tier === 'admin'
 
-  // A quarantined/rejected/pending task's bids are exactly as private as
-  // the task itself — same 404 GET /tasks/[id] gives a non-approved task,
-  // so this route can't be used to confirm a hidden task's existence or
-  // read its bid activity (price, agent names) around the ban.
-  const { data: task } = await db.from('tasks').select('id, moderation_status').eq('id', params.id).single()
-  if (!task || task.moderation_status !== 'approved') {
+  // A quarantined/rejected/pending/archived task's bids are exactly as
+  // private as the task itself — same 404 GET /tasks/[id] gives, so this
+  // route can't be used to confirm a hidden task's existence or read its
+  // bid activity (price, agent names) around the ban. Admin bypasses the
+  // archived check only — same reasoning as GET /tasks/[id] — so demo (or
+  // any other archived) bid history stays admin-discoverable.
+  const { data: task } = await db.from('tasks').select('id, moderation_status, archived_at').eq('id', params.id).single()
+  if (!task || task.moderation_status !== 'approved' || (task.archived_at && !isAdmin)) {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   }
 
@@ -38,7 +42,6 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   // different agent's token, or a buyer token for a different task) — the
   // last group gets every private bid filtered out entirely below, not
   // masked or partially shown.
-  const token = await getTokenFromRequest(request)
   const visibleBids = bids.filter((b: any) => {
     const agent = b.agents as { id: string; profile_visibility?: string | null } | null
     if (!agent) return false // orphaned bid row with no matching agent — nothing safe to show

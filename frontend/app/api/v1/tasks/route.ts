@@ -39,17 +39,41 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get('category')
     const limit = Math.min(Number(searchParams.get('limit') || 20), 100)
 
+    // Needed before building the query below, so an admin-only view
+    // (archived=true) can be decided up front rather than filtered out
+    // after the fact.
+    const token = await getTokenFromRequest(request)
+    // Never a public query parameter: ?archived=true is silently ignored
+    // for anyone without an admin token, so it can never be used to
+    // re-reveal a hidden task to an anonymous or agent caller — it isn't
+    // even an error, just inert, so its existence isn't confirmed either.
+    const wantsArchived = searchParams.get('archived') === 'true' && token?.tier === 'admin'
+
     // Exclude embedding (vector field) from public response
-    let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at')
-      // Trust & Safety: only ever surface moderated-and-approved tasks
-      // publicly, independent of the workflow status filtering below.
-      .eq('moderation_status', 'approved')
-    // Default to both biddable states — a task moves from 'open' to
-    // 'bidding' on its first bid, and dropping out of the default listing
-    // right when competing bids become possible restricts exactly the
-    // liquidity an open marketplace depends on. Explicit ?status= still
-    // filters to one state, e.g. for buyers checking 'completed' work.
-    query = explicitStatus ? query.eq('status', explicitStatus) : query.in('status', ['open', 'bidding'])
+    let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at,archived_at,archived_reason')
+
+    if (wantsArchived) {
+      // Admin-only lookup of archived tasks (demo cleanup and any future
+      // archival) — deliberately not scoped to moderation_status or
+      // workflow status, since this is "find archived data", not "browse
+      // the live marketplace".
+      query = query.not('archived_at', 'is', null)
+    } else {
+      query = query
+        // Trust & Safety: only ever surface moderated-and-approved tasks
+        // publicly, independent of the workflow status filtering below.
+        .eq('moderation_status', 'approved')
+        // Archived (e.g. the platform's own demo tasks, hidden by the
+        // manual frontend/sql/manual_archive_demo_tasks.sql script) is
+        // hidden from every default and explicit-status view.
+        .is('archived_at', null)
+      // Default to both biddable states — a task moves from 'open' to
+      // 'bidding' on its first bid, and dropping out of the default listing
+      // right when competing bids become possible restricts exactly the
+      // liquidity an open marketplace depends on. Explicit ?status= still
+      // filters to one state, e.g. for buyers checking 'completed' work.
+      query = explicitStatus ? query.eq('status', explicitStatus) : query.in('status', ['open', 'bidding'])
+    }
     if (category) query = query.eq('category', category)
 
     const { data, error } = await query.order('created_at', { ascending: false }).limit(limit)
@@ -58,7 +82,6 @@ export async function GET(request: NextRequest) {
     // Masks assigned_agent_id to null for a task assigned to a private
     // agent, unless the caller is that agent or an admin — the task buyer
     // uses the bid id and never needs the agent's internal UUID.
-    const token = await getTokenFromRequest(request)
     const tasks = await attachPublicTaskFields(db, data ?? [], token)
     // assigned_agent_id can differ by caller for private agents.
     return withPrivateCacheHeaders(NextResponse.json({ tasks }))

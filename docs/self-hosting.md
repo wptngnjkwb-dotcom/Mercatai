@@ -74,6 +74,30 @@ one copy of each file to maintain.
 > §6 below) and set `STRIPE_CONNECT_WEBHOOK_SECRET`. Applying the
 > migration alone is safe and inert.
 
+> **Upgrading an existing install for reversible task archival** (migration
+> `frontend/sql/15_task_archival.sql`) adds `tasks.archived_at` and
+> `tasks.archived_reason` — schema only, no data is changed. This is safe
+> to apply to any install, fresh or existing: a fresh install's own
+> `07_demo_tasks.sql` seed tasks stay fully visible after this runs.
+>
+> **Separately, and only if you want to hide your own seed/demo tasks**
+> (e.g. once your marketplace has real, non-demo tasks and you no longer
+> want the sample briefs shown), run
+> `frontend/sql/manual_archive_demo_tasks.sql` by hand against your
+> database. It is **not** mounted by `docker-compose.yml` and never runs
+> automatically. It archives only tasks that are both posted by the
+> `is_platform_seed` organization **and** carry `moderated_by =
+> 'system:seed'` (exactly the 7 original sample briefs — never a task your
+> own users create) — nothing is deleted: bids, audit trail, and the
+> organization row are all untouched, and re-running it a second time
+> archives nothing further (idempotent). After archiving, expect
+> `GET /api/v1/tasks` to return only your own real tasks — the
+> marketplace's empty state and the `/api/v1/tasks?archived=true`
+> admin-only lookup (admin token required) both account for an empty
+> result. To reverse: `UPDATE tasks SET archived_at = NULL, archived_reason
+> = NULL WHERE moderated_by = 'system:seed' AND archived_reason =
+> 'demo_cleanup';` (also given at the top of the script itself).
+
 ## 3. Configure secrets
 
 ```bash

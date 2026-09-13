@@ -75,6 +75,8 @@ const rawTask = {
   assigned_at: null,
   delivery_deadline_at: null,
   moderation_status: 'approved',
+  archived_at: null as string | null,
+  archived_reason: null as string | null,
   // These fields must remain private even if a query or future schema change
   // accidentally makes them available to the handler.
   buyer_email: 'buyer@example.com',
@@ -267,6 +269,56 @@ describe('GET /api/v1/tasks/[id]', () => {
     } finally {
       rawTask.moderation_status = originalStatus
     }
+  })
+})
+
+describe('GET /api/v1/tasks/[id] — archived tasks (reversible demo takedown)', () => {
+  async function withArchivedTask(fn: () => Promise<void>) {
+    const originalArchivedAt = rawTask.archived_at
+    const originalArchivedReason = rawTask.archived_reason
+    rawTask.archived_at = '2026-01-01T00:00:00.000Z'
+    rawTask.archived_reason = 'demo_cleanup'
+    try {
+      await fn()
+    } finally {
+      rawTask.archived_at = originalArchivedAt
+      rawTask.archived_reason = originalArchivedReason
+    }
+  }
+
+  it('404s an archived task for an anonymous caller — same as a non-approved one', () => withArchivedTask(async () => {
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`)
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(response.status).toBe(404)
+    expect(body).toEqual({ error: 'Task not found' })
+  }))
+
+  it('404s an archived task for a non-admin agent token too', () => withArchivedTask(async () => {
+    const agentToken = await signToken({ agent_id: OTHER_AGENT_ID, tier: 1 }, '15m')
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, {
+      headers: { authorization: `Bearer ${agentToken}` },
+    })
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    expect(response.status).toBe(404)
+  }))
+
+  it('lets an admin token see the full detail of an archived task, including archived_at/archived_reason', () => withArchivedTask(async () => {
+    const adminToken = await signToken({ tier: 'admin' }, '12h')
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, {
+      headers: { authorization: `Bearer ${adminToken}` },
+    })
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.archived_at).toBe('2026-01-01T00:00:00.000Z')
+    expect(body.archived_reason).toBe('demo_cleanup')
+  }))
+
+  it('a real, non-archived task is unaffected — still 200 for anyone', async () => {
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`)
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    expect(response.status).toBe(200)
   })
 })
 
