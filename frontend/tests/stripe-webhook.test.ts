@@ -21,6 +21,7 @@ type Row = Record<string, any>
 let tables: Record<string, Row[]>
 let dbCalls: string[]
 let failNextTaskTransition = false
+let currentStripeIntent: Row = { id: 'pi_1', status: 'requires_payment_method' }
 
 function resetDb() {
   tables = { transactions: [], tasks: [], bids: [] }
@@ -30,6 +31,19 @@ resetDb()
 
 function makeDb() {
   return {
+    async rpc(name: string, args: Row) {
+      if (name !== 'invalidate_task_funding') throw new Error(`unexpected rpc ${name}`)
+      const tx = tables.transactions.find((row) => row.id === args.p_transaction_id)
+      const task = tables.tasks.find((row) => row.id === args.p_task_id)
+      if (!tx || !task) return { data: null, error: { code: 'P0002' } }
+      tx.escrow_status = 'failed'
+      if (task.status === 'review') task.status = 'disputed'
+      else if (task.status === 'in_progress' || task.status === 'assigned') {
+        task.status = 'assigned'
+        task.delivery_deadline_at = null
+      }
+      return { data: [{ task_status: task.status, transaction_status: 'failed' }], error: null }
+    },
     from(table: string) {
       dbCalls.push(table)
       if (!(table in tables)) throw new Error(`test mock: table "${table}" was never initialized`)
@@ -90,11 +104,14 @@ vi.mock('@/lib/server/supabase', () => ({ getSupabase: () => makeDb() }))
 
 const constructEvent = vi.fn((rawBody: string, signature: string) => {
   if (signature !== 'valid-signature') throw new Error('signature verification failed')
-  return JSON.parse(rawBody)
+  const event = JSON.parse(rawBody)
+  if (event.type?.startsWith('payment_intent.')) currentStripeIntent = event.data.object
+  return event
 })
+const retrievePaymentIntent = vi.fn(async () => currentStripeIntent)
 vi.mock('stripe', () => ({
   default: vi.fn(function () {
-    return { webhooks: { constructEvent } }
+    return { webhooks: { constructEvent }, paymentIntents: { retrieve: retrievePaymentIntent } }
   }),
 }))
 
@@ -125,8 +142,12 @@ beforeEach(() => {
   auditLog.mockClear()
   failNextTaskTransition = false
   constructEvent.mockClear()
-  tables.transactions.push({ id: 'tx-1', task_id: 'task-1', escrow_status: 'pending', stripe_payment_intent_id: 'pi_1' })
-  tables.tasks.push({ id: 'task-1', status: 'assigned', delivery_deadline_at: null })
+  tables.transactions.push({ id: 'tx-1', task_id: 'task-1', agent_id: 'agent-1', buyer_org_id: 'org-1', escrow_status: 'pending', stripe_payment_intent_id: 'pi_1' })
+  tables.tasks.push({
+    id: 'task-1', status: 'assigned', delivery_deadline_at: null,
+    assigned_agent_id: 'agent-1', posted_by_org_id: 'org-1', archived_at: null,
+    moderation_status: 'approved', organizations: { is_platform_seed: false },
+  })
   tables.bids.push({ id: 'bid-1', task_id: 'task-1', status: 'accepted', delivery_hours: 36, submitted_at: '2026-09-01T00:00:00.000Z' })
 })
 
@@ -195,6 +216,16 @@ describe('payment_intent.succeeded / payment_intent.payment_failed — correct t
     expect(tables.transactions[0].escrow_status).toBe('failed')
   })
 
+  it('a canceled, previously-held card stops execution and clears its deadline atomically', async () => {
+    tables.transactions[0].escrow_status = 'held'
+    tables.tasks[0].status = 'in_progress'
+    tables.tasks[0].delivery_deadline_at = '2026-09-03T00:00:00.000Z'
+    const response = await POST(webhookRequest(paymentIntentEvent('evt_cancel_held', 'payment_intent.canceled', 'canceled')))
+    expect(response.status).toBe(200)
+    expect(tables.transactions[0].escrow_status).toBe('failed')
+    expect(tables.tasks[0]).toMatchObject({ status: 'assigned', delivery_deadline_at: null })
+  })
+
   it('a non-payment_intent event is accepted (200) but reconciles nothing', async () => {
     const response = await POST(webhookRequest({ id: 'evt_1', type: 'account.updated', data: { object: {} } }))
     expect(response.status).toBe(200)
@@ -241,8 +272,8 @@ describe('idempotent redelivery', () => {
     expect(tables.transactions[0].escrow_status).toBe('held')
 
     // A stale/duplicate payment_intent.payment_failed for the same intent
-    // arriving after it already succeeded — reconcilePaymentIntent's own
-    // .eq('escrow_status', 'pending') guard is what makes this a no-op.
+    // arriving after it already succeeded. The live retrieve returns the
+    // current succeeded state, so the historical event type cannot undo it.
     await POST(webhookRequest(paymentIntentEvent('evt_2', 'payment_intent.payment_failed', 'succeeded')))
     expect(tables.transactions[0].escrow_status).toBe('held')
   })

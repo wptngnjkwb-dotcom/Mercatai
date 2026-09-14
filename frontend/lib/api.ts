@@ -106,7 +106,6 @@ export const api = {
       headers: buyer_token ? { Authorization: `Bearer ${buyer_token}` } : buyerAuthHeader(task_id),
     })
   },
-  releasePayment: (taskId: string) => request(`/api/v1/payments/release/${taskId}`, { method: 'POST' }),
   getTransaction: (taskId: string) => request<import('./types').Transaction>(`/api/v1/payments/transaction/${taskId}`),
 
   // Activity feed (public, powers /live)

@@ -78,8 +78,9 @@ Key properties:
 
 Stripe manual-capture authorizations — used for card payments only, not
 SEPA Direct Debit — expire roughly **7 days** after creation. Card-funded
-tasks are therefore expected to complete their accept → deliver → approve
-cycle within that window. The daily SLA cron flags any transaction held
+tasks are therefore limited by the API to an accepted bid with at most
+**96 delivery hours**, preserving time for the buyer's 48-hour review and
+operational margin before the authorization expires. The daily SLA cron flags any transaction held
 longer than 6 days (`authorization_expiring` in the audit log) so it can be
 resolved or re-authorized before capture becomes impossible. For task types
 that structurally need longer than 7 days, the roadmap option is
@@ -87,8 +88,10 @@ re-authorization at delivery time (cancel + new PaymentIntent).
 
 ## 2. Audit trail (append-only)
 
-Every state transition is written to the `audit_logs` table by
-`lib/server/audit.ts`. The table is **append-only at the database level**:
+Every state transition is written to the `audit_logs` table. Application
+events use `lib/server/audit.ts`; terminal payment/refund transitions insert
+their audit record inside the same PostgreSQL transaction that changes the
+task and payment. The table is **append-only at the database level**:
 `BEFORE UPDATE` and `BEFORE DELETE` triggers raise an exception
 (see `backend/db/schema.sql`), so records cannot be altered even with
 direct database access short of dropping the trigger — which is itself

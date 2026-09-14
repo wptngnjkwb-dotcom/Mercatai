@@ -21,15 +21,29 @@ let transactionRow: Record<string, unknown> | null
 let taskRow: Record<string, unknown> | null
 const taskUpdates: Record<string, unknown>[] = []
 const transactionUpdates: Record<string, unknown>[] = []
+const rpcCalls: { name: string; args: Record<string, unknown> }[] = []
 const ASSIGNED_AGENT_ID = 'agent-1'
 let assignedAgentVisibility = 'public'
+let finalizeRpcError: Record<string, unknown> | null = null
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
+    async rpc(name: string, args: Record<string, unknown>) {
+      rpcCalls.push({ name, args })
+      if (finalizeRpcError) return { data: null, error: finalizeRpcError }
+      return { data: [{
+        task_status: 'completed', transaction_status: 'released',
+        assigned_agent_id: ASSIGNED_AGENT_ID, agent_payout_eur: 90,
+        platform_fee_eur: transactionRow?.platform_fee_eur ?? 5,
+        newly_completed: true,
+      }], error: null }
+    },
     from(table: string) {
       const builder: Record<string, unknown> = {
         select: () => builder,
         eq: () => builder,
+        order: () => builder,
+        limit: () => builder,
         update: (values: Record<string, unknown>) => {
           if (table === 'tasks') taskUpdates.push(values)
           if (table === 'transactions') transactionUpdates.push(values)
@@ -55,8 +69,6 @@ vi.mock('@/lib/server/auth', () => ({
 // that also lets the handler be a plain static import instead of a top-level
 // await, which the project's tsconfig (no `target`) rejects.
 const {
-  auditLog,
-  applyReputationEvent,
   fireWebhooks,
   recordAffiliateEarning,
   retrievePaymentIntent,
@@ -66,8 +78,6 @@ const {
   const retrieve = vi.fn(async () => ({ capture_method: 'manual', status: 'requires_capture' }))
   const capture = vi.fn(async () => ({}))
   return {
-    auditLog: vi.fn(async () => {}),
-    applyReputationEvent: vi.fn(async () => {}),
     fireWebhooks: vi.fn(async (_event: string, _payload: Record<string, unknown>) => {}),
     recordAffiliateEarning: vi.fn(async () => {}),
     retrievePaymentIntent: retrieve,
@@ -79,8 +89,6 @@ const {
   }
 })
 
-vi.mock('@/lib/server/audit', () => ({ auditLog }))
-vi.mock('@/lib/server/reputation', () => ({ applyReputationEvent }))
 vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks }))
 vi.mock('@/lib/server/affiliate', () => ({ recordAffiliateEarning }))
 
@@ -98,21 +106,23 @@ describe('PUT /api/v1/tasks/[id]/approve', () => {
   beforeEach(() => {
     taskUpdates.length = 0
     transactionUpdates.length = 0
+    rpcCalls.length = 0
     vi.clearAllMocks()
     // The route returns 400 before touching payment state unless the task is
     // in review, so every case below has to start there to reach the guard.
     taskRow = { id: TASK_ID, status: 'review', assigned_agent_id: 'agent-1' }
     process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'
     assignedAgentVisibility = 'public'
+    finalizeRpcError = null
   })
 
   function expectNoSideEffects() {
     expect(taskUpdates).toHaveLength(0)
     expect(transactionUpdates).toHaveLength(0)
     expect(stripeConstructor).not.toHaveBeenCalled()
-    expect(applyReputationEvent).not.toHaveBeenCalled()
     expect(fireWebhooks).not.toHaveBeenCalled()
     expect(recordAffiliateEarning).not.toHaveBeenCalled()
+    expect(rpcCalls).toHaveLength(0)
   }
 
   for (const escrowStatus of ['pending', 'failed']) {
@@ -192,10 +202,27 @@ describe('PUT /api/v1/tasks/[id]/approve', () => {
 
     expect(response.status).toBe(200)
     expect(capturePaymentIntent).toHaveBeenCalledWith('pi_test')
-    expect(taskUpdates).toContainEqual({ status: 'completed' })
-    expect(transactionUpdates[0]).toMatchObject({ escrow_status: 'released' })
-    expect(applyReputationEvent).toHaveBeenCalled()
+    expect(rpcCalls).toEqual([{ name: 'finalize_funded_task', args: {
+      p_task_id: TASK_ID, p_transaction_id: 'tx-1', p_reason: 'buyer_approved',
+    } }])
+    expect(taskUpdates).toHaveLength(0)
+    expect(transactionUpdates).toHaveLength(0)
     expect(fireWebhooks).toHaveBeenCalled()
+  })
+
+  it('does not publish completion side effects when capture succeeds but atomic DB finalization fails', async () => {
+    transactionRow = {
+      id: 'tx-1', task_id: TASK_ID, escrow_status: 'held', platform_fee_eur: 5,
+      agent_payout_eur: 90, stripe_payment_intent_id: 'pi_test',
+    }
+    finalizeRpcError = { code: 'XX000', message: 'simulated rollback' }
+    const response = await PUT(approveRequest(), { params: { id: TASK_ID } })
+    expect(response.status).toBe(500)
+    expect(capturePaymentIntent).toHaveBeenCalledTimes(1)
+    expect(fireWebhooks).not.toHaveBeenCalled()
+    expect(recordAffiliateEarning).not.toHaveBeenCalled()
+    expect(taskUpdates).toHaveLength(0)
+    expect(transactionUpdates).toHaveLength(0)
   })
 
   it('includes the real agent_id in the public task.completed webhook payload for a public agent', async () => {

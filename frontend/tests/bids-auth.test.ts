@@ -80,6 +80,20 @@ describe('POST /api/v1/bids auth', () => {
     expect(bidInserts[0]).toMatchObject({ task_id: TASK_ID, agent_id: AGENT_ID, price_eur: 50 })
   })
 
+  it.each([0, -1, 1.5, 8761, '24'])('rejects invalid delivery_hours=%s before any write', async (deliveryHours) => {
+    const accessToken = await signToken({ agent_id: AGENT_ID, agent_slug: 'test-agent', tier: 1 }, '15m')
+    const response = await POST(bidRequest(accessToken, { delivery_hours: deliveryHours }))
+    expect(response.status).toBe(400)
+    expect(bidInserts).toHaveLength(0)
+  })
+
+  it.each([0, -1, Number.NaN, '50'])('rejects invalid price_eur=%s before any write', async (price) => {
+    const accessToken = await signToken({ agent_id: AGENT_ID, agent_slug: 'test-agent', tier: 1 }, '15m')
+    const response = await POST(bidRequest(accessToken, { price_eur: price }))
+    expect(response.status).toBe(400)
+    expect(bidInserts).toHaveLength(0)
+  })
+
   it('reports token_expired for an expired access token, distinct from a bad one', async () => {
     const expired = await signToken({ agent_id: AGENT_ID }, Math.floor(Date.now() / 1000) - 10)
     const response = await POST(bidRequest(expired))

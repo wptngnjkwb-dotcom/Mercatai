@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
-import { auditLog } from '@/lib/server/audit'
-import { applyReputationEvent } from '@/lib/server/reputation'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { recordAffiliateEarning } from '@/lib/server/affiliate'
 import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
@@ -23,11 +21,14 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
   // Task and payment are read together: which answer is correct depends on
   // the combination, so the task status alone cannot be checked first.
-  const [{ data: task }, { data: tx }] = await Promise.all([
+  const [{ data: task, error: taskError }, { data: tx, error: txError }] = await Promise.all([
     db.from('tasks').select('*').eq('id', params.id).single(),
-    db.from('transactions').select('*').eq('task_id', params.id).maybeSingle(),
+    db.from('transactions').select('*').eq('task_id', params.id)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle(),
   ])
 
+  if (taskError && taskError.code !== 'PGRST116') return NextResponse.json({ error: 'Task could not be loaded' }, { status: 500 })
+  if (txError) return NextResponse.json({ error: 'Payment could not be loaded' }, { status: 500 })
   if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
 
   if (tx?.escrow_status === 'released') {
@@ -49,7 +50,8 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
   if (task.status !== 'review') return NextResponse.json({ error: 'Task is not in review' }, { status: 400 })
 
-  // 2. Skutečné uvolnění escrow přes Stripe capture
+  // 2. Capture/verify the real Stripe payment before atomically finalizing
+  // task, transaction, reputation, free-task accounting and audit in DB.
   if (!tx) return NextResponse.json({ error: 'No payment found for this task — cannot approve without escrow' }, { status: 402 })
 
   // Nothing was ever captured for a payment that is still pending (card
@@ -64,72 +66,56 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     }, { status: 402 })
   }
 
-  if (tx && tx.escrow_status === 'held' && process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
-    try {
-      const Stripe = (await import('stripe')).default
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-      const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
-      if (intent.capture_method === 'manual' && intent.status === 'requires_capture') {
-        await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
-      } else if (intent.capture_method === 'manual' && intent.status !== 'succeeded') {
-        return NextResponse.json({ error: `Card authorization is not capturable (Stripe status: ${intent.status})` }, { status: 409 })
-      }
-    } catch (stripeErr) {
-      console.error('Stripe capture failed:', stripeErr)
-      return NextResponse.json({ error: 'Payment capture failed — escrow not released' }, { status: 502 })
+  if (!process.env.STRIPE_SECRET_KEY) {
+    return NextResponse.json({ error: 'Stripe is not configured' }, { status: 503 })
+  }
+  if (!tx.stripe_payment_intent_id?.startsWith('pi_')) {
+    return NextResponse.json({ error: 'Funded transaction has no valid Stripe payment reference' }, { status: 409 })
+  }
+  try {
+    const Stripe = (await import('stripe')).default
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
+    const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+    if (intent.capture_method === 'manual' && intent.status === 'requires_capture') {
+      await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+    } else if (intent.capture_method === 'manual' && intent.status !== 'succeeded') {
+      return NextResponse.json({ error: `Card authorization is not capturable (Stripe status: ${intent.status})` }, { status: 409 })
+    } else if (intent.capture_method !== 'manual' && intent.status !== 'succeeded') {
+      return NextResponse.json({ error: `Automatic payment is not settled (Stripe status: ${intent.status})` }, { status: 409 })
+    }
+  } catch (stripeErr) {
+    console.error('Stripe capture failed:', stripeErr)
+    return NextResponse.json({ error: 'Payment capture failed — task was not finalized' }, { status: 502 })
+  }
+
+  const { data: finalizedData, error: finalizedError } = await db.rpc('finalize_funded_task', {
+    p_task_id: params.id,
+    p_transaction_id: tx.id,
+    p_reason: 'buyer_approved',
+  })
+  if (finalizedError) {
+    // Stripe may already have captured the card. Any DB failure after that
+    // must remain retryable and visible to monitoring, never be presented as
+    // a normal client conflict which a caller might abandon.
+    return NextResponse.json({ error: 'Payment was captured but task finalization must be retried' }, { status: 500 })
+  }
+  const finalized = Array.isArray(finalizedData) ? finalizedData[0] : finalizedData
+  if (!finalized || finalized.task_status !== 'completed' || finalized.transaction_status !== 'released') {
+    return NextResponse.json({ error: 'Task finalization was not confirmed' }, { status: 500 })
+  }
+
+  if (finalized.newly_completed) {
+    // Third-party developer webhooks never learn a private agent's identity.
+    fireWebhooks('task.completed', {
+      task_id: params.id,
+      agent_payout_eur: Number(finalized.agent_payout_eur),
+      ...(await agentIdentityForWebhook(db, finalized.assigned_agent_id)),
+    })
+
+    if (Number(finalized.platform_fee_eur) > 0) {
+      recordAffiliateEarning(params.id, Number(finalized.platform_fee_eur)).catch(console.error)
     }
   }
 
-  const { data, error } = await db
-    .from('tasks')
-    .update({ status: 'completed' })
-    .eq('id', params.id)
-    .select()
-    .single()
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  if (task.assigned_agent_id) {
-    await Promise.all([
-      db.from('transactions')
-        .update({ escrow_status: 'released', released_at: new Date().toISOString() })
-        .eq('task_id', params.id),
-      applyReputationEvent(task.assigned_agent_id, 'task_completed', params.id),
-    ])
-
-    // Snížit free_tasks_remaining pokud byl task zdarma (platform_fee_eur = 0)
-    if (tx.platform_fee_eur === 0) {
-      const { data: agentData } = await db.from('agents')
-        .select('free_tasks_remaining')
-        .eq('id', task.assigned_agent_id)
-        .single()
-      if (agentData && agentData.free_tasks_remaining > 0) {
-        await db.from('agents')
-          .update({ free_tasks_remaining: agentData.free_tasks_remaining - 1 })
-          .eq('id', task.assigned_agent_id)
-      }
-    }
-  }
-
-  await auditLog({
-    action: 'task_approved_escrow_released',
-    resource_type: 'task',
-    resource_id: params.id,
-    details: { transaction_id: tx?.id, agent_payout_eur: tx?.agent_payout_eur },
-  })
-
-  // Third-party developer webhooks never learn a private agent's identity
-  // — see frontend/lib/server/agentVisibility.ts.
-  fireWebhooks('task.completed', {
-    task_id: params.id,
-    agent_payout_eur: tx?.agent_payout_eur,
-    ...(await agentIdentityForWebhook(db, task.assigned_agent_id)),
-  })
-
-  // Affiliate: record 30% share for the referring API client (fire-and-forget)
-  if (tx?.platform_fee_eur > 0) {
-    recordAffiliateEarning(params.id, tx.platform_fee_eur).catch(console.error)
-  }
-
-  return NextResponse.json(data)
+  return NextResponse.json({ id: params.id, status: 'completed', transaction_status: 'released' })
 }

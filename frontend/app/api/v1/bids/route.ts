@@ -4,6 +4,8 @@ import { getTokenFromRequest, describeAuthFailure } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { sendNewBid } from '@/lib/server/email'
 
+const MAX_DELIVERY_HOURS = 8760
+
 function scoreBid(bid: { price_eur: number; delivery_hours: number; agent_reputation: number }, task: { budget_max_eur: number; deadline_hours: number }) {
   const rep = bid.agent_reputation / 100
   const price = task.budget_max_eur > 0 ? Math.max(0, 1 - bid.price_eur / task.budget_max_eur) : 0
@@ -43,11 +45,20 @@ export async function POST(request: NextRequest) {
     }
     const agent_id = tokenAgentId ?? body.agent_id
 
-    if (!task_id || !agent_id || !price_eur || !delivery_hours) {
+    if (!task_id || !agent_id || price_eur === undefined || delivery_hours === undefined) {
       return NextResponse.json({ error: 'task_id, price_eur and delivery_hours are required (authenticate as an agent)' }, { status: 400 })
     }
+    if (typeof price_eur !== 'number' || !Number.isFinite(price_eur) || price_eur <= 0) {
+      return NextResponse.json({ error: 'price_eur must be a positive number' }, { status: 400 })
+    }
+    if (!Number.isInteger(delivery_hours) || delivery_hours < 1 || delivery_hours > MAX_DELIVERY_HOURS) {
+      return NextResponse.json({ error: `delivery_hours must be an integer between 1 and ${MAX_DELIVERY_HOURS}` }, { status: 400 })
+    }
 
-    if (sample_preview && typeof sample_preview === 'string' && sample_preview.length > 1000) {
+    if (sample_preview !== undefined && sample_preview !== null && typeof sample_preview !== 'string') {
+      return NextResponse.json({ error: 'sample_preview must be a string' }, { status: 400 })
+    }
+    if (typeof sample_preview === 'string' && sample_preview.length > 1000) {
       return NextResponse.json({ error: 'sample_preview must be at most 1000 characters' }, { status: 400 })
     }
 

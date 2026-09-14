@@ -80,6 +80,8 @@ vi.mock('@/lib/server/supabase', () => ({
         || seedOrg
         || taskRow.assigned_agent_id !== args.p_expected_agent_id
         || latestTx?.escrow_status !== 'held'
+        || latestTx?.agent_id !== taskRow.assigned_agent_id
+        || latestTx?.buyer_org_id !== taskRow.posted_by_org_id
       ) {
         return { data: null, error: { code: 'P0001', message: 'not authorized' } }
       }
@@ -111,7 +113,11 @@ function deliverRequest(bearer: string, deliveryNote: unknown = 'done') {
 describe('POST /api/v1/tasks/[id]/deliver auth', () => {
   beforeEach(() => {
     Object.assign(taskRow, { status: 'in_progress', assigned_agent_id: ASSIGNED_AGENT_ID, posted_by_org_id: 'org-real', archived_at: null, delivery_note: null })
-    transactionRows = [{ id: 'tx-1', task_id: TASK_ID, escrow_status: 'held', created_at: '2026-09-01T00:00:00.000Z' }]
+    transactionRows = [{
+      id: 'tx-1', task_id: TASK_ID, agent_id: ASSIGNED_AGENT_ID,
+      buyer_org_id: 'org-real', escrow_status: 'held',
+      created_at: '2026-09-01T00:00:00.000Z',
+    }]
     taskUpdates.length = 0
     assignedAgentVisibility = 'public'
     seedOrg = false
@@ -165,6 +171,16 @@ describe('POST /api/v1/tasks/[id]/deliver auth', () => {
     const response = await POST(deliverRequest(token), { params: { id: TASK_ID } })
     expect(response.status).toBe(409)
     expect(taskWriteCount + transactionWriteCount).toBe(0)
+    expect(fireWebhooks).not.toHaveBeenCalled()
+  })
+
+  it('rejects delivery when the held Stripe transaction belongs to another agent', async () => {
+    transactionRows[0].agent_id = OTHER_AGENT_ID
+    const token = await signToken({ agent_id: ASSIGNED_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(deliverRequest(token), { params: { id: TASK_ID } })
+    expect(response.status).toBe(409)
+    expect(taskWriteCount + transactionWriteCount).toBe(0)
+    expect(auditLog).not.toHaveBeenCalled()
     expect(fireWebhooks).not.toHaveBeenCalled()
   })
 

@@ -11,7 +11,14 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
   const db = getSupabase()
 
-  const { data: bid } = await db.from('bids').select('*').eq('id', params.id).single()
+  const { data: bid, error: bidError } = await db
+    .from('bids')
+    .select('id,task_id')
+    .eq('id', params.id)
+    .single()
+  if (bidError && bidError.code !== 'PGRST116') {
+    return NextResponse.json({ error: 'Bid could not be loaded' }, { status: 500 })
+  }
   if (!bid) return NextResponse.json({ error: 'Bid not found' }, { status: 404 })
 
   // Verify caller is buyer of this task OR admin
@@ -21,47 +28,38 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ error: 'Forbidden — only the task buyer can accept bids' }, { status: 403 })
   }
 
-  // A task can be quarantined after bids already exist (e.g. reported
-  // post-publish) — moderation must freeze the whole transaction from
-  // there, not just block new bids. Re-checked here even though POST
-  // /bids already gated submission, since that check was only true at
-  // submission time, not now.
-  const { data: taskModeration } = await db.from('tasks').select('moderation_status').eq('id', bid.task_id).single()
-  if (!taskModeration || taskModeration.moderation_status !== 'approved') {
-    return NextResponse.json({ error: 'This task is not available — it is pending review' }, { status: 409 })
+  // The database locks the task first, then selects exactly one still-pending
+  // bid. Task assignment and all bid statuses either commit together or roll
+  // back together. Re-accepting a bid after funding or changing the payee is
+  // therefore impossible even under concurrent requests.
+  const { data, error } = await db.rpc('accept_task_bid', {
+    p_bid_id: params.id,
+    p_expected_task_id: bid.task_id,
+  })
+  if (error) {
+    if (error.code === 'P0002') return NextResponse.json({ error: 'Bid or task not found' }, { status: 404 })
+    if (error.code === 'P0001' || error.code === '23505') {
+      return NextResponse.json({ error: 'This bid can no longer be selected for the current task state' }, { status: 409 })
+    }
+    return NextResponse.json({ error: 'Bid selection could not be recorded' }, { status: 500 })
   }
+  const accepted = Array.isArray(data) ? data[0] : data
+  if (!accepted) return NextResponse.json({ error: 'Bid selection was not confirmed' }, { status: 500 })
 
-  // Record selection time only. The delivery SLA begins when Stripe
-  // confirms funding and the task moves assigned -> in_progress.
-  const assignedAt = new Date()
-
-  // Try the full update (with SLA columns); fall back gracefully if the
-  // migration hasn't been applied yet so bid acceptance never breaks.
-  const { error: taskUpdateErr } = await db.from('tasks').update({
-    status: 'assigned',
-    assigned_agent_id: bid.agent_id,
-    assigned_at: assignedAt.toISOString(),
-    delivery_deadline_at: null,
-  }).eq('id', bid.task_id)
-
-  if (taskUpdateErr) {
-    await db.from('tasks').update({ status: 'assigned', assigned_agent_id: bid.agent_id }).eq('id', bid.task_id)
-  }
-
-  await Promise.all([
-    db.from('bids').update({ status: 'accepted' }).eq('id', params.id),
-    db.from('bids').update({ status: 'rejected' }).eq('task_id', bid.task_id).neq('id', params.id),
-  ])
-
-  await auditLog({ action: 'bid_accepted', resource_type: 'bid', resource_id: params.id, details: { task_id: bid.task_id, agent_id: bid.agent_id } })
+  await auditLog({ action: 'bid_accepted', resource_type: 'bid', resource_id: params.id, details: { task_id: accepted.task_id, agent_id: accepted.agent_id } })
   // Third-party developer webhooks never learn a private agent's identity
   // — see frontend/lib/server/agentVisibility.ts. The audit log above is
   // internal, not public distribution, and keeps the real agent_id.
   fireWebhooks('bid.accepted', {
     bid_id: params.id,
-    task_id: bid.task_id,
-    price_eur: bid.price_eur,
-    ...(await agentIdentityForWebhook(db, bid.agent_id)),
+    task_id: accepted.task_id,
+    price_eur: accepted.price_eur,
+    ...(await agentIdentityForWebhook(db, accepted.agent_id)),
   })
-  return NextResponse.json({ id: params.id, status: 'accepted', task_status: 'assigned' })
+  return NextResponse.json({
+    id: accepted.bid_id,
+    status: 'accepted',
+    task_status: accepted.task_status,
+    assigned_at: accepted.assigned_at,
+  })
 }

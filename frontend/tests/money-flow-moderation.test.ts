@@ -31,7 +31,7 @@ resetAccountRetrieveResult()
 let existingTxRow: Record<string, unknown> | null = null
 
 const stripeAccountsRetrieve = vi.fn(async () => accountRetrieveResult)
-const stripePaymentIntentsCreate = vi.fn(async () => ({ id: 'pi_test_123', client_secret: 'secret_test' }))
+const stripePaymentIntentsCreate = vi.fn(async (_params?: unknown, _options?: unknown) => ({ id: 'pi_test_123', client_secret: 'secret_test' }))
 const stripePaymentIntentsRetrieve = vi.fn(async () => ({ status: 'requires_payment_method', payment_method_types: ['card'], client_secret: 'secret_existing_pending' }))
 const stripePaymentIntentsCancel = vi.fn(async () => ({}))
 
@@ -50,7 +50,31 @@ vi.mock('stripe', () => ({
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
+    async rpc(name: string, args: Record<string, any>) {
+      if (name === 'accept_task_bid') {
+        if (taskModerationStatus !== 'approved') return { data: null, error: { code: 'P0001' } }
+        taskUpdates.push({ status: 'assigned', assigned_at: '2026-09-01T00:00:00.000Z', delivery_deadline_at: null })
+        return { data: [{ bid_id: BID_ID, task_id: TASK_ID, agent_id: 'agent-1', price_eur: 50, delivery_hours: 24, task_status: 'assigned', assigned_at: '2026-09-01T00:00:00.000Z' }], error: null }
+      }
+      if (name === 'claim_task_payment') {
+        const tx = existingTxRow
+        return { data: [{
+          transaction_id: tx?.id ?? 'tx-fake-1',
+          payment_attempt_key: 'attempt-key-1',
+          stripe_payment_intent_id: tx?.stripe_payment_intent_id ?? null,
+          escrow_status: tx?.escrow_status ?? 'pending',
+          payment_method: args.p_payment_method,
+          gross_amount_eur: tx?.gross_amount_eur ?? args.p_gross_amount_eur,
+          platform_fee_eur: tx?.platform_fee_eur ?? args.p_platform_fee_eur,
+          processing_deduction_eur: tx?.stripe_fee_eur ?? args.p_processing_deduction_eur,
+          agent_payout_eur: tx?.agent_payout_eur ?? args.p_agent_payout_eur,
+          created: !tx,
+        }], error: null }
+      }
+      throw new Error(`unexpected rpc ${name}`)
+    },
     from(table: string) {
+      let pendingUpdate: Record<string, unknown> | null = null
       const builder: Record<string, any> = {
         select: () => builder,
         eq: () => builder,
@@ -59,8 +83,10 @@ vi.mock('@/lib/server/supabase', () => ({
         order: () => builder,
         limit: () => builder,
         insert: () => builder,
+        is: () => builder,
         maybeSingle: async () => {
           if (table === 'bids') return { data: bidRow, error: null }
+          if (table === 'transactions' && pendingUpdate) return { data: { id: existingTxRow?.id ?? 'tx-fake-1' }, error: null }
           if (table === 'transactions') return { data: existingTxRow, error: null }
           return { data: null, error: null }
         },
@@ -86,6 +112,7 @@ vi.mock('@/lib/server/supabase', () => ({
           return { data: null, error: null }
         },
         update: (values: Record<string, unknown>) => {
+          pendingUpdate = values
           if (table === 'tasks') taskUpdates.push(values)
           if (table === 'agents') agentUpdates.push(values)
           return builder
@@ -105,6 +132,7 @@ vi.mock('@/lib/server/settings', () => ({ getPlatformFeePercent: vi.fn(async () 
 vi.mock('@/lib/server/paymentState', () => ({ reconcilePaymentIntent: vi.fn(async () => 'requires_action') }))
 
 beforeEach(() => {
+  bidRow.delivery_hours = 24
   taskModerationStatus = 'approved'
   agentStripeOnboardingCompleted = true
   acceptedBidAgentVisibility = 'public'
@@ -256,6 +284,14 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
 
     expect(response.status).toBe(201)
     expect(stripePaymentIntentsCreate).toHaveBeenCalled()
+  })
+
+  it('rejects an invalid accepted-bid SLA before claiming or creating a Stripe payment', async () => {
+    bidRow.delivery_hours = 0
+    const response = await fundRequest('card')()
+    expect(response.status).toBe(409)
+    expect(stripeAccountsRetrieve).not.toHaveBeenCalled()
+    expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
   })
 
   it('creates the PaymentIntent and syncs the DB flag to true when stripe_onboarding_completed is stored false but the account is actually ready', async () => {

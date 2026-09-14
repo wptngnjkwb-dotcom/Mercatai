@@ -6,6 +6,7 @@ process.env.JWT_SECRET_KEY = 'test-secret-for-hire-moderation-32-chars!'
 const insertedTasks: Record<string, unknown>[] = []
 const insertedBids: Record<string, unknown>[] = []
 const insertedOrgs: Record<string, unknown>[] = []
+const rpcCalls: { name: string; args: Record<string, unknown> }[] = []
 
 const listingRow = {
   id: 'listing-1',
@@ -22,6 +23,16 @@ const listingRow = {
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
+    async rpc(name: string, args: Record<string, unknown>) {
+      rpcCalls.push({ name, args })
+      return { data: [{
+        task_id: 'task-1', buyer_org_id: 'org-1', agent_id: 'agent-1',
+        task_title: listingRow.title, price_eur: listingRow.price_eur,
+        delivery_hours: listingRow.delivery_hours,
+        agent_display_name: listingRow.agents.display_name,
+        assigned_at: '2026-09-01T00:00:00.000Z',
+      }], error: null }
+    },
     from(table: string) {
       let insertedRow: Record<string, unknown> | null = null
       const builder: Record<string, any> = {
@@ -60,6 +71,7 @@ beforeEach(() => {
   insertedTasks.length = 0
   insertedBids.length = 0
   insertedOrgs.length = 0
+  rpcCalls.length = 0
 })
 
 describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
@@ -74,15 +86,15 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     const body = await response.json()
 
     expect(response.status).toBe(201)
-    expect(insertedTasks).toHaveLength(1)
-    // Before the fix, moderation_status was absent here entirely, so the
-    // row defaulted to 'pending' in the database despite this 201 response
-    // and the accepted bid created below telling the buyer it was live.
-    expect(insertedTasks[0]).toMatchObject({ moderation_status: 'approved' })
-    expect(insertedTasks[0]).toMatchObject({ assigned_at: expect.any(String), delivery_deadline_at: null })
-    expect(insertedTasks[0]).toHaveProperty('published_at')
-    expect((insertedTasks[0] as any).published_at).not.toBeNull()
-    expect(insertedBids).toHaveLength(1)
+    expect(rpcCalls).toHaveLength(1)
+    expect(rpcCalls[0]).toMatchObject({ name: 'create_store_hire', args: {
+      p_listing_id: 'listing-1', p_expected_agent_id: 'agent-1',
+      p_moderation_policy_version: expect.any(String),
+    } })
+    // Organization, approved task, accepted bid and counter are created
+    // inside this single transaction rather than independent app writes.
+    expect(insertedTasks).toHaveLength(0)
+    expect(insertedBids).toHaveLength(0)
     expect(body).toHaveProperty('task_id')
     expect(body.delivery_deadline_at).toBeNull()
   })
@@ -118,8 +130,8 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     })
     const response = await POST(request, { params: { listingId: 'listing-1' } })
     expect(response.status).toBe(201)
-    expect(insertedOrgs).toHaveLength(1)
-    expect(insertedOrgs[0]).toMatchObject({ name: 'Mercatai Sample Briefs' })
+    expect(insertedOrgs).toHaveLength(0)
+    expect(rpcCalls[0]).toMatchObject({ args: { p_org_name: 'Mercatai Sample Briefs' } })
   })
 })
 

@@ -29,6 +29,16 @@ export async function POST(request: NextRequest, { params }: { params: { listing
 
     const body = await request.json().catch(() => ({}))
     const { details, org_name, buyer_email } = body
+    if (details !== undefined && (typeof details !== 'string' || details.trim().length > 50000)) {
+      return NextResponse.json({ error: 'details must be text up to 50,000 characters' }, { status: 400 })
+    }
+    if (org_name !== undefined && (typeof org_name !== 'string' || org_name.trim().length > 200)) {
+      return NextResponse.json({ error: 'org_name must be text up to 200 characters' }, { status: 400 })
+    }
+    const normalizedBuyerEmail = typeof buyer_email === 'string' ? buyer_email.trim().toLowerCase() : null
+    if (buyer_email !== undefined && (!normalizedBuyerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedBuyerEmail))) {
+      return NextResponse.json({ error: 'buyer_email must be a valid email address' }, { status: 400 })
+    }
 
     const db = getSupabase()
 
@@ -74,117 +84,60 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       }, { status: moderation.decision === 'quarantine' ? 202 : 422 })
     }
 
-    // Buyer organization — same identity rule as POST /tasks: org_name is
-    // a free-text display label, never an identity lookup key, and
-    // buyer_token stays scoped to the single task it was issued for (it's
-    // emailed in plain text, so trusting it to authorize posting under the
-    // org more broadly would widen a leaked email's blast radius past what
-    // its holder should expect). Every hire gets a brand new organization
-    // row, even on a name collision — see the comment in POST /tasks.
-    const orgName = org_name || 'anonymous'
-    const { data: newOrg, error: orgErr } = await db
-      .from('organizations')
-      .insert({ name: orgName, verification_level: 'anonymous' })
-      .select('id')
-      .single()
-    if (orgErr) throw orgErr
-    const orgId: string = newOrg.id
-
-    const assignedAt = new Date()
-
-    // Task is born assigned — no bidding window
-    const taskInsert = {
-      posted_by_org_id: orgId,
-      title: listing.title,
-      description: details
-        ? `${listing.description}\n\n--- Buyer brief ---\n${details}`
-        : listing.description,
-      category: listing.category || 'research',
-      budget_min_eur: listing.price_eur,
-      budget_max_eur: listing.price_eur,
-      deadline_hours: listing.delivery_hours,
-      status: 'assigned',
-      assigned_agent_id: listing.agent_id,
-      ...(buyer_email ? { buyer_email } : {}),
-      // Already passed the moderation gate above (the only decisions that
-      // reach this line are allow/allow_with_warning) — persist that, or
-      // the row defaults to moderation_status='pending' and every other
-      // endpoint hides a task this one just told the buyer was live.
-      moderation_status: 'approved',
-      moderation_risk_score: moderation.riskScore,
-      moderation_reason_codes: moderation.reasonCodes,
-      moderation_policy_version: moderation.policyVersion,
-      moderated_at: new Date().toISOString(),
-      moderated_by: 'system:auto',
-      published_at: new Date().toISOString(),
-    }
-
-    let task: any
-    {
-      // SLA columns may not be migrated everywhere — mirror the fallback in bid accept
-      const { data, error } = await db
-        .from('tasks')
-        .insert({ ...taskInsert, assigned_at: assignedAt.toISOString(), delivery_deadline_at: null })
-        .select()
-        .single()
-      if (error) {
-        const { data: retry, error: retryErr } = await db.from('tasks').insert(taskInsert).select().single()
-        if (retryErr) throw retryErr
-        task = retry
-      } else {
-        task = data
-      }
-    }
-
-    // Record the transaction shape downstream code expects: an accepted bid
-    await db.from('bids').insert({
-      task_id: task.id,
-      agent_id: listing.agent_id,
-      price_eur: listing.price_eur,
-      delivery_hours: listing.delivery_hours,
-      approach_summary: `Instant hire via Agent Store listing "${listing.title}"`,
-      score: 1,
-      status: 'accepted',
+    // Organization + assigned task + accepted bid + listing counter are one
+    // transaction. A downstream payment can never see a half-created hire.
+    const { data: hireData, error: hireError } = await db.rpc('create_store_hire', {
+      p_listing_id: listing.id,
+      p_expected_agent_id: listing.agent_id,
+      p_org_name: typeof org_name === 'string' ? org_name.trim() : 'anonymous',
+      p_buyer_email: normalizedBuyerEmail,
+      p_buyer_details: typeof details === 'string' ? details.trim() : null,
+      p_moderation_risk_score: moderation.riskScore,
+      p_moderation_reason_codes: moderation.reasonCodes,
+      p_moderation_policy_version: moderation.policyVersion,
     })
-
-    await db
-      .from('agent_listings')
-      .update({ hires_count: (listing.hires_count ?? 0) + 1 })
-      .eq('id', listing.id)
+    if (hireError) {
+      if (hireError.code === 'P0001') return NextResponse.json({ error: 'Listing can no longer be hired' }, { status: 409 })
+      if (hireError.code === 'P0002') return NextResponse.json({ error: 'Listing not found or inactive' }, { status: 404 })
+      throw hireError
+    }
+    const task = Array.isArray(hireData) ? hireData[0] : hireData
+    if (!task?.task_id || !task?.buyer_org_id) throw new Error('Instant hire was not confirmed')
+    const orgId: string = task.buyer_org_id
 
     const buyerToken = await signToken(
-      { role: 'buyer', task_id: task.id, org_id: orgId, ...(buyer_email ? { buyer_email } : {}) },
+      { role: 'buyer', task_id: task.task_id, org_id: orgId, ...(normalizedBuyerEmail ? { buyer_email: normalizedBuyerEmail } : {}) },
       '30d'
     )
 
     await auditLog({
       action: 'instant_hire',
       resource_type: 'task',
-      resource_id: task.id,
+      resource_id: task.task_id,
       agent_id: listing.agent_id,
       details: { listing_id: listing.id, price_eur: listing.price_eur },
       ip_address: request.headers.get('x-forwarded-for') ?? undefined,
     })
     fireWebhooks('bid.accepted', {
-      task_id: task.id,
+      task_id: task.task_id,
       ...(await agentIdentityForWebhook(db, listing.agent_id)),
       price_eur: listing.price_eur,
     })
 
-    if (buyer_email && typeof buyer_email === 'string' && buyer_email.includes('@')) {
+    if (normalizedBuyerEmail) {
       sendTaskCreated({
-        to: buyer_email,
-        taskTitle: task.title,
-        taskId: task.id,
+        to: normalizedBuyerEmail,
+        taskTitle: task.task_title,
+        taskId: task.task_id,
         buyerToken,
         budgetMax: listing.price_eur,
       }).catch(console.error)
     }
 
     return NextResponse.json({
-      task_id: task.id,
+      task_id: task.task_id,
       buyer_org_id: orgId,
-      agent: (listing.agents as any).display_name,
+      agent: task.agent_display_name,
       price_eur: listing.price_eur,
       delivery_deadline_at: null,
       buyer_token: buyerToken,

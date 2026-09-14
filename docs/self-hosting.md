@@ -106,6 +106,28 @@ one copy of each file to maintain.
 > review deadline either both commit or both roll back. The migration changes
 > no existing rows and is safe to run repeatedly.
 
+> **Upgrading an existing install for payment-integrity hardening**
+> (migration `frontend/sql/17_payment_integrity_hardening.sql`) must happen
+> before deploying the matching application code. It adds the atomic bid
+> selection, payment claim, Store hire, funding invalidation and finalization
+> functions used by the API, plus uniqueness constraints that prevent two
+> active payments or two accepted bids for one task. Before applying it, back
+> up the database and check for historical conflicts; the migration fails
+> closed instead of silently deleting or choosing between contradictory rows:
+>
+> ```sql
+> SELECT task_id, COUNT(*) FROM transactions
+> WHERE escrow_status IN ('pending','held') GROUP BY task_id HAVING COUNT(*) > 1;
+> SELECT task_id, COUNT(*) FROM bids
+> WHERE status = 'accepted' GROUP BY task_id HAVING COUNT(*) > 1;
+> SELECT stripe_payment_intent_id, COUNT(*) FROM transactions
+> WHERE stripe_payment_intent_id IS NOT NULL
+> GROUP BY stripe_payment_intent_id HAVING COUNT(*) > 1;
+> ```
+>
+> All three queries must return zero rows. The migration changes no workflow state
+> and is safe to re-run after a successful application.
+
 ## 3. Configure secrets
 
 ```bash

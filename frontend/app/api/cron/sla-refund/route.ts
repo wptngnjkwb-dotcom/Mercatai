@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
-import { applyReputationEvent } from '@/lib/server/reputation'
 
 /**
  * SLA deadline guarantee — Vercel Cron (hourly).
@@ -46,43 +45,39 @@ export async function GET(request: NextRequest) {
 
   for (const tx of overdue) {
     try {
+      if (!process.env.STRIPE_SECRET_KEY) throw new Error('Stripe is not configured')
+      if (!tx.stripe_payment_intent_id?.startsWith('pi_')) throw new Error('Held transaction has no valid Stripe payment reference')
       // Cancel an uncaptured card authorization; refund an already settled
       // SEPA debit (automatic-capture intents cannot be canceled).
-      if (process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
-        const Stripe = (await import('stripe')).default
-        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-        const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
-        if (intent.status === 'succeeded') {
-          await stripe.refunds.create({
-            payment_intent: tx.stripe_payment_intent_id,
-            reverse_transfer: true,
-            refund_application_fee: true,
-          })
-        } else {
-          await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id)
-        }
+      const Stripe = (await import('stripe')).default
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
+      const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+      if (intent.status === 'succeeded') {
+        await stripe.refunds.create({
+          payment_intent: tx.stripe_payment_intent_id,
+          reverse_transfer: true,
+          refund_application_fee: true,
+        }, { idempotencyKey: `mercatai-sla-refund-${tx.id}` })
+      } else if (intent.status === 'requires_capture') {
+        await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id)
+      } else if (intent.status === 'canceled') {
+        // Previous cron attempt may have completed the Stripe cancellation
+        // but failed its DB commit; finalize that same outcome below.
+      } else {
+        throw new Error(`Stripe payment cannot be refunded from status ${intent.status}`)
       }
 
-      await db.from('transactions').update({ escrow_status: 'refunded' }).eq('id', tx.id)
-      await db.from('tasks').update({ status: 'cancelled' }).eq('id', tx.task_id)
-
-      // Penalize the agent's reputation for the missed deadline
-      const agentId = tx.tasks?.assigned_agent_id
-      if (agentId) {
-        await applyReputationEvent(agentId, 'task_failed', tx.task_id).catch(() => {})
-      }
-
-      await auditLog({
-        action: 'sla_auto_refund',
-        resource_type: 'transaction',
-        resource_id: tx.id,
-        details: {
-          task_id: tx.task_id,
-          gross_amount_eur: tx.gross_amount_eur,
-          reason: 'delivery_deadline_missed',
-          deadline: tx.tasks?.delivery_deadline_at,
-        },
+      const { data: finalizedData, error: finalizedError } = await db.rpc('finalize_task_refund', {
+        p_task_id: tx.task_id,
+        p_transaction_id: tx.id,
+        p_outcome: 'sla_missed',
+        p_reason: 'delivery_deadline_missed',
       })
+      if (finalizedError) throw finalizedError
+      const finalized = Array.isArray(finalizedData) ? finalizedData[0] : finalizedData
+      if (!finalized || finalized.task_status !== 'cancelled' || finalized.transaction_status !== 'refunded') {
+        throw new Error('SLA refund finalization was not confirmed')
+      }
 
       results.push({ transaction_id: tx.id, task_id: tx.task_id, status: 'refunded' })
     } catch (err) {

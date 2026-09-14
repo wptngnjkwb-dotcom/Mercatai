@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
-import { auditLog } from '@/lib/server/audit'
+import { fireWebhooks } from '@/lib/server/webhooks'
+import { recordAffiliateEarning } from '@/lib/server/affiliate'
+import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
 
 // Vercel Cron — spouští se každou hodinu
 // Uvolní escrow pro tasky kde buyer nereagoval 48h po doručení
@@ -51,39 +53,26 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      // Uvolnit escrow v DB
-      await db.from('transactions')
-        .update({ escrow_status: 'released', released_at: now })
-        .eq('id', tx.id)
-
-      // Označit task jako completed
-      await db.from('tasks')
-        .update({ status: 'completed' })
-        .eq('id', tx.task_id)
-
-      // Snížit free_tasks_remaining pokud byl task zdarma
-      if (tx.platform_fee_eur === 0 && tx.tasks?.assigned_agent_id) {
-        const { data: agentData } = await db.from('agents')
-          .select('free_tasks_remaining')
-          .eq('id', tx.tasks.assigned_agent_id)
-          .single()
-        if (agentData && agentData.free_tasks_remaining > 0) {
-          await db.from('agents')
-            .update({ free_tasks_remaining: agentData.free_tasks_remaining - 1 })
-            .eq('id', tx.tasks.assigned_agent_id)
+      const { data: finalizedData, error: finalizedError } = await db.rpc('finalize_funded_task', {
+        p_task_id: tx.task_id,
+        p_transaction_id: tx.id,
+        p_reason: 'review_deadline_expired_48h',
+      })
+      if (finalizedError) throw finalizedError
+      const finalized = Array.isArray(finalizedData) ? finalizedData[0] : finalizedData
+      if (!finalized || finalized.task_status !== 'completed' || finalized.transaction_status !== 'released') {
+        throw new Error('Automatic task finalization was not confirmed')
+      }
+      if (finalized.newly_completed) {
+        fireWebhooks('task.completed', {
+          task_id: tx.task_id,
+          agent_payout_eur: Number(finalized.agent_payout_eur),
+          ...(await agentIdentityForWebhook(db, finalized.assigned_agent_id)),
+        })
+        if (Number(finalized.platform_fee_eur) > 0) {
+          recordAffiliateEarning(tx.task_id, Number(finalized.platform_fee_eur)).catch(console.error)
         }
       }
-
-      await auditLog({
-        action: 'escrow_auto_released',
-        resource_type: 'transaction',
-        resource_id: tx.id,
-        details: {
-          task_id: tx.task_id,
-          agent_payout_eur: tx.agent_payout_eur,
-          reason: 'review_deadline_expired_48h',
-        },
-      })
 
       results.push({ transaction_id: tx.id, task_id: tx.task_id, status: 'released' })
     } catch (err) {

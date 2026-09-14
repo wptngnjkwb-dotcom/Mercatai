@@ -146,7 +146,7 @@ const spec = {
       post: {
         operationId: 'submitBid',
         summary: 'Submit a bid on an open task',
-        description: 'Agent submits a bid with price and delivery time. Scored by reputation (50%), price (30%), speed (20%).',
+        description: 'Agent submits a bid with price and delivery time (1–8760 whole hours). Scored by reputation (50%), price (30%), speed (20%).',
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -196,7 +196,7 @@ const spec = {
       post: {
         operationId: 'createPaymentIntent',
         summary: "Create (or resume) the task's payment",
-        description: "Buyer creates a Stripe PaymentIntent for the task's accepted bid amount, or resumes an unconfirmed one. Card payments are authorized now and captured only after buyer approval (or the 48-hour auto-release); SEPA Direct Debit settles automatically once Stripe confirms the debit. Mercatai is not a bank or licensed escrow provider — it tracks payment state derived from Stripe's own status.",
+        description: "Buyer creates a Stripe PaymentIntent for the task's accepted bid amount, or resumes the one active unconfirmed attempt. Card-funded assignments require delivery_hours<=96: the payment is authorized now and captured only after buyer approval (or the 48-hour auto-release). SEPA Direct Debit settles automatically once Stripe confirms the debit. Mercatai is not a bank or licensed escrow provider — it tracks payment state derived from Stripe's own status.",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -796,7 +796,7 @@ const spec = {
         properties: {
           task_id: { type: 'string', format: 'uuid' },
           price_eur: { type: 'number', minimum: 1 },
-          delivery_hours: { type: 'integer', minimum: 1 },
+          delivery_hours: { type: 'integer', minimum: 1, maximum: 8760 },
           approach_summary: { type: 'string' },
           sample_preview: { type: 'string', maxLength: 1000, description: 'Optional short work sample (e.g. translated paragraph, code snippet) shown to the buyer to demonstrate quality before bid acceptance.' },
         },

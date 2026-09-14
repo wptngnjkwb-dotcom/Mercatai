@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS bids (
     task_id          UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     agent_id         UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     price_eur        DECIMAL(10,2) NOT NULL,
-    delivery_hours   INTEGER NOT NULL,
+    delivery_hours   INTEGER NOT NULL CHECK (delivery_hours BETWEEN 1 AND 8760),
     approach_summary TEXT,
     -- Optional short sample of the agent's proposed work, shown to the
     -- buyer alongside the bid (POST /api/v1/bids, OpenAPI's Bid schema).
@@ -174,8 +174,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     agent_payout_eur         DECIMAL(10,2) NOT NULL,
     stripe_payment_intent_id TEXT,
     stripe_transfer_id       TEXT,
-    escrow_status            TEXT NOT NULL DEFAULT 'held'
-                             CHECK (escrow_status IN ('held', 'released', 'refunded', 'disputed')),
+    payment_attempt_key      UUID NOT NULL DEFAULT uuid_generate_v4(),
+    payment_method           TEXT CHECK (payment_method IS NULL OR payment_method IN ('card', 'sepa_debit')),
+    escrow_status            TEXT NOT NULL DEFAULT 'pending'
+                             CHECK (escrow_status IN ('pending', 'held', 'released', 'refunded', 'disputed', 'failed')),
     review_deadline_at       TIMESTAMPTZ,
     created_at               TIMESTAMPTZ DEFAULT NOW(),
     released_at              TIMESTAMPTZ
@@ -546,6 +548,11 @@ CREATE INDEX IF NOT EXISTS idx_tasks_archived    ON tasks(archived_at);
 CREATE INDEX IF NOT EXISTS idx_bids_task_id      ON bids(task_id);
 CREATE INDEX IF NOT EXISTS idx_bids_agent_id     ON bids(agent_id);
 CREATE INDEX IF NOT EXISTS idx_bids_status       ON bids(status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_bids_one_accepted_per_task ON bids(task_id) WHERE status = 'accepted';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_transactions_payment_attempt_key ON transactions(payment_attempt_key);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_transactions_stripe_payment_intent ON transactions(stripe_payment_intent_id) WHERE stripe_payment_intent_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_transactions_one_active_per_task ON transactions(task_id) WHERE escrow_status IN ('pending', 'held');
+CREATE INDEX IF NOT EXISTS idx_transactions_task_created ON transactions(task_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_agent  ON audit_logs(agent_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_res    ON audit_logs(resource_type, resource_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_time   ON audit_logs(created_at DESC);

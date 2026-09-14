@@ -8,17 +8,23 @@ const HOURS_TO_MS = 60 * 60 * 1000
 
 async function ensureFundedTaskStarted(
   db: ReturnType<typeof getSupabase>,
-  tx: { id: string; task_id: string },
+  tx: { id: string; task_id: string; agent_id: string; buyer_org_id: string },
   intent: Stripe.PaymentIntent,
   eventType?: string,
 ): Promise<void> {
   const { data: task, error: taskError } = await db
     .from('tasks')
-    .select('id,status,delivery_deadline_at')
+    .select('id,status,delivery_deadline_at,assigned_agent_id,posted_by_org_id,archived_at,moderation_status,organizations!posted_by_org_id(is_platform_seed)')
     .eq('id', tx.task_id)
     .maybeSingle()
   if (taskError) throw taskError
   if (!task) throw new Error('Funded transaction has no task')
+  if (task.archived_at || task.moderation_status !== 'approved' || (task.organizations as any)?.is_platform_seed === true) {
+    throw new Error('Funded transaction belongs to an unavailable task')
+  }
+  if (task.assigned_agent_id !== tx.agent_id || task.posted_by_org_id !== tx.buyer_org_id) {
+    throw new Error('Funded transaction does not match task assignment')
+  }
 
   // A later workflow state proves the assigned -> in_progress transition
   // already happened. An exact in_progress state is likewise idempotent.
@@ -88,7 +94,7 @@ export async function reconcilePaymentIntent(
   const db = getSupabase()
   const { data: tx, error: txReadError } = await db
     .from('transactions')
-    .select('id, task_id, escrow_status')
+    .select('id, task_id, agent_id, buyer_org_id, escrow_status')
     .eq('stripe_payment_intent_id', intent.id)
     .maybeSingle()
   if (txReadError) throw txReadError
@@ -126,25 +132,28 @@ export async function reconcilePaymentIntent(
     await ensureFundedTaskStarted(db, tx, intent, eventType)
   }
 
-  const failed = intent.status === 'canceled' || eventType === 'payment_intent.payment_failed'
-  if (failed && tx.escrow_status === 'pending') {
-    const { data: updated, error: txUpdateError } = await db
-      .from('transactions')
-      .update({ escrow_status: 'failed' })
-      .eq('id', tx.id)
-      .eq('escrow_status', 'pending')
-      .select('id')
-      .maybeSingle()
-    if (txUpdateError) throw txUpdateError
-
-    if (updated) {
-      await auditLog({
-        action: 'payment_failed',
-        resource_type: 'transaction',
-        resource_id: tx.id,
-        details: { task_id: tx.task_id, stripe_id: intent.id, stripe_status: intent.status, event_type: eventType },
-      })
+  // eventType alone is not a source of truth: Stripe can deliver an old
+  // payment_failed event after a later success. The webhook route retrieves
+  // the current PaymentIntent before calling us, so only its current state
+  // decides whether execution must be stopped.
+  const failed = intent.status === 'canceled'
+    || (eventType === 'payment_intent.payment_failed' && !funded && intent.status !== 'processing')
+  if (failed && (tx.escrow_status === 'pending' || tx.escrow_status === 'held')) {
+    const { data: invalidated, error: invalidationError } = await db.rpc('invalidate_task_funding', {
+      p_transaction_id: tx.id,
+      p_task_id: tx.task_id,
+    })
+    if (invalidationError) throw invalidationError
+    const invalidation = Array.isArray(invalidated) ? invalidated[0] : invalidated
+    if (invalidation?.transaction_status !== 'failed') {
+      throw new Error('Failed payment invalidation was not confirmed')
     }
+    await auditLog({
+      action: 'payment_failed',
+      resource_type: 'transaction',
+      resource_id: tx.id,
+      details: { task_id: tx.task_id, stripe_id: intent.id, stripe_status: intent.status, event_type: eventType },
+    })
   }
 
   return stripeState(intent)
