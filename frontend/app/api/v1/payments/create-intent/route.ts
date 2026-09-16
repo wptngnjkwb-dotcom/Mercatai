@@ -212,7 +212,7 @@ export async function POST(request: NextRequest) {
       const canReuse = existingMethod === paymentMethod && existingIntent.status !== 'canceled'
 
       if (canReuse && existingIntent.client_secret) {
-        const paymentState = await reconcilePaymentIntent(existingIntent)
+        const paymentState = await reconcilePaymentIntent(existingIntent, undefined, stripe)
         if (paymentState === 'authorized') {
           return NextResponse.json({ error: 'Payment is already funded', transaction_id: paymentTx.transaction_id }, { status: 409 })
         }
@@ -234,7 +234,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (existingIntent.status === 'canceled') {
-        await reconcilePaymentIntent(existingIntent)
+        await reconcilePaymentIntent(existingIntent, undefined, stripe)
         return NextResponse.json({ error: 'Previous payment was canceled. Retry to create a new payment attempt.' }, { status: 409 })
       }
       return NextResponse.json({ error: `Existing payment is ${existingIntent.status}; it cannot be replaced` }, { status: 409 })

@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     stripe_fee_eur           DECIMAL(10,2) NOT NULL,
     agent_payout_eur         DECIMAL(10,2) NOT NULL,
     stripe_payment_intent_id TEXT,
+    stripe_charge_id         TEXT,
     stripe_transfer_id       TEXT,
     payment_attempt_key      UUID NOT NULL DEFAULT uuid_generate_v4(),
     payment_method           TEXT CHECK (payment_method IS NULL OR payment_method IN ('card', 'sepa_debit')),
@@ -508,6 +509,74 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================
+-- payment_disputes — minimal, safe monitoring for charge.dispute.*
+-- events on the MAIN payment webhook (/api/v1/payments/stripe-webhook),
+-- not the Connect webhook. Observation and alerting only — never moves
+-- money, never reverses a transfer, never issues a refund. Never stores
+-- card data: only the dispute's id, status, reason (a Stripe enum),
+-- amount, and currency. admin_alert_* mirrors
+-- stripe_connect_payouts.admin_alert_* exactly (same claim/lease/frozen-
+-- payload semantics) — see frontend/sql/18_payment_charge_identity_and_
+-- disputes.sql and frontend/lib/server/paymentDisputes.ts.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payment_disputes (
+    id                            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    stripe_dispute_id             TEXT NOT NULL UNIQUE,
+    stripe_charge_id              TEXT,
+    stripe_payment_intent_id      TEXT,
+    transaction_id                UUID REFERENCES transactions(id) ON DELETE SET NULL,
+    status                        TEXT NOT NULL,
+    reason                        TEXT,
+    amount_minor                  BIGINT NOT NULL,
+    currency                      TEXT NOT NULL,
+    admin_alert_status            TEXT NOT NULL DEFAULT 'pending'
+                                   CHECK (admin_alert_status IN ('pending', 'sending', 'sent', 'failed')),
+    admin_alert_claim_token       UUID,
+    admin_alert_claimed_at        TIMESTAMPTZ,
+    admin_alert_sent_at           TIMESTAMPTZ,
+    admin_alert_attempts          INTEGER NOT NULL DEFAULT 0,
+    admin_alert_payload_snapshot  JSONB,
+    admin_alert_provider_id       TEXT,
+    last_alert_error              TEXT,
+    created_at                    TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION claim_dispute_admin_alert(
+    p_dispute_row_id UUID,
+    p_lease_seconds INTEGER DEFAULT 300,
+    p_payload_snapshot JSONB DEFAULT NULL
+) RETURNS TABLE (claim_token UUID, attempt_count INTEGER, payload_snapshot JSONB) AS $$
+DECLARE
+    v_token UUID := uuid_generate_v4();
+    v_attempts INTEGER;
+    v_snapshot JSONB;
+BEGIN
+    UPDATE payment_disputes d
+    SET admin_alert_status = 'sending',
+        admin_alert_claimed_at = NOW(),
+        admin_alert_claim_token = v_token,
+        admin_alert_attempts = d.admin_alert_attempts + 1,
+        admin_alert_payload_snapshot = COALESCE(d.admin_alert_payload_snapshot, p_payload_snapshot)
+    WHERE d.id = p_dispute_row_id
+      AND (
+          d.admin_alert_status IN ('pending', 'failed')
+          OR (d.admin_alert_status = 'sending' AND d.admin_alert_claimed_at < NOW() - (p_lease_seconds || ' seconds')::interval)
+      )
+    RETURNING d.admin_alert_attempts, d.admin_alert_payload_snapshot INTO v_attempts, v_snapshot;
+
+    IF v_attempts IS NOT NULL THEN
+        RETURN QUERY SELECT v_token, v_attempts, v_snapshot;
+    END IF;
+
+    RETURN;
+END;
+$$ LANGUAGE plpgsql;
+
+REVOKE ALL ON FUNCTION claim_dispute_admin_alert(UUID, INTEGER, JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION claim_dispute_admin_alert(UUID, INTEGER, JSONB) TO service_role;
+
+-- ============================================================
 -- stripe_connect_account_status — current known readiness snapshot per
 -- connected account. A reliable, critically-written table (unlike
 -- audit_logs, which is fire-and-forget best-effort) so a capability
@@ -565,6 +634,9 @@ CREATE INDEX IF NOT EXISTS idx_stripe_connect_events_status         ON stripe_co
 CREATE INDEX IF NOT EXISTS idx_stripe_connect_payouts_agent         ON stripe_connect_payouts(agent_id);
 CREATE INDEX IF NOT EXISTS idx_stripe_connect_payouts_status        ON stripe_connect_payouts(status);
 CREATE INDEX IF NOT EXISTS idx_stripe_connect_account_status_agent  ON stripe_connect_account_status(agent_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_stripe_charge_id ON transactions(stripe_charge_id) WHERE stripe_charge_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_payment_disputes_transaction ON payment_disputes(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_payment_disputes_status ON payment_disputes(status);
 
 -- ============================================================
 -- Row Level Security (RLS) — základní politiky
@@ -582,6 +654,7 @@ ALTER TABLE task_moderation_appeals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stripe_connect_events         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stripe_connect_payouts        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stripe_connect_account_status ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_disputes              ENABLE ROW LEVEL SECURITY;
 
 -- Service role má plný přístup (backend vždy používá service_role_key)
 CREATE POLICY "service_role_all" ON organizations   TO service_role USING (true) WITH CHECK (true);
@@ -597,3 +670,4 @@ CREATE POLICY "service_role_all" ON task_moderation_appeals TO service_role USIN
 CREATE POLICY "service_role_all" ON stripe_connect_events         TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_all" ON stripe_connect_payouts        TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_all" ON stripe_connect_account_status TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_all" ON payment_disputes               TO service_role USING (true) WITH CHECK (true);

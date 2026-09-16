@@ -9,6 +9,7 @@ import {
   buildAdminAlertProviderPayload,
   type FrozenAdminAlertPayload,
 } from '@/lib/server/email'
+import { minorUnitExponent, formatMinorAmount } from '@/lib/server/currency'
 
 type Db = ReturnType<typeof getSupabase>
 
@@ -86,27 +87,26 @@ export async function markConnectEventFailed(db: Db, id: string, claimToken: str
   }
 }
 
-// Currencies Stripe treats as having no fractional/minor unit — the
-// integer amount Stripe reports IS the whole-currency amount already, not
-// a smallest-unit count to divide by 100. All other currencies (including
-// today's CZK/EUR/NOK) use 2 decimal places. This is deliberately not the
-// data model: stripe_connect_payouts.amount_minor always stores Stripe's
-// raw integer unchanged — this function only matters when FORMATTING an
-// amount for a human (UI, email), never when persisting one.
-// https://docs.stripe.com/currencies#zero-decimal
-const ZERO_DECIMAL_CURRENCIES = new Set([
-  'bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf',
-])
-
-export function minorUnitExponent(currency: string): number {
-  return ZERO_DECIMAL_CURRENCIES.has(currency.toLowerCase()) ? 0 : 2
-}
-
-export function formatMinorAmount(amountMinor: number, currency: string): string {
-  const exponent = minorUnitExponent(currency)
-  const amount = amountMinor / 10 ** exponent
-  return `${amount.toFixed(exponent)} ${currency.toUpperCase()}`
-}
+// Re-exported for backward compatibility (tests/money-minor-units.test.ts
+// and others still import these from this file) — the actual
+// implementation now lives in frontend/lib/server/currency.ts, a small
+// dependency-free module. It was moved out of this file specifically so
+// frontend/lib/server/paymentDisputes.ts (and any other module that only
+// needs currency formatting) doesn't have to transitively import
+// @/lib/server/email through this file just to reach it — under this
+// suite's vitest.config.ts (isolate: false, one shared worker), that
+// transitive import risks racing a DIFFERENT test file's own
+// vi.mock('@/lib/server/email', ...) for the same module path. See
+// paymentDisputes.ts's own top-of-file comment for the full reasoning.
+//
+// Deliberately `export ... from` (an indirect re-export), NOT
+// `export { minorUnitExponent, formatMinorAmount }` on their own line —
+// the latter re-exports the LOCAL import binding above and was observed
+// to transpile (via this project's esbuild-based test transform) into a
+// binding that reads as undefined at runtime, despite the key existing
+// on the module's export object. `export ... from` doesn't have this
+// failure mode.
+export { minorUnitExponent, formatMinorAmount } from '@/lib/server/currency'
 
 interface AccountReadinessSnapshot {
   charges_enabled: boolean

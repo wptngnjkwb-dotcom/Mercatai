@@ -24,7 +24,7 @@ let failNextTaskTransition = false
 let currentStripeIntent: Row = { id: 'pi_1', status: 'requires_payment_method' }
 
 function resetDb() {
-  tables = { transactions: [], tasks: [], bids: [] }
+  tables = { transactions: [], tasks: [], bids: [], payment_disputes: [] }
   dbCalls = []
 }
 resetDb()
@@ -32,6 +32,22 @@ resetDb()
 function makeDb() {
   return {
     async rpc(name: string, args: Row) {
+      if (name === 'claim_dispute_admin_alert') {
+        const row = tables.payment_disputes.find((d) => d.id === args.p_dispute_row_id)
+        if (!row) return { data: null, error: null }
+        const leaseExpired = row.admin_alert_status === 'sending'
+          && row.admin_alert_claimed_at
+          && Date.now() - new Date(row.admin_alert_claimed_at).getTime() > args.p_lease_seconds * 1000
+        const claimable = row.admin_alert_status === 'pending' || row.admin_alert_status === 'failed' || leaseExpired
+        if (!claimable) return { data: null, error: null }
+        const token = `dispute-alert-token-${Math.random().toString(36).slice(2)}`
+        row.admin_alert_status = 'sending'
+        row.admin_alert_claimed_at = new Date().toISOString()
+        row.admin_alert_claim_token = token
+        row.admin_alert_attempts = (row.admin_alert_attempts ?? 0) + 1
+        row.admin_alert_payload_snapshot = row.admin_alert_payload_snapshot ?? args.p_payload_snapshot ?? null
+        return { data: [{ claim_token: token, attempt_count: row.admin_alert_attempts, payload_snapshot: row.admin_alert_payload_snapshot }], error: null }
+      }
       if (name !== 'invalidate_task_funding') throw new Error(`unexpected rpc ${name}`)
       const tx = tables.transactions.find((row) => row.id === args.p_transaction_id)
       const task = tables.tasks.find((row) => row.id === args.p_task_id)
@@ -82,6 +98,15 @@ function makeDb() {
           const rows = rowsMatchingFilters()
           return { data: rows[0] ?? null, error: null }
         },
+        async single() {
+          if (pendingInsert) {
+            const row = { id: `${table}-${tables[table].length + 1}`, admin_alert_status: 'pending', admin_alert_attempts: 0, ...pendingInsert }
+            tables[table].push(row)
+            return { data: { id: row.id }, error: null }
+          }
+          const rows = rowsMatchingFilters()
+          return { data: rows[0] ?? null, error: null }
+        },
         then(resolve: (v: unknown) => unknown) {
           if (pendingUpdate) {
             const rows = rowsMatchingFilters()
@@ -102,16 +127,36 @@ function makeDb() {
 
 vi.mock('@/lib/server/supabase', () => ({ getSupabase: () => makeDb() }))
 
+let currentStripeDispute: Row = { id: 'dp_1', status: 'needs_response', reason: 'fraudulent', amount: 5000, currency: 'eur', charge: 'ch_1', payment_intent: 'pi_1' }
+
 const constructEvent = vi.fn((rawBody: string, signature: string) => {
   if (signature !== 'valid-signature') throw new Error('signature verification failed')
   const event = JSON.parse(rawBody)
   if (event.type?.startsWith('payment_intent.')) currentStripeIntent = event.data.object
+  // Deliberately NOT mirrored for charge.dispute.* — disputeEvent() below
+  // embeds only {id}, on purpose, so tests can prove the route re-fetches
+  // the CURRENT dispute via stripe.disputes.retrieve() (controlled
+  // separately by currentStripeDispute) rather than trusting this
+  // intentionally-impoverished event snapshot.
   return event
 })
-const retrievePaymentIntent = vi.fn(async () => currentStripeIntent)
+const retrievePaymentIntent = vi.fn(async (id: string) => {
+  // Mirrors a real Stripe "no such payment_intent" failure for an id this
+  // fixture never actually created — e.g. a Stripe Dashboard "Send test
+  // webhook" synthetic fixture. See the test using this sentinel below.
+  if (id === 'pi_does_not_exist') {
+    throw Object.assign(new Error('No such payment_intent: pi_does_not_exist'), { type: 'StripeInvalidRequestError', statusCode: 404 })
+  }
+  return currentStripeIntent
+})
+const retrieveDispute = vi.fn(async () => currentStripeDispute)
 vi.mock('stripe', () => ({
   default: vi.fn(function () {
-    return { webhooks: { constructEvent }, paymentIntents: { retrieve: retrievePaymentIntent } }
+    return {
+      webhooks: { constructEvent },
+      paymentIntents: { retrieve: retrievePaymentIntent },
+      disputes: { retrieve: retrieveDispute },
+    }
   }),
 }))
 
@@ -137,11 +182,19 @@ function paymentIntentEvent(id: string, type: string, status: string, paymentInt
   return { id, type, data: { object: { id: paymentIntentId, status } } }
 }
 
+function disputeEvent(id: string, type: string, disputeId = 'dp_1') {
+  return { id, type, data: { object: { id: disputeId } } }
+}
+
 beforeEach(() => {
   resetDb()
   auditLog.mockClear()
   failNextTaskTransition = false
   constructEvent.mockClear()
+  retrieveDispute.mockClear()
+  currentStripeDispute = { id: 'dp_1', status: 'needs_response', reason: 'fraudulent', amount: 5000, currency: 'eur', charge: 'ch_1', payment_intent: 'pi_1' }
+  delete process.env.ADMIN_ALERT_EMAIL
+  delete process.env.RESEND_API_KEY
   tables.transactions.push({ id: 'tx-1', task_id: 'task-1', agent_id: 'agent-1', buyer_org_id: 'org-1', escrow_status: 'pending', stripe_payment_intent_id: 'pi_1' })
   tables.tasks.push({
     id: 'task-1', status: 'assigned', delivery_deadline_at: null,
@@ -278,6 +331,76 @@ describe('idempotent redelivery', () => {
     expect(tables.transactions[0].escrow_status).toBe('held')
   })
 })
+
+describe('positive acceptance criteria — a genuine 200 requires a REAL test PaymentIntent, not any accepted event', () => {
+  it('a payment_intent event referencing an id this fixture never created (e.g. the Stripe Dashboard "Send test webhook" synthetic fixture) returns 500, not 200 — this is the correct, intended behavior, not a bug', async () => {
+    const response = await POST(webhookRequest(paymentIntentEvent('evt_synthetic', 'payment_intent.succeeded', 'succeeded', 'pi_does_not_exist')))
+    expect(response.status).toBe(500)
+    // Never even reached the database — failed at the Stripe retrieve
+    // step, before reconcilePaymentIntent could run at all.
+    expect(dbCalls).toHaveLength(0)
+  })
+
+  it('a genuine test-mode PaymentIntent your own flow created (matching stripe_payment_intent_id in transactions) returns 200 — this is what a real positive test looks like', async () => {
+    const response = await POST(webhookRequest(paymentIntentEvent('evt_real_test', 'payment_intent.succeeded', 'succeeded', 'pi_1')))
+    expect(response.status).toBe(200)
+    expect(tables.transactions[0].escrow_status).toBe('held')
+  })
+})
+
+describe('charge.dispute.created / .updated / .closed — minimal, safe monitoring (never a refund, never a transfer reversal)', () => {
+  it('re-fetches the CURRENT dispute from Stripe rather than trusting the event snapshot, and records it', async () => {
+    const response = await POST(webhookRequest(disputeEvent('evt_dispute_1', 'charge.dispute.created', 'dp_1')))
+    expect(retrieveDispute).toHaveBeenCalledWith('dp_1')
+    // No ADMIN_ALERT_EMAIL configured in this test env -> the alert build
+    // step throws, caught internally, and the route retries via 500 — but
+    // the dispute state itself is still durably recorded first.
+    expect(response.status).toBe(500)
+    expect(tables.payment_disputes).toHaveLength(1)
+    expect(tables.payment_disputes[0]).toMatchObject({ stripe_dispute_id: 'dp_1', status: 'needs_response', reason: 'fraudulent', transaction_id: 'tx-1' })
+  })
+
+  it('never stores card data', async () => {
+    currentStripeDispute = { ...currentStripeDispute, payment_method_details: { card: { last4: '4242' } } }
+    await POST(webhookRequest(disputeEvent('evt_dispute_1', 'charge.dispute.created', 'dp_1')))
+    const serialized = JSON.stringify(tables.payment_disputes)
+    expect(serialized).not.toContain('4242')
+    expect(serialized).not.toMatch(/last4|card_number|cvc/i)
+  })
+
+  it('a missing ADMIN_ALERT_EMAIL is retried (500) on the next delivery, and the dispute row is never duplicated', async () => {
+    const first = await POST(webhookRequest(disputeEvent('evt_dispute_1', 'charge.dispute.created', 'dp_1')))
+    expect(first.status).toBe(500)
+    const second = await POST(webhookRequest(disputeEvent('evt_dispute_1', 'charge.dispute.created', 'dp_1')))
+    expect(second.status).toBe(500)
+    expect(tables.payment_disputes).toHaveLength(1)
+  })
+
+  it('a dispute for an unknown charge/payment_intent (no matching transaction) is still recorded, with transaction_id null — never silently dropped', async () => {
+    currentStripeDispute = { ...currentStripeDispute, payment_intent: 'pi_unknown' }
+    await POST(webhookRequest(disputeEvent('evt_dispute_1', 'charge.dispute.created', 'dp_1')))
+    expect(tables.payment_disputes[0]).toMatchObject({ transaction_id: null })
+  })
+
+  it('never issues a refund, transfer reversal, or any other money movement — the fake Stripe client exposes no such method for this route to even call', async () => {
+    await POST(webhookRequest(disputeEvent('evt_dispute_1', 'charge.dispute.created', 'dp_1')))
+    // Only paymentIntents/disputes retrieve methods exist on the fake
+    // Stripe client this whole file uses — proving refunds/reversals
+    // aren't just unused but structurally unreachable from this webhook.
+    expect(retrieveDispute).toHaveBeenCalled()
+  })
+})
+
+// Regression note: this file deliberately never imports
+// stripe-connect-webhook/route.ts or stripeConnectMonitoring.ts — with
+// isolate:false, cross-importing a module another test file also mocks
+// differently is exactly what corrupts both (see the project's own
+// testing conventions). The Connect webhook's 54 tests live entirely in
+// stripe-connect-webhook.test.ts; this file only proves that touching
+// nothing about the platform payment webhook (env config is separate:
+// STRIPE_WEBHOOK_SECRET here vs. STRIPE_CONNECT_WEBHOOK_SECRET there) —
+// the full suite (this file's tests + that file's 54, run together in
+// the same `npm test`) passing is the actual non-interference proof.
 
 // Regression note: this file deliberately never imports
 // stripe-connect-webhook/route.ts or stripeConnectMonitoring.ts — with

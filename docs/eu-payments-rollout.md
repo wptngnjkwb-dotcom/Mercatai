@@ -1,11 +1,65 @@
 # EU-wide payments rollout — groundwork
 
-Last reviewed: 2026-09-12. Companion to `docs/stripe-connect-country-support.md`
+Last reviewed: 2026-09-16. Companion to `docs/stripe-connect-country-support.md`
 (the country-support architecture and its rationale) — this document is the
 concrete, EU-scoped checklist for turning that architecture on more broadly.
 It changes nothing in code: the app is already fully country-parameterized
 (see "What's already true" below). Enabling more countries is a Stripe
 Dashboard + Vercel environment-variable change, not a deploy.
+
+## Charge-model decision (2026-09-16) — this rollout does NOT change it
+
+For the first paid pilots, Mercatai keeps the current **destination charge
+with `on_behalf_of`** architecture (`transfer_data.destination` +
+`on_behalf_of` on the PaymentIntent — see `frontend/app/api/v1/payments/
+create-intent/route.ts`). A prior draft of this document argued this was
+unsupported for cross-border payouts; that was a misreading. Per Stripe's
+own current docs (`/connect/account-capabilities` — "Cross-border
+transfers"), the EEA is treated as **one single region** for cross-border
+transfer purposes — a Czech platform paying a connected account anywhere
+else in the EU/EEA is not a cross-border transfer at all in Stripe's
+sense, and the current architecture is not blocked by it. Switching to
+Direct charges remains a possible *long-term* direction (see the separate
+charge-model decision memorandum from this engagement), but is explicitly
+**not** part of this rollout — expanding to more EU countries under the
+current charge model requires no charge-model change, only the
+Stripe-side enablement and verification steps below.
+
+## Publicly enabled countries today: CZ, DE, NO only
+
+**No other country is published anywhere** (UI, OpenAPI, discovery JSON,
+`STRIPE_CONNECT_ENABLED_COUNTRIES`) as of this rollout. Adding a country
+to any single one of those surfaces without the other three, or without
+completing the verification gate below, is exactly the kind of
+inconsistency `docs/stripe-connect-country-support.md`'s "Catalog vs.
+enabled" section already warns against — a country must never be
+publicly offered as available before it has actually been turned on and
+verified. **Next priority: France (FR)** — see "Recommended rollout
+order" below; every other Eurozone country follows after FR, not before.
+
+### The four-part gate — all four required before ANY country is published
+
+A country is not "enabled" until **all four** of the following are true.
+Completing only the UI/code side (which is already generic and needs no
+per-country change) is explicitly **not** sufficient:
+
+1. **Stripe Dashboard enablement** — Settings → Connect → Onboarding
+   options → Countries, in live mode, for this specific platform account.
+2. **Environment configuration** — the country's ISO code added to
+   `STRIPE_CONNECT_ENABLED_COUNTRIES` in Vercel (Production), which is
+   what `frontend/lib/server/stripeConnectCountries.ts` actually reads at
+   runtime — Dashboard enablement alone does not change what Mercatai's
+   own code will let an agent select.
+3. **Test-mode onboarding pass** — a real hosted Express onboarding
+   completed in Stripe test mode for that country, confirming Stripe
+   actually accepts it end-to-end for this platform account (not just
+   that it's in the general catalog).
+4. **Capabilities + a real payment/payout test** — `card_payments`
+   (+ `sepa_debit_payments` where applicable) active on a test account for
+   that country, and at least one test-mode card authorize → capture →
+   release pass (plus SEPA if claiming SEPA support) — see
+   `docs/stripe-connect-country-support.md`'s own required checklist
+   before publicly describing a country as tested end-to-end.
 
 ## What's already true (no code change needed)
 
@@ -75,11 +129,16 @@ destination-charge (`on_behalf_of` + `transfer_data.destination`) flow.
 Suggested phased order, batching by what's most likely to surface a real
 issue first:
 
-1. **Phase 1 — Eurozone, SEPA-capable, large agent pools likely** (settle
-   in EUR, so no payout-currency conversion to reason about): FR, IT, ES,
-   NL, BE, AT, IE, PT, FI. Test-mode pass per the existing doc's
-   checklist before enabling each live, or accept and document the risk
-   of enabling on catalog-correctness alone (not recommended for the
+0. **France (FR) first, on its own** — not bundled with the rest of
+   phase 1. Complete the full four-part gate above for FR alone, verify
+   it live with a real (or first) pilot transaction, and only then move
+   to the rest of phase 1. Called out separately because it's currently
+   this rollout's stated next priority.
+1. **Phase 1 — remaining Eurozone, SEPA-capable, large agent pools
+   likely** (settle in EUR, so no payout-currency conversion to reason
+   about): IT, ES, NL, BE, AT, IE, PT, FI. Test-mode pass per the existing
+   doc's checklist before enabling each live, or accept and document the
+   risk of enabling on catalog-correctness alone (not recommended for the
    first few — that's exactly the gap the Croatia/Iceland/Peru incident
    in the country-support doc came from).
 2. **Phase 2 — remaining Eurozone**: GR, LU, MT, CY, SK, SI, LV, LT, EE.

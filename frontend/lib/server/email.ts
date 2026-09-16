@@ -240,10 +240,18 @@ export function buildAdminAlertProviderPayload(params: {
  * Returns the id Resend assigned to the (possibly pre-existing) email on
  * success.
  */
-export async function sendPayoutFailedAdminAlertOrThrow(payload: FrozenAdminAlertPayload, idempotencyKey: string): Promise<string> {
+/**
+ * Shared delivery mechanics for every critical, retryable admin alert
+ * (payout failures, payment disputes, ...) — `alertKind` only affects
+ * error-message wording, never behavior. See
+ * sendPayoutFailedAdminAlertOrThrow and sendDisputeAdminAlertOrThrow
+ * below for the two current callers; each keeps its own name so a
+ * stack trace or log line still says which kind of alert failed.
+ */
+async function sendAdminAlertOrThrow(payload: FrozenAdminAlertPayload, idempotencyKey: string, alertKind: string): Promise<string> {
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
-    throw new Error('RESEND_API_KEY is not configured — a critical payout-failure alert cannot be delivered')
+    throw new Error(`RESEND_API_KEY is not configured — a critical ${alertKind} alert cannot be delivered`)
   }
   const { Resend } = await import('resend')
   const resend = new Resend(apiKey)
@@ -265,7 +273,7 @@ export async function sendPayoutFailedAdminAlertOrThrow(payload: FrozenAdminAler
       // (the payload is frozen at first claim and reused verbatim), so
       // seeing this at all points at a real bug in that freezing, not a
       // normal operational hiccup.
-      throw new Error(`Resend rejected the payout-failure alert — idempotency key reused with a different payload (invalid_idempotent_request): ${error.message}`)
+      throw new Error(`Resend rejected the ${alertKind} alert — idempotency key reused with a different payload (invalid_idempotent_request): ${error.message}`)
     }
     if (error.name === 'concurrent_idempotent_requests') {
       // A different request with the SAME key is still being processed
@@ -274,12 +282,75 @@ export async function sendPayoutFailedAdminAlertOrThrow(payload: FrozenAdminAler
       // other failure), not a permanent rejection.
       throw new Error(`Resend is still processing a concurrent request with this idempotency key (concurrent_idempotent_requests): ${error.message}`)
     }
-    throw new Error(`Resend rejected the payout-failure alert: ${error.message}`)
+    throw new Error(`Resend rejected the ${alertKind} alert: ${error.message}`)
   }
   if (!data?.id) {
-    throw new Error('Resend accepted the payout-failure alert but returned no email id')
+    throw new Error(`Resend accepted the ${alertKind} alert but returned no email id`)
   }
   return data.id
+}
+
+export async function sendPayoutFailedAdminAlertOrThrow(payload: FrozenAdminAlertPayload, idempotencyKey: string): Promise<string> {
+  return sendAdminAlertOrThrow(payload, idempotencyKey, 'payout-failure')
+}
+
+/**
+ * Delivers the charge.dispute.* admin alert, or throws — same
+ * at-least-once, lease-retried, Resend-idempotency-keyed contract as
+ * sendPayoutFailedAdminAlertOrThrow. See
+ * frontend/lib/server/paymentDisputes.ts for the caller (ensureDisputeAdminAlertSent)
+ * and frontend/sql/18_payment_charge_identity_and_disputes.sql for the
+ * claim/lease table this backs.
+ */
+export async function sendDisputeAdminAlertOrThrow(payload: FrozenAdminAlertPayload, idempotencyKey: string): Promise<string> {
+  return sendAdminAlertOrThrow(payload, idempotencyKey, 'payment-dispute')
+}
+
+/**
+ * Builds the charge.dispute.* admin-alert email exactly as it would be
+ * sent right now — same "build once at first claim, freeze forever"
+ * contract as buildAdminAlertProviderPayload above. Throws if
+ * ADMIN_ALERT_EMAIL is not configured, for the same reason: that failure
+ * belongs to the first attempt that discovers it, not a later retry.
+ * Never includes card data — only the dispute id, its Stripe status/
+ * reason enum, and the amount.
+ */
+export function buildDisputeAdminAlertProviderPayload(params: {
+  disputeId: string
+  status: string
+  reason: string | null
+  amountLabel: string
+  transactionId: string | null
+  chargeId: string | null
+}): FrozenAdminAlertPayload {
+  const to = process.env.ADMIN_ALERT_EMAIL
+  if (!to) {
+    throw new Error('ADMIN_ALERT_EMAIL is not configured — a critical payment-dispute alert cannot be built')
+  }
+  return {
+    from: FROM,
+    to,
+    subject: `⚠️ Stripe dispute ${params.status} — ${params.amountLabel}`,
+    html: `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#dc2626">Payment dispute</h2>
+      <p>A Stripe dispute of <strong>${params.amountLabel}</strong> is now <strong>${params.status}</strong>.</p>
+      <table style="width:100%;border-collapse:collapse;margin:12px 0">
+        <tr><td style="padding:6px;color:#6b7280">Dispute ID</td><td style="padding:6px;font-weight:600"><code>${params.disputeId}</code></td></tr>
+        <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Reason</td><td style="padding:6px;font-weight:600">${params.reason ?? 'not provided'}</td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Charge</td><td style="padding:6px;font-weight:600">${params.chargeId ? `<code>${params.chargeId}</code>` : 'unknown'}</td></tr>
+        <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Mercatai transaction</td><td style="padding:6px;font-weight:600">${params.transactionId ?? 'no matching transaction found'}</td></tr>
+      </table>
+      <p style="font-size:12px;color:#6b7280">No card data is stored by Mercatai — check the Stripe Dashboard for full detail and to respond before the evidence deadline. This alert is informational only; Mercatai never automatically refunds or reverses a transfer in response to a dispute.</p>
+      <a href="${BASE_URL}/admin"
+         style="display:inline-block;background:#dc2626;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
+        Open admin
+      </a>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>
+    `,
+    payloadVersion: ADMIN_ALERT_PAYLOAD_VERSION,
+  }
 }
 
 export async function sendPayoutFailedAgentNotice(params: { to: string; amountLabel: string }) {

@@ -31,7 +31,7 @@ export async function GET(request: NextRequest, { params }: { params: { taskId: 
   const Stripe = (await import('stripe')).default
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
   const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
-  const paymentState = await reconcilePaymentIntent(intent)
+  const paymentState = await reconcilePaymentIntent(intent, undefined, stripe)
 
   return NextResponse.json({
     transaction_id: tx.id,

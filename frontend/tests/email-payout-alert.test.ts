@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { sendPayoutFailedAdminAlertOrThrow, buildAdminAlertProviderPayload, ADMIN_ALERT_PAYLOAD_VERSION } from '@/lib/server/email'
+import {
+  sendPayoutFailedAdminAlertOrThrow,
+  buildAdminAlertProviderPayload,
+  ADMIN_ALERT_PAYLOAD_VERSION,
+  sendDisputeAdminAlertOrThrow,
+  buildDisputeAdminAlertProviderPayload,
+} from '@/lib/server/email'
 
 // Deliberately does NOT mock @/lib/server/supabase or 'stripe' — this file
 // tests both functions in isolation, exercising the REAL implementations
@@ -144,5 +150,90 @@ describe('sendPayoutFailedAdminAlertOrThrow — a critical alert must never sile
       expect.objectContaining({ to: 'admin@example.com' }), // the FROZEN address, not the changed one
       { idempotencyKey }
     )
+  })
+})
+
+const disputeBuildParams = {
+  disputeId: 'dp_1',
+  status: 'needs_response',
+  reason: 'fraudulent',
+  amountLabel: '100.00 EUR',
+  transactionId: 'tx-1',
+  chargeId: 'ch_1',
+}
+const disputeIdempotencyKey = 'dispute-alert:dp_1'
+
+describe('buildDisputeAdminAlertProviderPayload — the only place ADMIN_ALERT_EMAIL / the dispute template is read', () => {
+  it('throws when ADMIN_ALERT_EMAIL is not configured', () => {
+    delete process.env.ADMIN_ALERT_EMAIL
+    expect(() => buildDisputeAdminAlertProviderPayload(disputeBuildParams)).toThrow(/ADMIN_ALERT_EMAIL/)
+  })
+
+  it('builds a payload with the current ADMIN_ALERT_EMAIL as `to`, and stamps the current payload version', () => {
+    process.env.ADMIN_ALERT_EMAIL = 'admin@example.com'
+    const payload = buildDisputeAdminAlertProviderPayload(disputeBuildParams)
+    expect(payload.to).toBe('admin@example.com')
+    expect(payload.payloadVersion).toBe(ADMIN_ALERT_PAYLOAD_VERSION)
+    expect(payload.html).toContain('dp_1')
+    expect(payload.html).toContain('100.00 EUR')
+    expect(payload.html).toContain('needs_response')
+  })
+
+  it('never includes card data (PAN, CVC, cardholder details) or the Resend API key', () => {
+    process.env.ADMIN_ALERT_EMAIL = 'admin@example.com'
+    process.env.RESEND_API_KEY = 'sk-should-never-appear'
+    const payload = buildDisputeAdminAlertProviderPayload(disputeBuildParams)
+    const serialized = JSON.stringify(payload)
+    expect(serialized).not.toContain('sk-should-never-appear')
+    expect(serialized).not.toMatch(/card_number|cvc|pan|cardholder/i)
+  })
+
+  it('states plainly that this is informational and never triggers an automatic refund or transfer reversal', () => {
+    process.env.ADMIN_ALERT_EMAIL = 'admin@example.com'
+    const payload = buildDisputeAdminAlertProviderPayload(disputeBuildParams)
+    expect(payload.html).toMatch(/never automatically refunds or reverses/i)
+  })
+
+  it('handles a missing transaction match and a missing reason without throwing', () => {
+    process.env.ADMIN_ALERT_EMAIL = 'admin@example.com'
+    const payload = buildDisputeAdminAlertProviderPayload({ ...disputeBuildParams, transactionId: null, reason: null })
+    expect(payload.html).toContain('no matching transaction found')
+  })
+})
+
+describe('sendDisputeAdminAlertOrThrow — a critical alert must never silently succeed', () => {
+  it('throws when RESEND_API_KEY is not configured, rather than logging "skipping"', async () => {
+    process.env.ADMIN_ALERT_EMAIL = 'admin@example.com'
+    delete process.env.RESEND_API_KEY
+    const payload = buildDisputeAdminAlertProviderPayload(disputeBuildParams)
+    await expect(sendDisputeAdminAlertOrThrow(payload, disputeIdempotencyKey)).rejects.toThrow(/RESEND_API_KEY/)
+    expect(resendSend).not.toHaveBeenCalled()
+  })
+
+  it('error messages say "payment-dispute", never "payout-failure" — the two alert kinds share code, not wording', async () => {
+    process.env.ADMIN_ALERT_EMAIL = 'admin@example.com'
+    delete process.env.RESEND_API_KEY
+    const payload = buildDisputeAdminAlertProviderPayload(disputeBuildParams)
+    await expect(sendDisputeAdminAlertOrThrow(payload, disputeIdempotencyKey)).rejects.toThrow(/payment-dispute/)
+  })
+
+  it('succeeds and returns the email id Resend assigned, passing the idempotency key as the second SDK argument', async () => {
+    process.env.ADMIN_ALERT_EMAIL = 'admin@example.com'
+    process.env.RESEND_API_KEY = 'test-key'
+    const payload = buildDisputeAdminAlertProviderPayload(disputeBuildParams)
+    const result = await sendDisputeAdminAlertOrThrow(payload, disputeIdempotencyKey)
+    expect(result).toBe('email-1')
+    expect(resendSend).toHaveBeenCalledWith(
+      { from: payload.from, to: 'admin@example.com', subject: payload.subject, html: payload.html },
+      { idempotencyKey: disputeIdempotencyKey }
+    )
+  })
+
+  it('never masks invalid_idempotent_request as success', async () => {
+    process.env.ADMIN_ALERT_EMAIL = 'admin@example.com'
+    process.env.RESEND_API_KEY = 'test-key'
+    const payload = buildDisputeAdminAlertProviderPayload(disputeBuildParams)
+    resendSend.mockResolvedValueOnce({ data: null, error: { name: 'invalid_idempotent_request', message: 'payload mismatch', statusCode: 409 } })
+    await expect(sendDisputeAdminAlertOrThrow(payload, disputeIdempotencyKey)).rejects.toThrow(/invalid_idempotent_request/)
   })
 })

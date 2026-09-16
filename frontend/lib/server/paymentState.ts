@@ -6,6 +6,53 @@ export type PaymentState = 'pending' | 'processing' | 'authorized' | 'failed'
 
 const HOURS_TO_MS = 60 * 60 * 1000
 
+/**
+ * Best-effort identity binding: records the transaction's stable
+ * stripe_charge_id (free — already on the PaymentIntent's own
+ * latest_charge field, no extra Stripe call) and, when a `stripe` client
+ * is available, its stripe_transfer_id (one extra charges.retrieve,
+ * since the Transfer id lives on the Charge, not the PaymentIntent).
+ * Neither is required for the escrow state machine — this exists so a
+ * later charge.dispute.* event (which carries charge/payment_intent ids,
+ * never a task or transaction id) can be matched back to the right
+ * transaction, and so an admin can jump straight to the right Stripe
+ * Dashboard objects. Never throws: a failure here must never break
+ * escrow reconciliation, which is why it's called after the transaction
+ * is already confirmed 'held', not before.
+ */
+async function captureChargeIdentity(
+  db: ReturnType<typeof getSupabase>,
+  txId: string,
+  intent: Stripe.PaymentIntent,
+  stripe?: Stripe,
+): Promise<void> {
+  const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : (intent.latest_charge as Stripe.Charge | null)?.id ?? null
+  if (!chargeId) return
+  try {
+    const { data: current, error: readError } = await db
+      .from('transactions')
+      .select('stripe_charge_id, stripe_transfer_id')
+      .eq('id', txId)
+      .maybeSingle()
+    if (readError) throw readError
+    if (current?.stripe_charge_id === chargeId && current?.stripe_transfer_id) return // already fully captured
+
+    let transferId: string | null = current?.stripe_transfer_id ?? null
+    if (!transferId && stripe) {
+      const charge = await stripe.charges.retrieve(chargeId)
+      transferId = typeof charge.transfer === 'string' ? charge.transfer : (charge.transfer as Stripe.Transfer | null)?.id ?? null
+    }
+
+    const { error: updateError } = await db
+      .from('transactions')
+      .update({ stripe_charge_id: chargeId, ...(transferId ? { stripe_transfer_id: transferId } : {}) })
+      .eq('id', txId)
+    if (updateError) throw updateError
+  } catch (err) {
+    console.error(`Could not capture charge/transfer identity for transaction ${txId}`, err)
+  }
+}
+
 async function ensureFundedTaskStarted(
   db: ReturnType<typeof getSupabase>,
   tx: { id: string; task_id: string; agent_id: string; buyer_org_id: string },
@@ -90,6 +137,7 @@ async function ensureFundedTaskStarted(
 export async function reconcilePaymentIntent(
   intent: Stripe.PaymentIntent,
   eventType?: string,
+  stripe?: Stripe,
 ): Promise<PaymentState> {
   const db = getSupabase()
   const { data: tx, error: txReadError } = await db
@@ -130,6 +178,9 @@ export async function reconcilePaymentIntent(
     // If a previous attempt updated the transaction but failed to start the
     // task, the next webhook or status reconciliation repairs it.
     await ensureFundedTaskStarted(db, tx, intent, eventType)
+    // Best-effort — see captureChargeIdentity's own doc comment for why a
+    // failure here never throws or blocks the state machine above.
+    await captureChargeIdentity(db, tx.id, intent, stripe)
   }
 
   // eventType alone is not a source of truth: Stripe can deliver an old
