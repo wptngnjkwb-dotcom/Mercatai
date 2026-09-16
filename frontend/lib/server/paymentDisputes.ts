@@ -44,9 +44,30 @@ const MAX_IDEMPOTENCY_KEY_LENGTH = 256
  * via stripe_payment_intent_id where possible.
  */
 
-function buildDisputeAlertIdempotencyKey(disputeId: string): string {
-  const raw = `dispute-alert:${disputeId}`
+/**
+ * Derived from BOTH the dispute id AND a stable hash of the actually-
+ * frozen payload — never the dispute id alone. A dispute id alone would
+ * give the SAME key to every status the dispute ever reaches (created,
+ * needs_response, lost, ...), and Resend rejects a reused key paired
+ * with a different payload as invalid_idempotent_request — exactly the
+ * failure a naive id-only key would cause the moment a real status
+ * change tries to send its own, genuinely different, alert. Keyed off
+ * the frozen `payload` (never a fresh, not-yet-frozen candidate) so
+ * every retry of the SAME frozen payload computes the IDENTICAL key,
+ * and any new payload (a real status change re-freezes one, see
+ * upsertDisputeRow) computes a different one. Capped at 256 characters,
+ * the same limit Resend enforces and buildPayoutAlertIdempotencyKey
+ * already respects.
+ */
+export function buildDisputeAlertIdempotencyKey(disputeId: string, payload: FrozenAdminAlertPayload): string {
+  const payloadHash = createHash('sha256')
+    .update(JSON.stringify({ from: payload.from, to: payload.to, subject: payload.subject, html: payload.html, payloadVersion: payload.payloadVersion }))
+    .digest('hex')
+  const raw = `dispute-alert:${disputeId}:${payloadHash}`
   if (raw.length <= MAX_IDEMPOTENCY_KEY_LENGTH) return raw
+  // Not reachable in practice (disputeId + a fixed 64-char hex hash is
+  // always far under 256 chars), but kept as the same safety net
+  // buildPayoutAlertIdempotencyKey uses, for an arbitrarily long disputeId.
   const hash = createHash('sha256').update(raw).digest('hex')
   return `dispute-alert:${hash}`.slice(0, MAX_IDEMPOTENCY_KEY_LENGTH)
 }
@@ -87,11 +108,25 @@ async function upsertDisputeRow(db: Db, disputeId: string, fields: DisputeRowFie
   const updateFields = (statusChanged: boolean) => ({
     ...fields,
     updated_at: new Date().toISOString(),
+    // A pure redelivery of the SAME status (statusChanged=false) must
+    // leave every admin_alert_* field untouched — including the ones
+    // reset below — so this whole block only ever appears in the update
+    // payload when statusChanged is true.
     ...(statusChanged ? {
       admin_alert_status: 'pending',
       admin_alert_claim_token: null,
       admin_alert_claimed_at: null,
       admin_alert_payload_snapshot: null,
+      // Cleared too: a NEW status is a genuinely new alert, not a
+      // continuation of the PRIOR status's delivery record. Leaving
+      // these set from the prior status's 'sent' would let a stale
+      // admin_alert_sent_at/provider_id sit next to a row that (until
+      // this new alert actually sends) hasn't been sent for its CURRENT
+      // status at all, and a stale last_alert_error would misattribute
+      // an old failure to the new status.
+      admin_alert_sent_at: null,
+      admin_alert_provider_id: null,
+      last_alert_error: null,
     } : {}),
   })
 
@@ -261,7 +296,10 @@ async function ensureDisputeAdminAlertSent(
     throw new Error(`Admin alert delivery failed for dispute ${disputeRowId}: ${message}`)
   }
 
-  const idempotencyKey = buildDisputeAlertIdempotencyKey(details.disputeId)
+  // Keyed off `payload` — the actually-frozen snapshot every retry
+  // reuses verbatim — never a fresh candidate, so this always matches
+  // whatever was computed the first time this exact payload was sent.
+  const idempotencyKey = buildDisputeAlertIdempotencyKey(details.disputeId, payload)
   try {
     const providerId = await deps.sendAlert(payload, idempotencyKey)
     await markDisputeAdminAlertSent(db, disputeRowId, claimToken, providerId)

@@ -54,6 +54,27 @@ jurisdiction; whether "reasonably necessary" needs a defined maximum
 pause duration; whether this needs its own consent checkbox at agent
 registration rather than being folded into existing Terms acceptance.)*
 
+**Implementation gap — blocks publication on its own, independent of
+legal review:** the "may pause an agent's future payouts" bullet above
+describes a capability that **does not exist in code today**. The dispute
+monitoring shipped so far (`frontend/lib/server/paymentDisputes.ts`,
+`charge.dispute.created/updated/closed` on the main payment webhook) only
+observes and alerts an admin — it never pauses, blocks, or holds a
+payout, and there is no admin action anywhere in this codebase that does
+either. Publishing this clause before that gap is closed would represent
+a capability Mercatai does not actually have. Before this bullet can be
+published, either:
+- a manual incident procedure must exist and be followed (an admin
+  runbook: on a dispute alert, manually verify and — using whatever
+  manual means Stripe/the payout pipeline currently allow — hold the
+  specific agent's payout), or
+- an administrative function must be built to pause an agent's payouts
+  programmatically, with its own review (who can invoke it, on what
+  evidence, how it's logged/audited, how/when it's lifted).
+
+Until one of those exists, this bullet should stay in draft — it is not
+a legal-review gap, it is a "the product does not do this yet" gap.
+
 ## Proposed addition to Section 7 (Agent Obligations)
 
 Insert after "Agents may not bid on tasks they cannot fulfil":

@@ -4,6 +4,7 @@ import {
   claimDisputeAdminAlert,
   markDisputeAdminAlertSent,
   markDisputeAdminAlertFailed,
+  buildDisputeAlertIdempotencyKey,
   type DisputeAlertDeps,
 } from '@/lib/server/paymentDisputes'
 import type { FrozenAdminAlertPayload } from '@/lib/server/email'
@@ -140,6 +141,124 @@ beforeEach(() => {
   deps = { buildPayload, sendAlert } as unknown as DisputeAlertDeps
 })
 
+/**
+ * A `sendAlert` fake that actually implements Resend's real idempotency
+ * rule (see frontend/lib/server/email.ts's sendAdminAlertOrThrow, which
+ * this simulates): a given idempotencyKey may only ever be sent once
+ * with one payload. A LATER call with the SAME key and the SAME payload
+ * replays the original result (never a second physical send). A LATER
+ * call with the SAME key but a DIFFERENT payload throws exactly the way
+ * Resend does — invalid_idempotent_request — since this codebase's
+ * default vi.fn() stub (used everywhere else in this file) always
+ * succeeds regardless of key/payload and would never have caught the
+ * bug this describe block exists to guard against.
+ */
+function makeResendLikeSendAlert() {
+  const sentByKey = new Map<string, { payloadJson: string; result: string }>()
+  let counter = 0
+  return vi.fn(async (payload: FrozenAdminAlertPayload, idempotencyKey: string) => {
+    const payloadJson = JSON.stringify(payload)
+    const existing = sentByKey.get(idempotencyKey)
+    if (existing) {
+      if (existing.payloadJson !== payloadJson) {
+        throw new Error(`Resend rejected the payment-dispute alert — idempotency key reused with a different payload (invalid_idempotent_request)`)
+      }
+      return existing.result
+    }
+    counter += 1
+    const result = `email-${counter}`
+    sentByKey.set(idempotencyKey, { payloadJson, result })
+    return result
+  })
+}
+
+describe('buildDisputeAlertIdempotencyKey — derived from dispute id AND a hash of the frozen payload', () => {
+  const payloadA: FrozenAdminAlertPayload = { from: 'a', to: 'b', subject: 'needs_response', html: '<p>x</p>', payloadVersion: 1 }
+  const payloadB: FrozenAdminAlertPayload = { from: 'a', to: 'b', subject: 'lost', html: '<p>y</p>', payloadVersion: 1 }
+
+  it('a retry with the byte-identical frozen payload produces the identical key', () => {
+    const key1 = buildDisputeAlertIdempotencyKey('dp_1', payloadA)
+    const key2 = buildDisputeAlertIdempotencyKey('dp_1', { ...payloadA })
+    expect(key1).toBe(key2)
+  })
+
+  it('the same dispute with a genuinely different payload (a real status change) produces a different key', () => {
+    const key1 = buildDisputeAlertIdempotencyKey('dp_1', payloadA)
+    const key2 = buildDisputeAlertIdempotencyKey('dp_1', payloadB)
+    expect(key1).not.toBe(key2)
+  })
+
+  it('two different disputes with the byte-identical payload still produce different keys — the dispute id is always part of the key', () => {
+    const key1 = buildDisputeAlertIdempotencyKey('dp_1', payloadA)
+    const key2 = buildDisputeAlertIdempotencyKey('dp_2', payloadA)
+    expect(key1).not.toBe(key2)
+  })
+
+  it('never exceeds 256 characters, even for a long dispute id', () => {
+    const longId = 'dp_' + 'x'.repeat(400)
+    const key = buildDisputeAlertIdempotencyKey(longId, payloadA)
+    expect(key.length).toBeLessThanOrEqual(256)
+  })
+})
+
+describe('handleDisputeEvent — idempotency key against a REALISTIC Resend simulation', () => {
+  it('the same key with the same payload is accepted idempotently (a retry after a DB-write failure, not a second physical send)', async () => {
+    const realisticSendAlert = makeResendLikeSendAlert()
+    const realisticDeps = { buildPayload, sendAlert: realisticSendAlert } as unknown as DisputeAlertDeps
+    const db = makeFakeDb()
+    const stripe = makeFakeStripe({
+      dp_1: { id: 'dp_1', status: 'needs_response', reason: 'fraudulent', amount: 5000, currency: 'eur', charge: 'ch_1', payment_intent: 'pi_1' },
+    })
+    await handleDisputeEvent(db as any, stripe, stripeDisputeEvent('dp_1', 'charge.dispute.created'), realisticDeps)
+    expect(disputes[0].admin_alert_status).toBe('sent')
+
+    // Force a second delivery of the SAME status by hand — simulates a
+    // retry where the DB write recording "sent" had failed even though
+    // Resend already accepted the email; the frozen payload/key are
+    // unchanged, so the realistic fake must replay, not reject.
+    disputes[0].admin_alert_status = 'failed'
+    await handleDisputeEvent(db as any, stripe, stripeDisputeEvent('dp_1', 'charge.dispute.created'), realisticDeps)
+    expect(disputes[0].admin_alert_status).toBe('sent')
+    expect(realisticSendAlert).toHaveBeenCalledTimes(2)
+    // Both calls used the identical idempotency key (2nd arg) — proving
+    // this was a legitimate replay, not treated as a brand-new alert.
+    const [, key1] = realisticSendAlert.mock.calls[0]
+    const [, key2] = realisticSendAlert.mock.calls[1]
+    expect(key1).toBe(key2)
+  })
+
+  it('a status change (needs_response -> lost) uses a genuinely different key, and BOTH alerts succeed — the old id-only key would have made the second one collide and throw invalid_idempotent_request', async () => {
+    const realisticSendAlert = makeResendLikeSendAlert()
+    const realisticDeps = { buildPayload, sendAlert: realisticSendAlert } as unknown as DisputeAlertDeps
+    const db = makeFakeDb()
+    const stripeObjects: Record<string, Row> = {
+      dp_1: { id: 'dp_1', status: 'needs_response', reason: 'fraudulent', amount: 5000, currency: 'eur', charge: 'ch_1', payment_intent: 'pi_1' },
+    }
+    const stripe = makeFakeStripe(stripeObjects)
+
+    await handleDisputeEvent(db as any, stripe, stripeDisputeEvent('dp_1', 'charge.dispute.created'), realisticDeps)
+    expect(disputes[0].admin_alert_status).toBe('sent')
+
+    stripeObjects.dp_1 = { ...stripeObjects.dp_1, status: 'lost' }
+    await handleDisputeEvent(db as any, stripe, stripeDisputeEvent('dp_1', 'charge.dispute.closed'), realisticDeps)
+    expect(disputes[0].admin_alert_status).toBe('sent')
+    expect(disputes[0].status).toBe('lost')
+
+    expect(realisticSendAlert).toHaveBeenCalledTimes(2)
+    const [, keyForNeedsResponse] = realisticSendAlert.mock.calls[0]
+    const [, keyForLost] = realisticSendAlert.mock.calls[1]
+    expect(keyForNeedsResponse).not.toBe(keyForLost)
+  })
+
+  it('a genuinely mismatched key+payload pairing (simulating a bug that reused a key across different content) is rejected by the realistic fake, proving the fake enforces the rule at all', async () => {
+    const realisticSendAlert = makeResendLikeSendAlert()
+    const payload: FrozenAdminAlertPayload = { from: 'a', to: 'b', subject: 'x', html: '<p>1</p>', payloadVersion: 1 }
+    const differentPayload: FrozenAdminAlertPayload = { ...payload, html: '<p>2</p>' }
+    await realisticSendAlert(payload, 'same-key')
+    await expect(realisticSendAlert(differentPayload, 'same-key')).rejects.toThrow(/invalid_idempotent_request/)
+  })
+})
+
 describe('handleDisputeEvent — records dispute state, verified live from Stripe', () => {
   it('re-fetches the CURRENT dispute from Stripe rather than trusting the event snapshot', async () => {
     const db = makeFakeDb()
@@ -226,6 +345,49 @@ describe('handleDisputeEvent — idempotent redelivery, no duplicate alert', () 
     await handleDisputeEvent(db as any, stripe, stripeDisputeEvent('dp_1', 'charge.dispute.created'), deps)
     expect(sendAlert).toHaveBeenCalledTimes(1)
     expect(disputes).toHaveLength(1)
+  })
+
+  it('redelivering the exact same status leaves admin_alert_sent_at, admin_alert_provider_id and last_alert_error untouched — only a real status change may reset them', async () => {
+    const db = makeFakeDb()
+    const stripe = makeFakeStripe({
+      dp_1: { id: 'dp_1', status: 'needs_response', reason: 'fraudulent', amount: 5000, currency: 'eur', charge: 'ch_1', payment_intent: 'pi_1' },
+    })
+    await handleDisputeEvent(db as any, stripe, stripeDisputeEvent('dp_1', 'charge.dispute.created'), deps)
+    const sentAt = disputes[0].admin_alert_sent_at
+    const providerId = disputes[0].admin_alert_provider_id
+    expect(sentAt).toBeTruthy()
+    expect(providerId).toBeTruthy()
+
+    // A pure redelivery of the SAME status (e.g. Stripe retrying the same
+    // webhook) must not touch these fields at all — they should remain
+    // literally the same value, not merely equal-looking.
+    await handleDisputeEvent(db as any, stripe, stripeDisputeEvent('dp_1', 'charge.dispute.created'), deps)
+    expect(disputes[0].admin_alert_sent_at).toBe(sentAt)
+    expect(disputes[0].admin_alert_provider_id).toBe(providerId)
+    expect(disputes[0].last_alert_error).toBeFalsy()
+  })
+
+  it('a status change resets admin_alert_sent_at/admin_alert_provider_id/last_alert_error before the new status is alerted, and they end up populated again for the NEW status only', async () => {
+    const db = makeFakeDb()
+    const stripeObjects: Record<string, Row> = {
+      dp_1: { id: 'dp_1', status: 'needs_response', reason: 'fraudulent', amount: 5000, currency: 'eur', charge: 'ch_1', payment_intent: 'pi_1' },
+    }
+    const stripe = makeFakeStripe(stripeObjects)
+    sendAlert.mockResolvedValueOnce('resend-id-1')
+    await handleDisputeEvent(db as any, stripe, stripeDisputeEvent('dp_1', 'charge.dispute.created'), deps)
+    expect(disputes[0].admin_alert_provider_id).toBe('resend-id-1')
+
+    stripeObjects.dp_1 = { ...stripeObjects.dp_1, status: 'lost' }
+    sendAlert.mockResolvedValueOnce('resend-id-2')
+    await handleDisputeEvent(db as any, stripe, stripeDisputeEvent('dp_1', 'charge.dispute.closed'), deps)
+    // Ends up 'sent' again (for the NEW status), with a genuinely NEW
+    // provider id — proving the stale prior sent_at/provider_id was
+    // actually cleared and freshly repopulated, not silently carried
+    // forward (or, worse, left stale while the row sat un-resent).
+    expect(disputes[0].admin_alert_status).toBe('sent')
+    expect(disputes[0].admin_alert_provider_id).toBe('resend-id-2')
+    expect(disputes[0].admin_alert_sent_at).toBeTruthy()
+    expect(disputes[0].last_alert_error).toBeFalsy()
   })
 
   it('a status change (e.g. needs_response -> lost) triggers exactly one more alert, not a duplicate of the first', async () => {
