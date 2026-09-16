@@ -3,6 +3,7 @@ import { getSupabase } from '@/lib/server/supabase'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { recordAffiliateEarning } from '@/lib/server/affiliate'
 import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
+import { recordPaymentChargeIdentity } from '@/lib/server/paymentState'
 
 // Vercel Cron — spouští se každou hodinu
 // Uvolní escrow pro tasky kde buyer nereagoval 48h po doručení
@@ -51,6 +52,13 @@ export async function GET(request: NextRequest) {
         } else if (intent.capture_method !== 'manual' && intent.status !== 'succeeded') {
           throw new Error(`Automatic payment has not settled (Stripe status: ${intent.status})`)
         }
+        // Read Stripe's CURRENT charge identity post-capture and record it —
+        // a failure here throws into this iteration's own try/catch below,
+        // so this transaction is simply retried on the next hourly run
+        // without a second capture (the guards above already treat an
+        // already-succeeded intent as a no-op).
+        const capturedIntent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+        await recordPaymentChargeIdentity(db, tx.id, capturedIntent, stripe)
       }
 
       const { data: finalizedData, error: finalizedError } = await db.rpc('finalize_funded_task', {

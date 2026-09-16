@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type Stripe from 'stripe'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
+import { recordPaymentChargeIdentity } from '@/lib/server/paymentState'
 
 /**
  * Dispute resolution — the missing exit from the 'disputed' state.
@@ -81,15 +83,23 @@ export async function PUT(request: NextRequest, { params }: { params: { taskId: 
       return NextResponse.json({ error: 'Stripe refund succeeded but database finalization must be retried' }, { status: 500 })
     }
   } else {
+    let capturedIntent: Stripe.PaymentIntent
     try {
       if (intent.capture_method === 'manual' && intent.status === 'requires_capture') {
         await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
       } else if (intent.status !== 'succeeded') {
         return NextResponse.json({ error: `Stripe payment cannot be paid from status ${intent.status}` }, { status: 409 })
       }
+      capturedIntent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
     } catch (err) {
       console.error('Stripe dispute capture failed', err)
       return NextResponse.json({ error: 'Stripe capture failed' }, { status: 502 })
+    }
+    try {
+      await recordPaymentChargeIdentity(db, tx.id, capturedIntent, stripe)
+    } catch (identityErr) {
+      console.error('Failed to record charge/transfer identity after admin capture:', identityErr)
+      return NextResponse.json({ error: 'Payment was captured but its charge/transfer identity could not be recorded — retry required' }, { status: 500 })
     }
     const { data, error } = await db.rpc('finalize_funded_task', {
       p_task_id: params.taskId, p_transaction_id: tx.id,

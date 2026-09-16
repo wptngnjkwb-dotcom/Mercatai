@@ -24,7 +24,7 @@ let failNextTaskTransition = false
 let currentStripeIntent: Row = { id: 'pi_1', status: 'requires_payment_method' }
 
 function resetDb() {
-  tables = { transactions: [], tasks: [], bids: [], payment_disputes: [] }
+  tables = { transactions: [], tasks: [], bids: [], payment_disputes: [], audit_logs: [] }
   dbCalls = []
 }
 resetDb()
@@ -47,6 +47,41 @@ function makeDb() {
         row.admin_alert_attempts = (row.admin_alert_attempts ?? 0) + 1
         row.admin_alert_payload_snapshot = row.admin_alert_payload_snapshot ?? args.p_payload_snapshot ?? null
         return { data: [{ claim_token: token, attempt_count: row.admin_alert_attempts, payload_snapshot: row.admin_alert_payload_snapshot }], error: null }
+      }
+      if (name === 'record_payment_charge_identity') {
+        // Mirrors frontend/sql/20_payment_charge_transfer_identity.sql's
+        // actual compare-and-set logic — see
+        // tests/payment-charge-transfer-identity.test.ts for the isolated
+        // unit tests of this same logic against recordPaymentChargeIdentity
+        // directly; this copy exists only so the REAL webhook route (which
+        // calls reconcilePaymentIntent, which calls getSupabase()
+        // internally) can be exercised end-to-end through this file's one
+        // vi.mock('@/lib/server/supabase').
+        const tx = tables.transactions.find((row) => row.id === args.p_transaction_id)
+        if (!tx) return { data: null, error: { code: 'P0002', message: 'transaction not found' } }
+        if (tx.stripe_payment_intent_id !== args.p_stripe_payment_intent_id) {
+          return { data: null, error: { code: 'P0001', message: 'payment intent does not match this transaction' } }
+        }
+        let chargeWritten = false, transferWritten = false, chargeConflict = false, transferConflict = false
+        if (args.p_stripe_charge_id != null) {
+          if (tx.stripe_charge_id == null) { tx.stripe_charge_id = args.p_stripe_charge_id; chargeWritten = true }
+          else if (tx.stripe_charge_id !== args.p_stripe_charge_id) chargeConflict = true
+        }
+        if (args.p_stripe_transfer_id != null) {
+          if (tx.stripe_transfer_id == null) { tx.stripe_transfer_id = args.p_stripe_transfer_id; transferWritten = true }
+          else if (tx.stripe_transfer_id !== args.p_stripe_transfer_id) transferConflict = true
+        }
+        if (chargeConflict || transferConflict) {
+          tables.audit_logs.push({ action: 'payment_identity_mismatch', resource_type: 'transaction', resource_id: tx.id })
+        }
+        return {
+          data: [{
+            transaction_id: tx.id, stripe_charge_id: tx.stripe_charge_id, stripe_transfer_id: tx.stripe_transfer_id,
+            charge_id_written: chargeWritten, transfer_id_written: transferWritten,
+            charge_id_conflict: chargeConflict, transfer_id_conflict: transferConflict,
+          }],
+          error: null,
+        }
       }
       if (name !== 'invalidate_task_funding') throw new Error(`unexpected rpc ${name}`)
       const tx = tables.transactions.find((row) => row.id === args.p_transaction_id)
@@ -150,12 +185,19 @@ const retrievePaymentIntent = vi.fn(async (id: string) => {
   return currentStripeIntent
 })
 const retrieveDispute = vi.fn(async () => currentStripeDispute)
+// Keyed by charge id so a test can control what Transfer (if any) a given
+// charge currently reports — mirrors the real "the Transfer may not be
+// attached to the Charge the instant it's captured" gap this whole
+// mechanism exists to self-heal.
+let chargeTransferById: Record<string, string | null> = {}
+const retrieveCharge = vi.fn(async (id: string) => ({ id, transfer: chargeTransferById[id] ?? null }))
 vi.mock('stripe', () => ({
   default: vi.fn(function () {
     return {
       webhooks: { constructEvent },
       paymentIntents: { retrieve: retrievePaymentIntent },
       disputes: { retrieve: retrieveDispute },
+      charges: { retrieve: retrieveCharge },
     }
   }),
 }))
@@ -178,8 +220,8 @@ function webhookRequest(event: unknown, signature = 'valid-signature') {
   })
 }
 
-function paymentIntentEvent(id: string, type: string, status: string, paymentIntentId = 'pi_1') {
-  return { id, type, data: { object: { id: paymentIntentId, status } } }
+function paymentIntentEvent(id: string, type: string, status: string, paymentIntentId = 'pi_1', latestCharge?: string) {
+  return { id, type, data: { object: { id: paymentIntentId, status, ...(latestCharge ? { latest_charge: latestCharge } : {}) } } }
 }
 
 function disputeEvent(id: string, type: string, disputeId = 'dp_1') {
@@ -192,10 +234,15 @@ beforeEach(() => {
   failNextTaskTransition = false
   constructEvent.mockClear()
   retrieveDispute.mockClear()
+  retrieveCharge.mockClear()
+  chargeTransferById = {}
   currentStripeDispute = { id: 'dp_1', status: 'needs_response', reason: 'fraudulent', amount: 5000, currency: 'eur', charge: 'ch_1', payment_intent: 'pi_1' }
   delete process.env.ADMIN_ALERT_EMAIL
   delete process.env.RESEND_API_KEY
-  tables.transactions.push({ id: 'tx-1', task_id: 'task-1', agent_id: 'agent-1', buyer_org_id: 'org-1', escrow_status: 'pending', stripe_payment_intent_id: 'pi_1' })
+  tables.transactions.push({
+    id: 'tx-1', task_id: 'task-1', agent_id: 'agent-1', buyer_org_id: 'org-1', escrow_status: 'pending',
+    stripe_payment_intent_id: 'pi_1', stripe_charge_id: null, stripe_transfer_id: null,
+  })
   tables.tasks.push({
     id: 'task-1', status: 'assigned', delivery_deadline_at: null,
     assigned_agent_id: 'agent-1', posted_by_org_id: 'org-1', archived_at: null,
@@ -345,6 +392,73 @@ describe('positive acceptance criteria — a genuine 200 requires a REAL test Pa
     const response = await POST(webhookRequest(paymentIntentEvent('evt_real_test', 'payment_intent.succeeded', 'succeeded', 'pi_1')))
     expect(response.status).toBe(200)
     expect(tables.transactions[0].escrow_status).toBe('held')
+  })
+})
+
+describe('payment_intent.succeeded — charge/transfer identity (record_payment_charge_identity)', () => {
+  it('a card payment funded by this webhook records both stripe_charge_id and stripe_transfer_id immediately when both are already known', async () => {
+    chargeTransferById.ch_1 = 'tr_1'
+    const response = await POST(webhookRequest(paymentIntentEvent('evt_1', 'payment_intent.succeeded', 'succeeded', 'pi_1', 'ch_1')))
+    expect(response.status).toBe(200)
+    expect(tables.transactions[0].stripe_charge_id).toBe('ch_1')
+    expect(tables.transactions[0].stripe_transfer_id).toBe('tr_1')
+  })
+
+  it('backfills a missing transfer_id on an ALREADY-released transaction from a late payment_intent.succeeded webhook — not limited to pending/held', async () => {
+    tables.transactions[0].escrow_status = 'released'
+    tables.transactions[0].stripe_charge_id = 'ch_1'
+    tables.transactions[0].stripe_transfer_id = null // the exact gap a real sandbox run found: released before the Transfer was ever recorded
+    chargeTransferById.ch_1 = 'tr_1'
+
+    const response = await POST(webhookRequest(paymentIntentEvent('evt_late', 'payment_intent.succeeded', 'succeeded', 'pi_1', 'ch_1')))
+
+    expect(response.status).toBe(200)
+    expect(tables.transactions[0].escrow_status).toBe('released') // never touched
+    expect(tables.transactions[0].stripe_transfer_id).toBe('tr_1') // backfilled
+  })
+
+  it('redelivering the exact same succeeded event when both ids are already correctly recorded is a pure no-op', async () => {
+    chargeTransferById.ch_1 = 'tr_1'
+    const event = paymentIntentEvent('evt_1', 'payment_intent.succeeded', 'succeeded', 'pi_1', 'ch_1')
+    await POST(webhookRequest(event))
+    expect(tables.transactions[0].stripe_transfer_id).toBe('tr_1')
+
+    const second = await POST(webhookRequest(event))
+
+    expect(second.status).toBe(200)
+    expect(tables.transactions).toHaveLength(1)
+    expect(tables.transactions[0].stripe_charge_id).toBe('ch_1')
+    expect(tables.transactions[0].stripe_transfer_id).toBe('tr_1')
+    expect(tables.audit_logs).toHaveLength(0)
+  })
+
+  it('an existing DIFFERENT charge id is never overwritten — the webhook returns 500 so Stripe retries, and the mismatch is audited, not hidden', async () => {
+    tables.transactions[0].stripe_charge_id = 'ch_original'
+    chargeTransferById.ch_different = 'tr_different'
+
+    const response = await POST(webhookRequest(paymentIntentEvent('evt_conflict', 'payment_intent.succeeded', 'succeeded', 'pi_1', 'ch_different')))
+
+    expect(response.status).toBe(500)
+    expect(tables.transactions[0].stripe_charge_id).toBe('ch_original') // never overwritten
+    expect(tables.audit_logs).toContainEqual(expect.objectContaining({ action: 'payment_identity_mismatch', resource_id: 'tx-1' }))
+  })
+
+  it('preserves the correct identity for a SEPA charge (Stripe "py_" object id) exactly like a card "ch_" one', async () => {
+    chargeTransferById.py_sepa_1 = 'tr_sepa_1'
+    const response = await POST(webhookRequest(paymentIntentEvent('evt_sepa', 'payment_intent.succeeded', 'succeeded', 'pi_1', 'py_sepa_1')))
+    expect(response.status).toBe(200)
+    expect(tables.transactions[0].stripe_charge_id).toBe('py_sepa_1')
+    expect(tables.transactions[0].stripe_transfer_id).toBe('tr_sepa_1')
+  })
+
+  it('a failed (canceled) PaymentIntent never records identity, even if a stale latest_charge is present from an earlier declined attempt', async () => {
+    chargeTransferById.ch_declined = 'tr_should_never_be_read'
+    const response = await POST(webhookRequest(paymentIntentEvent('evt_declined', 'payment_intent.canceled', 'canceled', 'pi_1', 'ch_declined')))
+    expect(response.status).toBe(200)
+    expect(tables.transactions[0].escrow_status).toBe('failed')
+    expect(tables.transactions[0].stripe_charge_id).toBeNull()
+    expect(tables.transactions[0].stripe_transfer_id).toBeNull()
+    expect(retrieveCharge).not.toHaveBeenCalled()
   })
 })
 

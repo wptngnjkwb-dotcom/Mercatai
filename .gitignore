@@ -30,3 +30,6 @@ sdk-langchain/
 
 # local-only business materials (not for the repo)
 docs/pitch/
+
+# locally downloaded dev tooling (e.g. Stripe CLI binary) — not vendored
+.tools/

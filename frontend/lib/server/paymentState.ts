@@ -6,51 +6,66 @@ export type PaymentState = 'pending' | 'processing' | 'authorized' | 'failed'
 
 const HOURS_TO_MS = 60 * 60 * 1000
 
+export interface PaymentIdentityOutcome {
+  stripeChargeId: string | null
+  stripeTransferId: string | null
+}
+
 /**
- * Best-effort identity binding: records the transaction's stable
- * stripe_charge_id (free — already on the PaymentIntent's own
- * latest_charge field, no extra Stripe call) and, when a `stripe` client
- * is available, its stripe_transfer_id (one extra charges.retrieve,
- * since the Transfer id lives on the Charge, not the PaymentIntent).
- * Neither is required for the escrow state machine — this exists so a
- * later charge.dispute.* event (which carries charge/payment_intent ids,
- * never a task or transaction id) can be matched back to the right
- * transaction, and so an admin can jump straight to the right Stripe
- * Dashboard objects. Never throws: a failure here must never break
- * escrow reconciliation, which is why it's called after the transaction
- * is already confirmed 'held', not before.
+ * Idempotently records a transaction's stripe_charge_id/stripe_transfer_id
+ * from Stripe's own CURRENT PaymentIntent/Charge — via
+ * record_payment_charge_identity (frontend/sql/20_payment_charge_transfer_identity.sql),
+ * which works at ANY escrow_status, including 'released'. A live sandbox
+ * run found two real gaps in the previous best-effort version: a
+ * destination charge's Transfer isn't always attached to the Charge the
+ * instant it's captured, and every path that finalizes a funded
+ * transaction flips escrow_status straight to 'released' in the same
+ * request as the capture — permanently excluding a transaction from the
+ * old pending/held-only gate the moment a Transfer became visible a
+ * moment too late.
+ *
+ * Write rules (enforced in SQL, not here): a NULL stored id can be filled
+ * in; an identical id is an idempotent no-op success; an EXISTING id that
+ * differs from what Stripe now reports is NEVER overwritten — logged to
+ * audit_logs atomically instead, and surfaced by throwing here so a
+ * caller (the webhook route in particular) never silently accepts a
+ * mismatch. Unlike the old helper, this DOES throw on failure — capture,
+ * escrow release, task state, reputation and free-task accounting are
+ * all handled elsewhere and never re-run by a retry of this call, so
+ * letting a caller's retry logic see the failure is always safe.
  */
-async function captureChargeIdentity(
+export async function recordPaymentChargeIdentity(
   db: ReturnType<typeof getSupabase>,
   txId: string,
   intent: Stripe.PaymentIntent,
   stripe?: Stripe,
-): Promise<void> {
+): Promise<PaymentIdentityOutcome | null> {
   const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : (intent.latest_charge as Stripe.Charge | null)?.id ?? null
-  if (!chargeId) return
-  try {
-    const { data: current, error: readError } = await db
-      .from('transactions')
-      .select('stripe_charge_id, stripe_transfer_id')
-      .eq('id', txId)
-      .maybeSingle()
-    if (readError) throw readError
-    if (current?.stripe_charge_id === chargeId && current?.stripe_transfer_id) return // already fully captured
+  if (!chargeId) return null
 
-    let transferId: string | null = current?.stripe_transfer_id ?? null
-    if (!transferId && stripe) {
-      const charge = await stripe.charges.retrieve(chargeId)
-      transferId = typeof charge.transfer === 'string' ? charge.transfer : (charge.transfer as Stripe.Transfer | null)?.id ?? null
-    }
-
-    const { error: updateError } = await db
-      .from('transactions')
-      .update({ stripe_charge_id: chargeId, ...(transferId ? { stripe_transfer_id: transferId } : {}) })
-      .eq('id', txId)
-    if (updateError) throw updateError
-  } catch (err) {
-    console.error(`Could not capture charge/transfer identity for transaction ${txId}`, err)
+  let transferId: string | null = null
+  if (stripe) {
+    const charge = await stripe.charges.retrieve(chargeId)
+    transferId = typeof charge.transfer === 'string' ? charge.transfer : (charge.transfer as Stripe.Transfer | null)?.id ?? null
   }
+
+  const { data, error } = await db.rpc('record_payment_charge_identity', {
+    p_transaction_id: txId,
+    p_stripe_payment_intent_id: intent.id,
+    p_stripe_charge_id: chargeId,
+    p_stripe_transfer_id: transferId,
+  })
+  if (error) throw new Error(`Failed to record payment charge/transfer identity for transaction ${txId}: ${error.message}`)
+  const result = Array.isArray(data) ? data[0] : data
+  if (!result) throw new Error(`Failed to record payment charge/transfer identity for transaction ${txId}: RPC returned no row`)
+
+  if (result.charge_id_conflict || result.transfer_id_conflict) {
+    throw new Error(
+      `Stripe charge/transfer identity mismatch for transaction ${txId} — an existing id differs from Stripe's current data and was not overwritten (see audit_logs: payment_identity_mismatch)`
+    )
+  }
+
+  return { stripeChargeId: result.stripe_charge_id, stripeTransferId: result.stripe_transfer_id }
 }
 
 async function ensureFundedTaskStarted(
@@ -178,9 +193,21 @@ export async function reconcilePaymentIntent(
     // If a previous attempt updated the transaction but failed to start the
     // task, the next webhook or status reconciliation repairs it.
     await ensureFundedTaskStarted(db, tx, intent, eventType)
-    // Best-effort — see captureChargeIdentity's own doc comment for why a
-    // failure here never throws or blocks the state machine above.
-    await captureChargeIdentity(db, tx.id, intent, stripe)
+  }
+
+  // Identity backfill is deliberately OUTSIDE the pending/held branch
+  // above and gated only on `funded` — it must keep working after the
+  // transaction reaches 'released' (see recordPaymentChargeIdentity's own
+  // doc comment), so a late payment_intent.succeeded webhook or a plain
+  // status check can still backfill a transfer id a synchronous capture
+  // path didn't have yet. `funded` itself already excludes a failed or
+  // refunded-looking PaymentIntent (status outside requires_capture/
+  // succeeded), so a declined attempt's stale charge is never recorded as
+  // if it belonged to a genuinely funded transaction. Unlike the escrow
+  // transition above, a failure here is never swallowed — it must
+  // propagate so the webhook route returns 500 and Stripe retries.
+  if (funded) {
+    await recordPaymentChargeIdentity(db, tx.id, intent, stripe)
   }
 
   // eventType alone is not a source of truth: Stripe can deliver an old

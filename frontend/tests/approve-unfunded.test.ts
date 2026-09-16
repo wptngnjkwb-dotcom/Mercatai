@@ -25,11 +25,31 @@ const rpcCalls: { name: string; args: Record<string, unknown> }[] = []
 const ASSIGNED_AGENT_ID = 'agent-1'
 let assignedAgentVisibility = 'public'
 let finalizeRpcError: Record<string, unknown> | null = null
+let identityRpcError: Record<string, unknown> | null = null
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
     async rpc(name: string, args: Record<string, unknown>) {
       rpcCalls.push({ name, args })
+      // Mirrors frontend/sql/20_payment_charge_transfer_identity.sql's
+      // compare-and-set semantics closely enough for this file's purpose —
+      // full coverage of that logic lives in
+      // tests/payment-charge-transfer-identity.test.ts and
+      // tests/stripe-webhook.test.ts; this just proves approve.ts calls it
+      // with the right args right after a real capture.
+      if (name === 'record_payment_charge_identity') {
+        if (identityRpcError) return { data: null, error: identityRpcError }
+        if (transactionRow) {
+          transactionRow.stripe_charge_id = args.p_stripe_charge_id
+          transactionRow.stripe_transfer_id = args.p_stripe_transfer_id
+        }
+        return { data: [{
+          transaction_id: args.p_transaction_id,
+          stripe_charge_id: args.p_stripe_charge_id, stripe_transfer_id: args.p_stripe_transfer_id,
+          charge_id_written: true, transfer_id_written: true,
+          charge_id_conflict: false, transfer_id_conflict: false,
+        }], error: null }
+      }
       if (finalizeRpcError) return { data: null, error: finalizeRpcError }
       return { data: [{
         task_status: 'completed', transaction_status: 'released',
@@ -73,18 +93,31 @@ const {
   recordAffiliateEarning,
   retrievePaymentIntent,
   capturePaymentIntent,
+  retrieveCharge,
   stripeConstructor,
 } = vi.hoisted(() => {
-  const retrieve = vi.fn(async () => ({ capture_method: 'manual', status: 'requires_capture' }))
+  // requires_capture pre-capture, succeeded (with a charge) once "captured"
+  // below flips it — close enough to Stripe's real behavior for this
+  // file's purpose without needing a full state machine. Derived from the
+  // capture spy's own call count (reset by this file's vi.clearAllMocks()
+  // in beforeEach) rather than a separate closure flag, so it can never
+  // leak stale "captured" state into the next test.
   const capture = vi.fn(async () => ({}))
+  const retrieve = vi.fn(async () => (
+    capture.mock.calls.length > 0
+      ? { id: 'pi_test', capture_method: 'manual', status: 'succeeded', latest_charge: 'ch_test' }
+      : { id: 'pi_test', capture_method: 'manual', status: 'requires_capture' }
+  ))
+  const retrieveCharge = vi.fn(async (id: string) => ({ id, transfer: 'tr_test' }))
   return {
     fireWebhooks: vi.fn(async (_event: string, _payload: Record<string, unknown>) => {}),
     recordAffiliateEarning: vi.fn(async () => {}),
     retrievePaymentIntent: retrieve,
     capturePaymentIntent: capture,
+    retrieveCharge,
     // Must be a function expression, not an arrow — the route calls `new Stripe(...)`
     stripeConstructor: vi.fn(function () {
-      return { paymentIntents: { retrieve, capture } }
+      return { paymentIntents: { retrieve, capture }, charges: { retrieve: retrieveCharge } }
     }),
   }
 })
@@ -114,6 +147,7 @@ describe('PUT /api/v1/tasks/[id]/approve', () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'
     assignedAgentVisibility = 'public'
     finalizeRpcError = null
+    identityRpcError = null
   })
 
   function expectNoSideEffects() {
@@ -188,7 +222,7 @@ describe('PUT /api/v1/tasks/[id]/approve', () => {
   })
 
   // The guards above must not have made legitimate approval unreachable.
-  it('captures and releases a funded payment', async () => {
+  it('captures a funded card payment, records both stripe_charge_id and stripe_transfer_id, and releases it — all in one approval', async () => {
     transactionRow = {
       id: 'tx-1',
       task_id: TASK_ID,
@@ -202,9 +236,20 @@ describe('PUT /api/v1/tasks/[id]/approve', () => {
 
     expect(response.status).toBe(200)
     expect(capturePaymentIntent).toHaveBeenCalledWith('pi_test')
-    expect(rpcCalls).toEqual([{ name: 'finalize_funded_task', args: {
-      p_task_id: TASK_ID, p_transaction_id: 'tx-1', p_reason: 'buyer_approved',
-    } }])
+    // Identity is recorded from the POST-capture PaymentIntent/Charge,
+    // BEFORE finalize_funded_task — see approve.ts's own comment on why a
+    // failure in between must never be reported as "capture failed".
+    expect(rpcCalls).toEqual([
+      { name: 'record_payment_charge_identity', args: {
+        p_transaction_id: 'tx-1', p_stripe_payment_intent_id: 'pi_test',
+        p_stripe_charge_id: 'ch_test', p_stripe_transfer_id: 'tr_test',
+      } },
+      { name: 'finalize_funded_task', args: {
+        p_task_id: TASK_ID, p_transaction_id: 'tx-1', p_reason: 'buyer_approved',
+      } },
+    ])
+    expect(transactionRow.stripe_charge_id).toBe('ch_test')
+    expect(transactionRow.stripe_transfer_id).toBe('tr_test')
     expect(taskUpdates).toHaveLength(0)
     expect(transactionUpdates).toHaveLength(0)
     expect(fireWebhooks).toHaveBeenCalled()
@@ -223,6 +268,35 @@ describe('PUT /api/v1/tasks/[id]/approve', () => {
     expect(recordAffiliateEarning).not.toHaveBeenCalled()
     expect(taskUpdates).toHaveLength(0)
     expect(transactionUpdates).toHaveLength(0)
+  })
+
+  it('a DB failure recording charge/transfer identity right after a successful capture is reported accurately (not as "capture failed") and never reaches finalize_funded_task — a retry heals it without a second capture', async () => {
+    transactionRow = {
+      id: 'tx-1', task_id: TASK_ID, escrow_status: 'held', platform_fee_eur: 5,
+      agent_payout_eur: 90, stripe_payment_intent_id: 'pi_test',
+    }
+    identityRpcError = { code: 'XX000', message: 'simulated connection reset' }
+
+    const first = await PUT(approveRequest(), { params: { id: TASK_ID } })
+    const firstBody = await first.json()
+    expect(first.status).toBe(500)
+    expect(firstBody.error).toMatch(/charge\/transfer identity/i)
+    expect(firstBody.error).not.toMatch(/capture failed/i) // Stripe DID capture — must not say otherwise
+    expect(capturePaymentIntent).toHaveBeenCalledTimes(1)
+    expect(rpcCalls.some((c) => c.name === 'finalize_funded_task')).toBe(false)
+    expect(fireWebhooks).not.toHaveBeenCalled()
+
+    // Retry: the PaymentIntent is already 'succeeded' (capturePaymentIntent
+    // call count would show a second attempt if the route mistakenly
+    // re-captured), identity recording now succeeds, and finalization
+    // proceeds normally.
+    identityRpcError = null
+    const retry = await PUT(approveRequest(), { params: { id: TASK_ID } })
+    expect(retry.status).toBe(200)
+    expect(capturePaymentIntent).toHaveBeenCalledTimes(1) // still just once — never a second capture
+    expect(transactionRow.stripe_charge_id).toBe('ch_test')
+    expect(transactionRow.stripe_transfer_id).toBe('tr_test')
+    expect(rpcCalls.some((c) => c.name === 'finalize_funded_task')).toBe(true)
   })
 
   it('includes the real agent_id in the public task.completed webhook payload for a public agent', async () => {

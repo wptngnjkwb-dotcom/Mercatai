@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type Stripe from 'stripe'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { recordAffiliateEarning } from '@/lib/server/affiliate'
 import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
+import { recordPaymentChargeIdentity } from '@/lib/server/paymentState'
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   // 1. Autentizace — buyer token for this task, or admin token
@@ -82,6 +84,19 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       return NextResponse.json({ error: `Card authorization is not capturable (Stripe status: ${intent.status})` }, { status: 409 })
     } else if (intent.capture_method !== 'manual' && intent.status !== 'succeeded') {
       return NextResponse.json({ error: `Automatic payment is not settled (Stripe status: ${intent.status})` }, { status: 409 })
+    }
+
+    // Stripe has now captured (or already had captured) this payment — read
+    // its CURRENT charge identity and record it before finalizing in the DB.
+    // A failure here must surface as its own retryable error, never as
+    // "capture failed" (it didn't) and never silently swallowed — see
+    // recordPaymentChargeIdentity's own doc comment.
+    const capturedIntent: Stripe.PaymentIntent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+    try {
+      await recordPaymentChargeIdentity(db, tx.id, capturedIntent, stripe)
+    } catch (identityErr) {
+      console.error('Failed to record charge/transfer identity after capture:', identityErr)
+      return NextResponse.json({ error: 'Payment was captured but its charge/transfer identity could not be recorded — retry required' }, { status: 500 })
     }
   } catch (stripeErr) {
     console.error('Stripe capture failed:', stripeErr)
