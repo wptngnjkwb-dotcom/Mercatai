@@ -128,6 +128,14 @@ one copy of each file to maintain.
 > All three queries must return zero rows. The migration changes no workflow state
 > and is safe to re-run after a successful application.
 
+> **Upgrading an existing install after migrations 14–18** must also apply
+> `frontend/sql/19_restrict_service_role_rpcs.sql`. Supabase can attach explicit
+> `EXECUTE` grants for `anon` and `authenticated` when functions are created, so
+> revoking only `PUBLIC` is not sufficient on every installation. Migration 19
+> idempotently removes all three public grants from the internal payment and
+> webhook lease RPCs and leaves execution only to `service_role`. It changes no
+> rows and is safe to run repeatedly.
+
 ## 3. Configure secrets
 
 ```bash
