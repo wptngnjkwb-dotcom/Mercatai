@@ -41,7 +41,17 @@ export async function recordPaymentChargeIdentity(
   stripe?: Stripe,
 ): Promise<PaymentIdentityOutcome | null> {
   const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : (intent.latest_charge as Stripe.Charge | null)?.id ?? null
-  if (!chargeId) return null
+  if (!chargeId) {
+    // A 'succeeded' PaymentIntent always has a Charge — Stripe creates it
+    // as part of the capture itself, no propagation delay possible. Seeing
+    // none here means the caller passed a stale/incomplete snapshot; treat
+    // it as a failure to record so the caller retries with fresher data,
+    // rather than quietly recording nothing for a payment that DID settle.
+    if (intent.status === 'succeeded') {
+      throw new Error(`Payment intent ${intent.id} succeeded but has no latest_charge yet — retry required`)
+    }
+    return null
+  }
 
   let transferId: string | null = null
   if (stripe) {
@@ -63,6 +73,22 @@ export async function recordPaymentChargeIdentity(
     throw new Error(
       `Stripe charge/transfer identity mismatch for transaction ${txId} — an existing id differs from Stripe's current data and was not overwritten (see audit_logs: payment_identity_mismatch)`
     )
+  }
+
+  // For a genuinely SETTLED payment ('succeeded'), a destination charge's
+  // Transfer can lag its Charge by a brief moment (the exact gap a live
+  // sandbox run found) — but it always arrives. Rather than silently
+  // persisting a charge-only identity and hoping something calls this
+  // again later, treat a still-missing transfer as a failure here so the
+  // caller retries (the webhook route's existing try/catch returns 500,
+  // Stripe redelivers; the capture routes surface their own retryable
+  // error) — the charge_id write above already committed either way, so
+  // the retry only has the transfer left to fill in.
+  // 'requires_capture' (authorized but not yet captured) deliberately
+  // stays exempt: a destination charge's Transfer never exists before an
+  // actual capture, so a missing transfer there is normal, not a gap.
+  if (intent.status === 'succeeded' && !result.stripe_transfer_id) {
+    throw new Error(`Payment intent ${intent.id} succeeded but its Transfer is not yet attached to charge ${result.stripe_charge_id} — retry required`)
   }
 
   return { stripeChargeId: result.stripe_charge_id, stripeTransferId: result.stripe_transfer_id }

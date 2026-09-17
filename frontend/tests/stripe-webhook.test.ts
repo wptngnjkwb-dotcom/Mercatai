@@ -220,7 +220,13 @@ function webhookRequest(event: unknown, signature = 'valid-signature') {
   })
 }
 
-function paymentIntentEvent(id: string, type: string, status: string, paymentIntentId = 'pi_1', latestCharge?: string) {
+// Defaults to a resolvable charge (see chargeTransferById's own 'ch_default'
+// entry in beforeEach) so the many pre-existing tests in this file that
+// don't care about charge/transfer identity specifics keep passing under
+// recordPaymentChargeIdentity's stricter 'succeeded' requirement — pass
+// `null` explicitly to omit latest_charge for a test that specifically
+// wants that.
+function paymentIntentEvent(id: string, type: string, status: string, paymentIntentId = 'pi_1', latestCharge: string | null = 'ch_default') {
   return { id, type, data: { object: { id: paymentIntentId, status, ...(latestCharge ? { latest_charge: latestCharge } : {}) } } }
 }
 
@@ -235,7 +241,12 @@ beforeEach(() => {
   constructEvent.mockClear()
   retrieveDispute.mockClear()
   retrieveCharge.mockClear()
-  chargeTransferById = {}
+  // Baseline so tests that don't care about charge/transfer identity
+  // specifics still get a complete, resolvable identity for the default
+  // 'ch_default' charge paymentIntentEvent() attaches — otherwise EVERY
+  // pre-existing 'succeeded' test would now fail recordPaymentChargeIdentity's
+  // stricter "succeeded must have a transfer too" check.
+  chargeTransferById = { ch_default: 'tr_default' }
   currentStripeDispute = { id: 'dp_1', status: 'needs_response', reason: 'fraudulent', amount: 5000, currency: 'eur', charge: 'ch_1', payment_intent: 'pi_1' }
   delete process.env.ADMIN_ALERT_EMAIL
   delete process.env.RESEND_API_KEY
@@ -459,6 +470,33 @@ describe('payment_intent.succeeded — charge/transfer identity (record_payment_
     expect(tables.transactions[0].stripe_charge_id).toBeNull()
     expect(tables.transactions[0].stripe_transfer_id).toBeNull()
     expect(retrieveCharge).not.toHaveBeenCalled()
+  })
+
+  it('a "succeeded" PaymentIntent whose Transfer is not yet attached returns 500 so Stripe retries — the charge id is still durably recorded on this attempt', async () => {
+    // 'ch_no_transfer_yet' deliberately has NO entry in chargeTransferById
+    // — retrieveCharge() resolves it with transfer: null, simulating the
+    // exact propagation gap a live sandbox run found immediately after a
+    // real capture.
+    const response = await POST(webhookRequest(paymentIntentEvent('evt_pending_transfer', 'payment_intent.succeeded', 'succeeded', 'pi_1', 'ch_no_transfer_yet')))
+
+    expect(response.status).toBe(500)
+    // The charge id itself was already fully known (no propagation delay
+    // for it) and must not be thrown away just because the transfer isn't
+    // ready — the retry this 500 provokes only has the transfer left to fill in.
+    expect(tables.transactions[0].stripe_charge_id).toBe('ch_no_transfer_yet')
+    expect(tables.transactions[0].stripe_transfer_id).toBeNull()
+  })
+
+  it('by contrast, "requires_capture" (authorized but not yet captured) is fine with a charge and no transfer at all — a destination charge never has one before capture', async () => {
+    // No chargeTransferById entry for 'ch_authorized_only' either — same
+    // "no transfer available" shape as the test above, but this time the
+    // PaymentIntent status is requires_capture, not succeeded.
+    const response = await POST(webhookRequest(paymentIntentEvent('evt_auth_only', 'payment_intent.succeeded', 'requires_capture', 'pi_1', 'ch_authorized_only')))
+
+    expect(response.status).toBe(200)
+    expect(tables.transactions[0].escrow_status).toBe('held')
+    expect(tables.transactions[0].stripe_charge_id).toBe('ch_authorized_only')
+    expect(tables.transactions[0].stripe_transfer_id).toBeNull()
   })
 })
 

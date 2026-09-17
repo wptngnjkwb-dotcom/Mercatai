@@ -237,15 +237,54 @@ describe('recordPaymentChargeIdentity — direct write-rule tests', () => {
     expect(result).toEqual({ stripeChargeId: 'py_sepa_1', stripeTransferId: 'tr_sepa_1' })
   })
 
-  it('returns null and calls neither Stripe nor the db when the intent has no charge at all', async () => {
+  it('returns null and calls neither Stripe nor the db when a non-succeeded intent (e.g. requires_capture) has no charge yet', async () => {
     const db = makeFakeDb()
     const rpcSpy = vi.spyOn(db, 'rpc')
     const stripe = makeStripe({})
 
-    const result = await recordPaymentChargeIdentity(db as any, 'tx-1', makeIntent({ latest_charge: null }), stripe)
+    const result = await recordPaymentChargeIdentity(db as any, 'tx-1', makeIntent({ status: 'requires_capture', latest_charge: null }), stripe)
 
     expect(result).toBeNull()
     expect(rpcSpy).not.toHaveBeenCalled()
     expect(stripe.charges.retrieve).not.toHaveBeenCalled()
+  })
+
+  it('throws for a "succeeded" intent with no latest_charge at all — a settled payment always has one; a missing one means stale data, not "nothing to record"', async () => {
+    const db = makeFakeDb()
+    const rpcSpy = vi.spyOn(db, 'rpc')
+    const stripe = makeStripe({})
+
+    await expect(
+      recordPaymentChargeIdentity(db as any, 'tx-1', makeIntent({ status: 'succeeded', latest_charge: null }), stripe)
+    ).rejects.toThrow(/no latest_charge/i)
+    expect(rpcSpy).not.toHaveBeenCalled()
+  })
+
+  it('"requires_capture" is fine with a charge and NO transfer at all — a destination charge never has a Transfer before it is actually captured', async () => {
+    transactions.push({ id: 'tx-1', stripe_payment_intent_id: 'pi_1', stripe_charge_id: null, stripe_transfer_id: null })
+    const db = makeFakeDb()
+    const stripe = makeStripe({}) // ch_1 resolves with transfer: null — no entry at all
+
+    const result = await recordPaymentChargeIdentity(
+      db as any, 'tx-1', makeIntent({ status: 'requires_capture' }), stripe
+    )
+
+    expect(result).toEqual({ stripeChargeId: 'ch_1', stripeTransferId: null })
+    expect(transactions[0].stripe_charge_id).toBe('ch_1')
+  })
+
+  it('"succeeded" with a charge but NO transfer yet throws so the caller retries — the charge id is still durably written on this same attempt', async () => {
+    transactions.push({ id: 'tx-1', stripe_payment_intent_id: 'pi_1', stripe_charge_id: null, stripe_transfer_id: null })
+    const db = makeFakeDb()
+    const stripe = makeStripe({}) // same "not attached yet" shape as the requires_capture case above
+
+    await expect(
+      recordPaymentChargeIdentity(db as any, 'tx-1', makeIntent({ status: 'succeeded' }), stripe)
+    ).rejects.toThrow(/Transfer is not yet attached/i)
+
+    // Unlike a genuine conflict, this is a legitimate, not-yet-complete
+    // write — the already-known charge id must not be discarded.
+    expect(transactions[0].stripe_charge_id).toBe('ch_1')
+    expect(transactions[0].stripe_transfer_id).toBeNull()
   })
 })
