@@ -19,6 +19,7 @@ const bidRow = { id: BID_ID, task_id: TASK_ID, agent_id: 'agent-1', price_eur: 5
 let accountRetrieveResult: Record<string, unknown> = {}
 function resetAccountRetrieveResult() {
   accountRetrieveResult = {
+    country: 'CZ',
     details_submitted: true,
     requirements: { currently_due: [] },
     charges_enabled: true,
@@ -149,6 +150,11 @@ beforeEach(() => {
   agentUpdates.length = 0
   existingTxRow = null
   resetAccountRetrieveResult()
+  // Matches accountRetrieveResult.country ('CZ') above — represents a
+  // properly configured deployment. The country-gate's own fail-closed
+  // behavior (empty/unset, a disallowed country) is covered by its
+  // dedicated describe block further down, which overrides this per test.
+  process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'CZ'
   stripeAccountsRetrieve.mockClear()
   stripePaymentIntentsCreate.mockClear()
   stripePaymentIntentsRetrieve.mockClear()
@@ -268,6 +274,10 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
 
   it('rejects SEPA for a non-EEA connected account with an actionable card-only response', async () => {
     accountRetrieveResult.country = 'PE'
+    // Enable PE for the Direct Charge gate too — this test is specifically
+    // about the SEPA-availability check, not the country gate (which has
+    // its own dedicated describe block below).
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'CZ,PE'
     const response = await fundRequest('sepa_debit')()
     const body = await response.json()
 
@@ -420,5 +430,80 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
       expect(stripePaymentIntentsRetrieve).not.toHaveBeenCalled()
       expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('POST /api/v1/payments/create-intent — STRIPE_DIRECT_CHARGE_COUNTRIES fail-closed gate', () => {
+  function fundRequest(paymentMethod?: 'card' | 'sepa_debit') {
+    return async () => {
+      const { POST } = await import('@/app/api/v1/payments/create-intent/route')
+      const buyerToken = await signToken({ role: 'buyer', task_id: TASK_ID, org_id: 'org-1' }, '30d')
+      const request = new NextRequest('http://localhost/api/v1/payments/create-intent', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${buyerToken}` },
+        body: JSON.stringify({ task_id: TASK_ID, ...(paymentMethod ? { payment_method: paymentMethod } : {}) }),
+      })
+      return POST(request)
+    }
+  }
+
+  it('refuses a brand-new payment when STRIPE_DIRECT_CHARGE_COUNTRIES is unset — the empty default permits nothing', async () => {
+    delete process.env.STRIPE_DIRECT_CHARGE_COUNTRIES
+    const response = await fundRequest('card')()
+    const body = await response.json()
+
+    expect(response.status).toBe(403)
+    expect(body.direct_charge_country_enabled).toBe(false)
+    expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
+  })
+
+  it('refuses a brand-new payment when STRIPE_DIRECT_CHARGE_COUNTRIES is set but does not include the connected account\'s country — and never silently falls back to the destination-charge model', async () => {
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'FR,ES,GB' // CZ (the fixture's account country) deliberately absent
+    const response = await fundRequest('card')()
+    const body = await response.json()
+
+    expect(response.status).toBe(403)
+    expect(body.direct_charge_country_enabled).toBe(false)
+    expect(body.error).toMatch(/not yet enabled for CZ/i)
+    // Refused outright, not downgraded: no PaymentIntent of any kind was
+    // created, in either charge model.
+    expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
+  })
+
+  for (const code of ['FR', 'ES', 'GB']) {
+    it(`allows a brand-new Direct Charge payment when the connected account's country (${code}) is individually enabled`, async () => {
+      accountRetrieveResult.country = code
+      process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = code
+      const response = await fundRequest('card')()
+      const body = await response.json()
+
+      expect(response.status).toBe(201)
+      expect(body).toMatchObject({ charge_model: 'direct', stripe_connected_account_id: 'acct_1' })
+      expect(stripePaymentIntentsCreate).toHaveBeenCalled()
+    })
+  }
+
+  it('an old, already-bound destination-charge transaction is fully served regardless of the Direct Charge gate — it is never re-evaluated', async () => {
+    delete process.env.STRIPE_DIRECT_CHARGE_COUNTRIES // gate would refuse any brand-new attempt
+    existingTxRow = {
+      id: 'tx-legacy-1',
+      escrow_status: 'pending',
+      stripe_payment_intent_id: 'pi_existing_pending',
+      stripe_charge_model: 'destination',
+      stripe_connected_account_id: null,
+      gross_amount_eur: 50,
+      platform_fee_eur: 2.1,
+      stripe_fee_eur: 0.4,
+      agent_payout_eur: 47.5,
+      review_deadline_at: '2026-01-01T00:00:00.000Z',
+    }
+
+    const response = await fundRequest('card')()
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body).toMatchObject({ charge_model: 'destination', stripe_connected_account_id: null })
+    expect(stripePaymentIntentsRetrieve).toHaveBeenCalledWith('pi_existing_pending', {})
+    expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
   })
 })

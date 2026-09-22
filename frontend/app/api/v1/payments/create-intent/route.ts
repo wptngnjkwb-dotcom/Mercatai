@@ -7,6 +7,7 @@ import { getTokenFromRequest } from '@/lib/server/auth'
 import { reconcilePaymentIntent } from '@/lib/server/paymentState'
 import { computeStripeAccountReadiness, isMethodReady, syncOnboardingCompletedFlag } from '@/lib/server/stripeAccountReadiness'
 import { getOnboardingCountry } from '@/lib/onboardingCountries'
+import { isDirectChargeCountryEnabled } from '@/lib/server/stripeConnectCountries'
 import {
   bindDirectChargeContext,
   directChargeCreateOptions,
@@ -195,9 +196,35 @@ export async function POST(request: NextRequest) {
     if (!claimedTx) throw new Error('Claimed payment transaction could not be reloaded')
 
     const existingPaymentIntentId = claimedTx.stripe_payment_intent_id ?? paymentTx.stripe_payment_intent_id
-    const paymentContext = existingPaymentIntentId?.startsWith('pi_')
-      ? paymentContextFromTransaction(claimedTx)
-      : await bindDirectChargeContext(db, paymentTx.transaction_id, agentStripeAccount)
+    const isNewChargeAttempt = !existingPaymentIntentId?.startsWith('pi_')
+
+    // Fail-closed country gate — ONLY for a brand-new payment attempt that
+    // is about to freeze a Direct Charge context for the first time.
+    // STRIPE_DIRECT_CHARGE_COUNTRIES (see stripeConnectCountries.ts)
+    // defaults to empty, so an unconfigured deployment permits none, and
+    // being onboarding-enabled is never silently treated as payment-
+    // enabled. A disallowed country is refused outright — this must never
+    // fall back to the legacy destination-charge model, silently or
+    // otherwise. Already-bound transactions (an existing PaymentIntent,
+    // old destination rows included) are untouched: see
+    // paymentContextFromTransaction below, which reads the immutably
+    // stored charge model instead of re-deciding it.
+    const accountForGate = isNewChargeAttempt ? await stripe.accounts.retrieve(agentStripeAccount) : null
+    if (isNewChargeAttempt) {
+      const gateCountryCode = typeof accountForGate!.country === 'string' ? accountForGate!.country.toUpperCase() : undefined
+      if (!gateCountryCode || !isDirectChargeCountryEnabled(gateCountryCode)) {
+        return NextResponse.json({
+          error: gateCountryCode
+            ? `Direct Charge payments are not yet enabled for ${gateCountryCode}. Contact support.`
+            : 'Could not determine the connected account\'s country — payment cannot be created.',
+          direct_charge_country_enabled: false,
+        }, { status: 403 })
+      }
+    }
+
+    const paymentContext = isNewChargeAttempt
+      ? await bindDirectChargeContext(db, paymentTx.transaction_id, agentStripeAccount)
+      : paymentContextFromTransaction(claimedTx)
 
     if (paymentContext.chargeModel === 'direct' && paymentContext.connectedAccountId !== agentStripeAccount) {
       return NextResponse.json({
@@ -209,8 +236,14 @@ export async function POST(request: NextRequest) {
     // creating a PaymentIntent. For Direct Charges this is the immutable
     // connected-account namespace stored on the transaction; legacy
     // destination rows continue to use the assigned agent's account.
+    // Reuses the account already fetched for the gate check above when it
+    // is the same account (always true for a brand-new attempt — the
+    // account-mismatch case above already returned) rather than a second,
+    // redundant Stripe API call.
     const readinessAccountId = paymentContext.connectedAccountId ?? agentStripeAccount
-    const accountForReadiness = await stripe.accounts.retrieve(readinessAccountId)
+    const accountForReadiness = accountForGate && readinessAccountId === agentStripeAccount
+      ? accountForGate
+      : await stripe.accounts.retrieve(readinessAccountId)
     const connectedCountry = typeof accountForReadiness.country === 'string'
       ? getOnboardingCountry(accountForReadiness.country.toUpperCase())
       : undefined

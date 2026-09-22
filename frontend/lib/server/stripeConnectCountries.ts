@@ -76,3 +76,62 @@ export function getEnabledOnboardingCountryGroups(): Array<{ label: string; coun
     .map((group) => ({ label: group.label, countries: group.countries.filter((c) => enabled.has(c.code)) }))
     .filter((group) => group.countries.length > 0)
 }
+
+/**
+ * STRIPE_DIRECT_CHARGE_COUNTRIES — a SEPARATE, deliberately fail-closed
+ * allowlist gating whether a NEW payment may actually be created as a
+ * Direct Charge for a connected account in a given country. This is not
+ * the same list as STRIPE_CONNECT_ENABLED_COUNTRIES above: that one only
+ * gates *starting onboarding* (registration) — being on it has never been
+ * a promise that Mercatai will actually accept a payment for that
+ * country's agents yet. Before this gate existed, POST
+ * /api/v1/payments/create-intent created a Direct Charge for ANY
+ * connected account with a completed Stripe onboarding, regardless of
+ * country, the moment migration 21 shipped — this closes that gap.
+ *
+ * Unlike parseEnabledCountryCodes, this NEVER falls back to a broad
+ * default when unset or when every supplied code is invalid — it
+ * resolves to an EMPTY list instead. An unconfigured deployment must
+ * permit zero countries for Direct Charge payment creation, not silently
+ * inherit the onboarding rollout list. See isDirectChargeCountryEnabled's
+ * caller in create-intent/route.ts for how a disallowed country is
+ * refused outright rather than ever falling back to the legacy
+ * destination-charge model.
+ */
+function parseDirectChargeCountryCodes(): string[] {
+  const raw = process.env.STRIPE_DIRECT_CHARGE_COUNTRIES
+  if (!raw || !raw.trim()) return []
+
+  const candidates = raw.split(',').map((c) => c.trim().toUpperCase()).filter(Boolean)
+  const valid: string[] = []
+  const invalid: string[] = []
+  for (const code of candidates) {
+    if (getOnboardingCountry(code)) valid.push(code)
+    else invalid.push(code)
+  }
+  // ISO codes only — never log the raw env value itself.
+  if (invalid.length > 0) {
+    console.error(`STRIPE_DIRECT_CHARGE_COUNTRIES has unknown country code(s), ignored: ${invalid.join(', ')}`)
+  }
+  return Array.from(new Set(valid))
+}
+
+/** ISO codes Mercatai currently permits creating a NEW Direct Charge payment for. Deliberately separate from, and never wider than, onboarding enablement. */
+export function getDirectChargeEnabledCountryCodes(): string[] {
+  return parseDirectChargeCountryCodes()
+}
+
+export function isDirectChargeCountryEnabled(code: string): boolean {
+  return parseDirectChargeCountryCodes().includes(code.toUpperCase())
+}
+
+/**
+ * A country is publicly describable as "payments enabled" only when it is
+ * enabled for BOTH onboarding (registration) AND Direct Charge payment
+ * creation — being in only one of the two lists must never be reported as
+ * payment support. See docs/stripe-connect-country-support.md.
+ */
+export function getPaymentEnabledCountryCodes(): string[] {
+  const onboardingEnabled = new Set(parseEnabledCountryCodes())
+  return parseDirectChargeCountryCodes().filter((code) => onboardingEnabled.has(code))
+}

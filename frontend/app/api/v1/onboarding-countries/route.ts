@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getEnabledOnboardingCountryGroups, getEnabledOnboardingCountryCodes } from '@/lib/server/stripeConnectCountries'
+import { getEnabledOnboardingCountryGroups, getEnabledOnboardingCountryCodes, getPaymentEnabledCountryCodes } from '@/lib/server/stripeConnectCountries'
 
 // Public, unauthenticated — the country selector on /agent/stripe-onboard
 // needs this before an agent has any session at all. Server-only, because
@@ -15,8 +15,18 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   return NextResponse.json({
+    // "Registration supported" — permitted to START onboarding. Distinct
+    // from, and always a superset of, payment_enabled_country_codes below
+    // — see getPaymentEnabledCountryCodes's own doc comment for why being
+    // on this list alone must never be read as payment support.
     enabled_country_codes: getEnabledOnboardingCountryCodes(),
     groups: getEnabledOnboardingCountryGroups(),
-    note: 'These are the countries Mercatai currently permits starting Stripe Connect onboarding for. Being listed here means onboarding is permitted, not that a payout has been verified end-to-end for that country — Stripe performs live capability and identity checks during and after onboarding regardless.',
+    // "Payments enabled" — a NEW Direct Charge payment can actually be
+    // created for a connected account in this country (gated separately
+    // by STRIPE_DIRECT_CHARGE_COUNTRIES, defaults to empty). A country
+    // only appears here when it is enabled for BOTH onboarding and Direct
+    // Charges.
+    payment_enabled_country_codes: getPaymentEnabledCountryCodes(),
+    note: 'enabled_country_codes are the countries Mercatai currently permits starting Stripe Connect onboarding for — being listed there means onboarding is permitted, not that a payout has been verified end-to-end, and not that a payment can be created yet. payment_enabled_country_codes is the narrower, separately-gated list for which a new Direct Charge payment can actually be created today.',
   }, { headers: { 'Cache-Control': 'no-store' } })
 }

@@ -18,6 +18,18 @@ async function withEnabledCountries<T>(value: string, fn: () => Promise<T>): Pro
   }
 }
 
+async function withDirectChargeCountries<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const original = process.env.STRIPE_DIRECT_CHARGE_COUNTRIES
+  if (value === undefined) delete process.env.STRIPE_DIRECT_CHARGE_COUNTRIES
+  else process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = value
+  try {
+    return await fn()
+  } finally {
+    if (original === undefined) delete process.env.STRIPE_DIRECT_CHARGE_COUNTRIES
+    else process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = original
+  }
+}
+
 describe('Public UI / OpenAPI / discovery JSON share one Stripe Connect country allowlist', () => {
   it('the onboarding-countries endpoint, discovery JSON, and OpenAPI spec all list exactly the same codes', async () => {
     await withEnabledCountries('CZ,DE,NO,PE', async () => {
@@ -70,5 +82,46 @@ describe('Public UI / OpenAPI / discovery JSON share one Stripe Connect country 
       if (original === undefined) delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
       else process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = original
     }
+  })
+})
+
+describe('Registration-supported vs. payments-enabled — the two lists must never be conflated across surfaces', () => {
+  it('onboarding-countries and discovery JSON report the exact same payment_enabled list, and it is unset (empty) by default', async () => {
+    await withEnabledCountries('FR,ES,GB,DE', async () => {
+      await withDirectChargeCountries(undefined, async () => {
+        const onboardingCountries = await (await getOnboardingCountries()).json()
+        const discovery = await (await getDiscoveryJson()).json()
+
+        expect(onboardingCountries.payment_enabled_country_codes).toEqual([])
+        expect(discovery.stripe_connect_payment_enabled_countries).toEqual([])
+      })
+    })
+  })
+
+  it('onboarding-countries and discovery JSON agree on the payment-enabled list, and it is always a subset of the onboarding-enabled list', async () => {
+    await withEnabledCountries('FR,ES,DE', async () => {
+      await withDirectChargeCountries('ES,DE,GB', async () => {
+        const onboardingCountries = await (await getOnboardingCountries()).json()
+        const discovery = await (await getDiscoveryJson()).json()
+
+        expect(onboardingCountries.payment_enabled_country_codes.sort()).toEqual(['DE', 'ES'])
+        expect(discovery.stripe_connect_payment_enabled_countries.sort()).toEqual(['DE', 'ES'])
+        // GB is Direct-Charge-enabled but NOT onboarding-enabled in this
+        // scenario — must never leak into either payment-enabled list.
+        expect(onboardingCountries.payment_enabled_country_codes).not.toContain('GB')
+        expect(discovery.stripe_connect_payment_enabled_countries).not.toContain('GB')
+        for (const code of onboardingCountries.payment_enabled_country_codes) {
+          expect(onboardingCountries.enabled_country_codes).toContain(code)
+        }
+      })
+    })
+  })
+
+  it('both surfaces carry text distinguishing registration support from payment support', async () => {
+    const onboardingCountries = await (await getOnboardingCountries()).json()
+    const discovery = await (await getDiscoveryJson()).json()
+
+    expect(onboardingCountries.note).toMatch(/not that a payment can be created/i)
+    expect(discovery.stripe_connect_payment_enabled_countries_note).toMatch(/registration support is never itself a promise of payment support/i)
   })
 })

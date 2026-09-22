@@ -94,6 +94,10 @@ services:
       # Falls back to the reviewed EU/EEA + UK Direct Charges rollout set
       # inside the app when unset — see stripeConnectCountries.ts.
       STRIPE_CONNECT_ENABLED_COUNTRIES: ${STRIPE_CONNECT_ENABLED_COUNTRIES:-}
+      # SEPARATE, fail-closed gate on actually creating a new Direct Charge
+      # payment — defaults to empty (permits none) when unset, unlike
+      # STRIPE_CONNECT_ENABLED_COUNTRIES above. See stripeConnectCountries.ts.
+      STRIPE_DIRECT_CHARGE_COUNTRIES: ${STRIPE_DIRECT_CHARGE_COUNTRIES:-}
       # Signing secret of the SEPARATE Connect webhook endpoint
       # (/api/v1/payments/stripe-connect-webhook) — a production Stripe
       # event destination for "events on connected accounts" can have its

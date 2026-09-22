@@ -4,6 +4,9 @@ import {
   getEnabledOnboardingCountries,
   isOnboardingCountryEnabled,
   getEnabledOnboardingCountryGroups,
+  getDirectChargeEnabledCountryCodes,
+  isDirectChargeCountryEnabled,
+  getPaymentEnabledCountryCodes,
 } from '@/lib/server/stripeConnectCountries'
 
 // Every test restores the env var afterward — this module reads
@@ -11,9 +14,12 @@ import {
 // other test files sharing this process under vitest's isolate:false must
 // never see a value this file happened to leave behind.
 const ORIGINAL = process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
+const ORIGINAL_DIRECT_CHARGE = process.env.STRIPE_DIRECT_CHARGE_COUNTRIES
 afterEach(() => {
   if (ORIGINAL === undefined) delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
   else process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = ORIGINAL
+  if (ORIGINAL_DIRECT_CHARGE === undefined) delete process.env.STRIPE_DIRECT_CHARGE_COUNTRIES
+  else process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = ORIGINAL_DIRECT_CHARGE
 })
 
 describe('getEnabledOnboardingCountryCodes', () => {
@@ -108,5 +114,86 @@ describe('getEnabledOnboardingCountryGroups', () => {
 
     const flatCodes = groups.flatMap((g) => g.countries.map((c) => c.code))
     expect(flatCodes.sort()).toEqual(['DE', 'PE'])
+  })
+})
+
+describe('getDirectChargeEnabledCountryCodes / isDirectChargeCountryEnabled — fail-closed, separate from onboarding', () => {
+  it('resolves to an EMPTY list when the env var is unset — unlike onboarding, never a broad default', () => {
+    delete process.env.STRIPE_DIRECT_CHARGE_COUNTRIES
+    expect(getDirectChargeEnabledCountryCodes()).toEqual([])
+  })
+
+  it('resolves to an empty list when the env var is empty or whitespace', () => {
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = '   '
+    expect(getDirectChargeEnabledCountryCodes()).toEqual([])
+  })
+
+  for (const code of ['FR', 'ES', 'GB']) {
+    it(`allows ${code} to be enabled individually, without enabling any other country`, () => {
+      process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = code
+      expect(getDirectChargeEnabledCountryCodes()).toEqual([code])
+      expect(isDirectChargeCountryEnabled(code)).toBe(true)
+      expect(isDirectChargeCountryEnabled(code === 'FR' ? 'ES' : 'FR')).toBe(false)
+    })
+  }
+
+  it('a country enabled for onboarding but NOT listed here is correctly reported as not Direct-Charge-enabled', () => {
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ,DE'
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'DE'
+    expect(isDirectChargeCountryEnabled('CZ')).toBe(false)
+    expect(isDirectChargeCountryEnabled('DE')).toBe(true)
+  })
+
+  it('drops an invalid/unknown code rather than throwing, keeping the valid ones', () => {
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'FR,XX,ES'
+    expect(getDirectChargeEnabledCountryCodes()).toEqual(['FR', 'ES'])
+  })
+
+  it('when EVERY supplied code is invalid, resolves to EMPTY — never falls back to a broad default the way onboarding does', () => {
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'XX,YY,ZZ'
+    expect(getDirectChargeEnabledCountryCodes()).toEqual([])
+  })
+
+  it('rejects a real ISO code outside the Stripe Express catalog (e.g. Croatia)', () => {
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'FR,HR'
+    expect(getDirectChargeEnabledCountryCodes()).toEqual(['FR'])
+  })
+
+  it('de-duplicates and is case-insensitive', () => {
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'fr,FR,Fr'
+    expect(getDirectChargeEnabledCountryCodes()).toEqual(['FR'])
+  })
+
+  it('logs an invalid code without ever including the raw env var value or any secret-shaped content', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'FR,NOTREAL'
+      getDirectChargeEnabledCountryCodes()
+      const loggedText = errorSpy.mock.calls.map((call) => call.join(' ')).join('\n')
+      expect(loggedText).toContain('NOTREAL')
+      expect(loggedText).not.toMatch(/sk_(test|live)_|whsec_/)
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+})
+
+describe('getPaymentEnabledCountryCodes — publicly "payment supported" requires BOTH onboarding AND Direct Charges', () => {
+  it('is empty when Direct Charges are unset, even if onboarding is wide open', () => {
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'FR,ES,GB,DE'
+    delete process.env.STRIPE_DIRECT_CHARGE_COUNTRIES
+    expect(getPaymentEnabledCountryCodes()).toEqual([])
+  })
+
+  it('excludes a country enabled for Direct Charges but not (yet) for onboarding', () => {
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'FR'
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'FR,ES'
+    expect(getPaymentEnabledCountryCodes()).toEqual(['FR'])
+  })
+
+  it('is the exact intersection when both lists overlap partially', () => {
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'FR,ES,DE'
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'ES,DE,GB'
+    expect(getPaymentEnabledCountryCodes().sort()).toEqual(['DE', 'ES'])
   })
 })

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getEnabledOnboardingCountryCodes } from '@/lib/server/stripeConnectCountries'
+import { getEnabledOnboardingCountryCodes, getPaymentEnabledCountryCodes } from '@/lib/server/stripeConnectCountries'
 
 // Depends on STRIPE_CONNECT_ENABLED_COUNTRIES at request time. Without
 // this, Next.js statically optimizes a parameter-less GET route handler at
@@ -36,6 +36,8 @@ export async function GET() {
     stripe_charge_model_note: 'New buyer payments are Direct Charges created in the assigned agent connected account. Mercatai receives only its application fee; legacy payments keep their original destination-charge context.',
     stripe_connect_onboarding_countries: getEnabledOnboardingCountryCodes(),
     stripe_connect_onboarding_countries_note: "Countries Mercatai currently permits starting Stripe Connect onboarding for. Listing here means onboarding is permitted, not that a payout has been verified end-to-end for that country — Stripe performs live identity and capability checks during onboarding, and Mercatai re-checks capabilities and payouts_enabled live before every payment, regardless of this list.",
+    stripe_connect_payment_enabled_countries: getPaymentEnabledCountryCodes(),
+    stripe_connect_payment_enabled_countries_note: "The narrower, separately-gated list of countries for which a NEW Direct Charge payment can actually be created today (STRIPE_DIRECT_CHARGE_COUNTRIES, defaults to permitting none). A country appears in stripe_connect_onboarding_countries the moment registration opens for it — appearing here additionally requires Direct Charge payments to have been explicitly enabled for it too. Registration support is never itself a promise of payment support.",
     currency: 'EUR',
     supports_private_agent_profiles: true,
     profile_visibility_modes: ['public', 'private'],
