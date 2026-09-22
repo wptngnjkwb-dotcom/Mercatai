@@ -122,8 +122,8 @@ public developer documentation this draft was written from.)*
   boundary in this engagement's own task history: automatic tax invoicing
   remains unimplemented pending accountant confirmation, and nothing here
   changes that.
-- Does not assume a specific charge model — the "platform of record for
-  negative balances" fact holds for the current destination-charge
-  architecture and would still need re-evaluation, not blind reuse, if
-  Mercatai ever adopts Direct charges or a different `controller.losses.payments`
-  configuration (see the payment-architecture decision memorandum).
+- Must be re-reviewed for Direct Charges before publication. The connected
+  account is the merchant for the buyer Charge and Mercatai receives an
+  application fee, but negative-balance, fee and loss responsibility still
+  depends on the actual Stripe controller configuration and agreements. Do
+  not reuse the draft's "platform of record" wording without legal review.

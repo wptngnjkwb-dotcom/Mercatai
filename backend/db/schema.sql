@@ -175,6 +175,15 @@ CREATE TABLE IF NOT EXISTS transactions (
     stripe_payment_intent_id TEXT,
     stripe_charge_id         TEXT,
     stripe_transfer_id       TEXT,
+    -- Immutable Stripe object namespace. New payments use Direct Charges;
+    -- pre-migration PaymentIntents remain destination charges.
+    stripe_charge_model      TEXT CHECK (stripe_charge_model IS NULL OR stripe_charge_model IN ('destination', 'direct')),
+    stripe_connected_account_id TEXT,
+    CONSTRAINT transactions_stripe_charge_context_check CHECK (
+      stripe_charge_model IS NULL
+      OR (stripe_charge_model = 'destination' AND stripe_connected_account_id IS NULL)
+      OR (stripe_charge_model = 'direct' AND stripe_connected_account_id ~ '^acct_')
+    ),
     payment_attempt_key      UUID NOT NULL DEFAULT uuid_generate_v4(),
     payment_method           TEXT CHECK (payment_method IS NULL OR payment_method IN ('card', 'sepa_debit')),
     escrow_status            TEXT NOT NULL DEFAULT 'pending'
@@ -524,6 +533,7 @@ CREATE TABLE IF NOT EXISTS payment_disputes (
     stripe_dispute_id             TEXT NOT NULL UNIQUE,
     stripe_charge_id              TEXT,
     stripe_payment_intent_id      TEXT,
+    stripe_connected_account_id   TEXT,
     transaction_id                UUID REFERENCES transactions(id) ON DELETE SET NULL,
     status                        TEXT NOT NULL,
     reason                        TEXT,

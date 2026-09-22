@@ -17,14 +17,16 @@ afterEach(() => {
 })
 
 describe('getEnabledOnboardingCountryCodes', () => {
-  it('falls back to the conservative CZ,DE,NO default when the env var is unset', () => {
+  const euEeaUk = ['AT','BE','BG','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','IS','NO','GB']
+
+  it('falls back to the EU/EEA + UK Direct Charges rollout when the env var is unset', () => {
     delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
-    expect(getEnabledOnboardingCountryCodes()).toEqual(['CZ', 'DE', 'NO'])
+    expect(getEnabledOnboardingCountryCodes()).toEqual(euEeaUk)
   })
 
   it('falls back to the same default when the env var is empty or whitespace', () => {
     process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = '   '
-    expect(getEnabledOnboardingCountryCodes()).toEqual(['CZ', 'DE', 'NO'])
+    expect(getEnabledOnboardingCountryCodes()).toEqual(euEeaUk)
   })
 
   it('parses a real comma-separated list, trimming and upper-casing each code', () => {
@@ -37,9 +39,9 @@ describe('getEnabledOnboardingCountryCodes', () => {
     expect(getEnabledOnboardingCountryCodes()).toEqual(['CZ', 'DE'])
   })
 
-  it('falls back to the conservative default when every supplied code is invalid — never an empty offering', () => {
+  it('falls back to the EU/EEA + UK rollout when every supplied code is invalid — never an empty offering', () => {
     process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'XX,YY,ZZ'
-    expect(getEnabledOnboardingCountryCodes()).toEqual(['CZ', 'DE', 'NO'])
+    expect(getEnabledOnboardingCountryCodes()).toEqual(euEeaUk)
   })
 
   it('de-duplicates repeated codes', () => {
@@ -75,6 +77,13 @@ describe('getEnabledOnboardingCountries / isOnboardingCountryEnabled', () => {
     expect(countries.map((c) => c.code)).toEqual(['DE', 'PE'])
     expect(countries.find((c) => c.code === 'DE')?.supportsSepaDebit).toBe(true)
     expect(countries.find((c) => c.code === 'PE')?.supportsSepaDebit).toBe(false)
+  })
+
+  it('marks the UK as SEPA-capable while keeping Iceland card-only', () => {
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'GB,IS'
+    const countries = getEnabledOnboardingCountries()
+    expect(countries.find((c) => c.code === 'GB')?.supportsSepaDebit).toBe(true)
+    expect(countries.find((c) => c.code === 'IS')?.supportsSepaDebit).toBe(false)
   })
 
   it('isOnboardingCountryEnabled reflects the same allowlist, case-insensitively', () => {

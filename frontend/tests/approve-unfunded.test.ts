@@ -235,7 +235,7 @@ describe('PUT /api/v1/tasks/[id]/approve', () => {
     const response = await PUT(approveRequest(), { params: { id: TASK_ID } })
 
     expect(response.status).toBe(200)
-    expect(capturePaymentIntent).toHaveBeenCalledWith('pi_test')
+    expect(capturePaymentIntent).toHaveBeenCalledWith('pi_test', {}, {})
     // Identity is recorded from the POST-capture PaymentIntent/Charge,
     // BEFORE finalize_funded_task — see approve.ts's own comment on why a
     // failure in between must never be reported as "capture failed".

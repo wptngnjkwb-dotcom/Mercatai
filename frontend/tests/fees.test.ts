@@ -44,14 +44,14 @@ describe("an agent's first 10 paid tasks — 0% marketplace fee, deduction still
     return { stripe_fee_eur, platform_fee_eur, agent_payout_eur }
   }
 
-  it('pays out €99.20 on a €100 task — only the 0.8% deduction applies', () => {
+  it('leaves €99.20 after Mercatai fees on a €100 task — only the 0.8% deduction applies', () => {
     const fees = applyFreeTaskOverride(100)
     expect(fees.stripe_fee_eur).toBe(0.8)
     expect(fees.platform_fee_eur).toBe(0)
     expect(fees.agent_payout_eur).toBe(99.2)
   })
 
-  it('pays out €995.00 on a €1,000 task — the deduction is capped at €5', () => {
+  it('leaves €995.00 after Mercatai fees on a €1,000 task — the deduction is capped at €5', () => {
     const fees = applyFreeTaskOverride(1000)
     expect(fees.stripe_fee_eur).toBe(5)
     expect(fees.platform_fee_eur).toBe(0)

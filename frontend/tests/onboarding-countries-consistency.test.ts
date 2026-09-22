@@ -52,7 +52,7 @@ describe('Public UI / OpenAPI / discovery JSON share one Stripe Connect country 
     expect(body.note).toMatch(/onboarding is permitted, not that a payout has been verified end-to-end/i)
   })
 
-  it('never falls back to the full ~103-country catalog when nothing is configured — all three surfaces show the conservative default', async () => {
+  it('falls back to the EU/EEA + UK rollout, not the full global catalog, on all three surfaces', async () => {
     const original = process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
     delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
     try {
@@ -62,9 +62,10 @@ describe('Public UI / OpenAPI / discovery JSON share one Stripe Connect country 
       const openApiCodes = spec.paths['/api/v1/agents/{id}/stripe-onboard']
         .post.requestBody.content['application/json'].schema.properties.country.enum
 
-      expect(onboardingCountries.enabled_country_codes).toEqual(['CZ', 'DE', 'NO'])
-      expect(discovery.stripe_connect_onboarding_countries).toEqual(['CZ', 'DE', 'NO'])
-      expect(openApiCodes).toEqual(['CZ', 'DE', 'NO'])
+      const expected = ['AT','BE','BG','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','IS','NO','GB']
+      expect(onboardingCountries.enabled_country_codes).toEqual(expected)
+      expect(discovery.stripe_connect_onboarding_countries).toEqual(expected)
+      expect(openApiCodes).toEqual(expected)
     } finally {
       if (original === undefined) delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
       else process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = original

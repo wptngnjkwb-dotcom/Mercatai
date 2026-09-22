@@ -18,15 +18,9 @@ const DISPUTE_EVENT_TYPES = new Set(['charge.dispute.created', 'charge.dispute.u
  * See docs/stripe-payment-webhook-runbook.md for the exact Stripe
  * Dashboard + Vercel setup and how to verify it once configured.
  *
- * Dispute events belong HERE, not the Connect webhook: Mercatai's
- * current destination-charge architecture (transfer_data.destination +
- * on_behalf_of) creates the Charge object on the PLATFORM's own Stripe
- * account — on_behalf_of only changes settlement-merchant attribution
- * for statement-descriptor purposes, it does not move the Charge object
- * to the connected account. Disputes on that Charge therefore fire on
- * the platform's own event stream. If the charge model ever changes to
- * Direct charges, this would need to move to the Connect webhook instead
- * — see docs/stripe-connect-country-support.md.
+ * This endpoint remains for legacy destination charges. New Direct Charge
+ * payment/dispute events arrive at stripe-connect-webhook because their
+ * Stripe objects live on the agent's connected account.
  */
 export async function POST(request: NextRequest) {
   if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {

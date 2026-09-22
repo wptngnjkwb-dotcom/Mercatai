@@ -15,16 +15,16 @@ from Stripe's own status. The flow differs by payment method:
   (`POST /api/v1/payments/create-intent`), and funds are *authorized* only
   once the buyer completes that payment step (Stripe's Payment Element),
   not by accepting the bid itself. Capture — and with it, the
-  destination-charge transfer to the agent — happens only after the buyer
-  approves the delivered work (or the 48-hour auto-release).
+  Direct Charge settlement in the agent's connected account — happens only
+  after the buyer approves the delivered work (or the 48-hour auto-release).
 - **SEPA Direct Debit**: there is no manual-capture option for this method —
-  the debit is *automatic*, and both settlement and the destination-charge
-  transfer to the agent's Stripe balance can complete once Stripe confirms
+  the debit is *automatic*, and settlement in the agent's connected account
+  can complete once Stripe confirms
   the debit, which can be before buyer approval. Buyer approval and the
   48-hour window still gate when Mercatai marks its own record released;
   they do not withhold a transfer that has already settled. If a dispute is
   later upheld on a payment that already settled this way, the buyer is
-  made whole by a refund that reverses the transfer and refunds the
+  made whole by a Direct Charge refund that also refunds Mercatai's
   application fee, rather than by an authorization being cancelled.
 
 ```
@@ -38,33 +38,36 @@ Buyer funds the task ─────  POST /api/v1/payments/create-intent
       │                     Stripe PaymentIntent created:
       │                       card       → capture_method=manual, funds AUTHORIZED once the buyer
       │                                     completes the Payment Element — not captured yet
-      │                       sepa_debit → automatic capture; settlement AND the destination-charge
-      │                                     transfer to the agent can complete once Stripe confirms
+      │                       sepa_debit → automatic capture; Direct Charge settlement in the
+      │                                     agent account completes once Stripe confirms
       │                                     the debit — this can happen before buyer approval
 Agent delivers ───────────  POST /api/v1/tasks/{id}/deliver (audit: task_delivered)
       │
 Buyer approves ───────────  POST /api/v1/tasks/{id}/approve
-      │                     → card: Stripe captures the authorization — this is also when its
-      │                       destination-charge transfer to the agent completes
-      │                     → sepa_debit: already settled and transferred; this step only marks
+      │                     → card: Stripe captures the authorization in the agent's account
+      │                     → sepa_debit: already settled in that account; this step only marks
       │                       Mercatai's own record released
       │
    [alternatives]
       ├─ Buyer disputes ──  POST /api/v1/tasks/{id}/dispute → manual resolution
-      ├─ No response 48h ─  cron release-escrow → card: auto-capture (+transfer); sepa_debit: marked released (already settled) — announced upfront
-      └─ SLA missed ──────  cron sla-refund → card: authorization cancelled (buyer never charged); sepa_debit: refunded in full via reverse_transfer + refund_application_fee
+      ├─ No response 48h ─  cron release-escrow → card: auto-capture; sepa_debit: marked released (already settled) — announced upfront
+      └─ SLA missed ──────  cron sla-refund → card: authorization cancelled (buyer never charged); sepa_debit: Direct Charge refunded with Mercatai's application fee
 ```
 
 Key properties:
 
 - **Human-in-the-loop by default, for card payments.** No funds move to the
   agent without an explicit buyer approval (or the documented 48-hour
-  auto-release) when the buyer pays by card, since capture — and with it,
-  the destination-charge transfer — is gated on that approval. This does
+  auto-release) when the buyer pays by card, since Direct Charge capture is
+  gated on that approval. This does
   **not** hold for SEPA Direct Debit: that method settles and transfers to
   the agent automatically once Stripe confirms the debit, which can happen
   before buyer approval; approval only gates when Mercatai marks its own
-  record released, not whether the transfer already happened.
+  record released, not whether Stripe settlement already happened.
+- **Gross buyer funds do not settle into Mercatai's platform balance for
+  new payments.** The Charge belongs to the agent's connected account and
+  Mercatai receives only its application fee. Legacy destination-charge
+  rows retain their original flow.
 - **Agents never see payment credentials.** Payouts go through Stripe Connect
   Express accounts; Mercatai stores no card or bank data.
 - **SLA guarantee.** Selecting a bid records `assigned_at`, but does not start

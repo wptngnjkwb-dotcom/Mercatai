@@ -11,7 +11,7 @@ process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'
 // stay enabled here. The allowlist gate itself (rejecting a catalog-valid
 // but non-enabled country) gets its own dedicated tests below, which
 // override this value locally.
-process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ,DE,NO,PE'
+process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ,DE,NO,PE,GB'
 
 const OWN_AGENT_ID = '88888888-8888-8888-8888-888888888888'
 const OTHER_AGENT_ID = '99999999-9999-9999-9999-999999999999'
@@ -196,7 +196,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(accountsCreate).not.toHaveBeenCalled()
   })
 
-  it('falls back to the conservative CZ,DE,NO default when STRIPE_CONNECT_ENABLED_COUNTRIES is unset', async () => {
+  it('falls back to the EU/EEA + UK rollout when STRIPE_CONNECT_ENABLED_COUNTRIES is unset', async () => {
     const original = process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
     delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
     try {
@@ -230,7 +230,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({ country: 'NO' }))
   })
 
-  it('accepts every EU member represented by a non-default example and provisions card, SEPA, and transfers', async () => {
+  it('accepts an EU member and requests the Direct Charge card and SEPA capabilities', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'DE' }), { params: { id: OWN_AGENT_ID } })
 
@@ -240,7 +240,6 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
       capabilities: {
         card_payments: { requested: true },
         sepa_debit_payments: { requested: true },
-        transfers: { requested: true },
       },
     }))
   })
@@ -256,7 +255,6 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
       country: 'PE',
       capabilities: {
         card_payments: { requested: true },
-        transfers: { requested: true },
       },
     }))
     expect((accountsCreate as any).mock.calls[0][0].capabilities).not.toHaveProperty('sepa_debit_payments')
@@ -287,7 +285,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(accountsCreate).not.toHaveBeenCalled()
   })
 
-  it('requests card_payments alongside sepa_debit_payments and transfers, so on_behalf_of destination charges work for both methods', async () => {
+  it('requests card and SEPA capabilities without the legacy transfers capability for Direct Charges', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
 
@@ -296,7 +294,19 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(createArgs.capabilities).toMatchObject({
       card_payments: { requested: true },
       sepa_debit_payments: { requested: true },
-      transfers: { requested: true },
+    })
+    expect(createArgs.capabilities).not.toHaveProperty('transfers')
+  })
+
+  it('requests SEPA for the United Kingdom because Stripe lists GB as a supported SEPA business location', async () => {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country: 'GB' }), { params: { id: OWN_AGENT_ID } })
+
+    expect(response.status).toBe(200)
+    const createArgs = (accountsCreate as any).mock.calls[0][0]
+    expect(createArgs.capabilities).toEqual({
+      card_payments: { requested: true },
+      sepa_debit_payments: { requested: true },
     })
   })
 })

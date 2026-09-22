@@ -1,6 +1,7 @@
 import type Stripe from 'stripe'
 import { auditLog } from '@/lib/server/audit'
 import { getSupabase } from '@/lib/server/supabase'
+import { paymentContextFromTransaction, stripeRequestOptions, type StripePaymentContext } from '@/lib/server/stripePaymentContext'
 
 export type PaymentState = 'pending' | 'processing' | 'authorized' | 'failed'
 
@@ -17,8 +18,8 @@ export interface PaymentIdentityOutcome {
  * record_payment_charge_identity (frontend/sql/20_payment_charge_transfer_identity.sql),
  * which works at ANY escrow_status, including 'released'. A live sandbox
  * run found two real gaps in the previous best-effort version: a
- * destination charge's Transfer isn't always attached to the Charge the
- * instant it's captured, and every path that finalizes a funded
+ * a legacy destination charge's Transfer isn't always attached to the
+ * Charge the instant it's captured, and every path that finalizes a funded
  * transaction flips escrow_status straight to 'released' in the same
  * request as the capture — permanently excluding a transaction from the
  * old pending/held-only gate the moment a Transfer became visible a
@@ -39,6 +40,7 @@ export async function recordPaymentChargeIdentity(
   txId: string,
   intent: Stripe.PaymentIntent,
   stripe?: Stripe,
+  context: StripePaymentContext = { chargeModel: 'destination', connectedAccountId: null },
 ): Promise<PaymentIdentityOutcome | null> {
   const chargeId = typeof intent.latest_charge === 'string' ? intent.latest_charge : (intent.latest_charge as Stripe.Charge | null)?.id ?? null
   if (!chargeId) {
@@ -55,16 +57,25 @@ export async function recordPaymentChargeIdentity(
 
   let transferId: string | null = null
   if (stripe) {
-    const charge = await stripe.charges.retrieve(chargeId)
+    const charge = await stripe.charges.retrieve(chargeId, stripeRequestOptions(context))
     transferId = typeof charge.transfer === 'string' ? charge.transfer : (charge.transfer as Stripe.Transfer | null)?.id ?? null
   }
 
-  const { data, error } = await db.rpc('record_payment_charge_identity', {
-    p_transaction_id: txId,
-    p_stripe_payment_intent_id: intent.id,
-    p_stripe_charge_id: chargeId,
-    p_stripe_transfer_id: transferId,
-  })
+  const { data, error } = context.chargeModel === 'direct'
+    ? await db.rpc('record_payment_charge_identity_v2', {
+      p_transaction_id: txId,
+      p_stripe_payment_intent_id: intent.id,
+      p_stripe_charge_id: chargeId,
+      p_stripe_transfer_id: transferId,
+      p_charge_model: context.chargeModel,
+      p_stripe_connected_account_id: context.connectedAccountId,
+    })
+    : await db.rpc('record_payment_charge_identity', {
+      p_transaction_id: txId,
+      p_stripe_payment_intent_id: intent.id,
+      p_stripe_charge_id: chargeId,
+      p_stripe_transfer_id: transferId,
+    })
   if (error) throw new Error(`Failed to record payment charge/transfer identity for transaction ${txId}: ${error.message}`)
   const result = Array.isArray(data) ? data[0] : data
   if (!result) throw new Error(`Failed to record payment charge/transfer identity for transaction ${txId}: RPC returned no row`)
@@ -75,7 +86,7 @@ export async function recordPaymentChargeIdentity(
     )
   }
 
-  // For a genuinely SETTLED payment ('succeeded'), a destination charge's
+  // For a genuinely SETTLED legacy payment ('succeeded'), a destination charge's
   // Transfer can lag its Charge by a brief moment (the exact gap a live
   // sandbox run found) — but it always arrives. Rather than silently
   // persisting a charge-only identity and hoping something calls this
@@ -84,10 +95,12 @@ export async function recordPaymentChargeIdentity(
   // Stripe redelivers; the capture routes surface their own retryable
   // error) — the charge_id write above already committed either way, so
   // the retry only has the transfer left to fill in.
-  // 'requires_capture' (authorized but not yet captured) deliberately
+  // Direct Charges have no Transfer object at all: the Charge already lives
+  // on the connected account. 'requires_capture' (authorized but not yet
+  // captured) deliberately
   // stays exempt: a destination charge's Transfer never exists before an
   // actual capture, so a missing transfer there is normal, not a gap.
-  if (intent.status === 'succeeded' && !result.stripe_transfer_id) {
+  if (context.chargeModel === 'destination' && intent.status === 'succeeded' && !result.stripe_transfer_id) {
     throw new Error(`Payment intent ${intent.id} succeeded but its Transfer is not yet attached to charge ${result.stripe_charge_id} — retry required`)
   }
 
@@ -179,16 +192,25 @@ export async function reconcilePaymentIntent(
   intent: Stripe.PaymentIntent,
   eventType?: string,
   stripe?: Stripe,
+  expectedContext?: StripePaymentContext,
 ): Promise<PaymentState> {
   const db = getSupabase()
   const { data: tx, error: txReadError } = await db
     .from('transactions')
-    .select('id, task_id, agent_id, buyer_org_id, escrow_status')
+    .select('id, task_id, agent_id, buyer_org_id, escrow_status, stripe_charge_model, stripe_connected_account_id')
     .eq('stripe_payment_intent_id', intent.id)
     .maybeSingle()
   if (txReadError) throw txReadError
 
   if (!tx) return stripeState(intent)
+
+  const paymentContext = paymentContextFromTransaction(tx)
+  if (expectedContext && (
+    expectedContext.chargeModel !== paymentContext.chargeModel
+    || expectedContext.connectedAccountId !== paymentContext.connectedAccountId
+  )) {
+    throw new Error('Stripe webhook/payment context does not match the transaction')
+  }
 
   const funded = intent.status === 'requires_capture' || intent.status === 'succeeded'
   if (funded && (tx.escrow_status === 'pending' || tx.escrow_status === 'held')) {
@@ -233,7 +255,7 @@ export async function reconcilePaymentIntent(
   // transition above, a failure here is never swallowed — it must
   // propagate so the webhook route returns 500 and Stripe retries.
   if (funded) {
-    await recordPaymentChargeIdentity(db, tx.id, intent, stripe)
+    await recordPaymentChargeIdentity(db, tx.id, intent, stripe, paymentContext)
   }
 
   // eventType alone is not a source of truth: Stripe can deliver an old

@@ -25,7 +25,7 @@ describe('migration 17 payment-integrity boundaries', () => {
     expect(migration).toContain('uq_transactions_payment_attempt_key')
     expect(migration).toContain('uq_transactions_stripe_payment_intent')
     expect(createIntentRoute).toContain('db.rpc(\'claim_task_payment\'')
-    expect(createIntentRoute).toContain('idempotencyKey: `mercatai-payment-${paymentTx.payment_attempt_key}`')
+    expect(createIntentRoute).toContain('`mercatai-payment-${paymentTx.payment_attempt_key}`')
   })
 
   it('binds delivery and finalization to the same agent, buyer and transaction', () => {
@@ -56,11 +56,11 @@ describe('migration 17 payment-integrity boundaries', () => {
 
   it('routes every refund/dispute outcome through atomic DB finalization and stable Stripe retry keys', () => {
     expect(refundRoute).toContain("db.rpc('finalize_task_refund'")
-    expect(refundRoute).toContain('idempotencyKey: `mercatai-refund-${tx.id}`')
+    expect(refundRoute).toContain('`mercatai-refund-${tx.id}`')
     expect(slaRefundRoute).toContain("db.rpc('finalize_task_refund'")
-    expect(slaRefundRoute).toContain('idempotencyKey: `mercatai-sla-refund-${tx.id}`')
+    expect(slaRefundRoute).toContain('`mercatai-sla-refund-${tx.id}`')
     expect(adminResolveRoute).toContain("db.rpc('finalize_task_refund'")
     expect(adminResolveRoute).toContain("db.rpc('finalize_funded_task'")
-    expect(adminResolveRoute).toContain('idempotencyKey: `mercatai-admin-refund-${tx.id}`')
+    expect(adminResolveRoute).toContain('`mercatai-admin-refund-${tx.id}`')
   })
 })

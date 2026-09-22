@@ -4,6 +4,7 @@ import { fireWebhooks } from '@/lib/server/webhooks'
 import { recordAffiliateEarning } from '@/lib/server/affiliate'
 import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
 import { recordPaymentChargeIdentity } from '@/lib/server/paymentState'
+import { paymentContextFromTransaction, stripeRequestOptions } from '@/lib/server/stripePaymentContext'
 
 // Vercel Cron — spouští se každou hodinu
 // Uvolní escrow pro tasky kde buyer nereagoval 48h po doručení
@@ -44,9 +45,11 @@ export async function GET(request: NextRequest) {
       if (process.env.STRIPE_SECRET_KEY && tx.stripe_payment_intent_id?.startsWith('pi_')) {
         const Stripe = (await import('stripe')).default
         const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-        const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+        const context = paymentContextFromTransaction(tx)
+        const requestOptions = stripeRequestOptions(context)
+        const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id, requestOptions)
         if (intent.capture_method === 'manual' && intent.status === 'requires_capture') {
-          await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+          await stripe.paymentIntents.capture(tx.stripe_payment_intent_id, {}, requestOptions)
         } else if (intent.capture_method === 'manual' && intent.status !== 'succeeded') {
           throw new Error(`Card authorization is not capturable (Stripe status: ${intent.status})`)
         } else if (intent.capture_method !== 'manual' && intent.status !== 'succeeded') {
@@ -57,8 +60,8 @@ export async function GET(request: NextRequest) {
         // so this transaction is simply retried on the next hourly run
         // without a second capture (the guards above already treat an
         // already-succeeded intent as a no-op).
-        const capturedIntent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
-        await recordPaymentChargeIdentity(db, tx.id, capturedIntent, stripe)
+        const capturedIntent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id, requestOptions)
+        await recordPaymentChargeIdentity(db, tx.id, capturedIntent, stripe, context)
       }
 
       const { data: finalizedData, error: finalizedError } = await db.rpc('finalize_funded_task', {

@@ -34,11 +34,17 @@ resetDb()
 function makeFakeDb() {
   return {
     async rpc(name: string, args: Row) {
-      if (name !== 'record_payment_charge_identity') throw new Error(`unexpected rpc ${name}`)
+      if (name !== 'record_payment_charge_identity' && name !== 'record_payment_charge_identity_v2') throw new Error(`unexpected rpc ${name}`)
       const tx = transactions.find((t) => t.id === args.p_transaction_id)
       if (!tx) return { data: null, error: { message: 'transaction not found', code: 'P0002' } }
       if (tx.stripe_payment_intent_id !== args.p_stripe_payment_intent_id) {
         return { data: null, error: { message: 'payment intent does not match this transaction', code: 'P0001' } }
+      }
+      if (name === 'record_payment_charge_identity_v2' && (
+        tx.stripe_charge_model !== args.p_charge_model
+        || tx.stripe_connected_account_id !== args.p_stripe_connected_account_id
+      )) {
+        return { data: null, error: { message: 'Stripe charge context mismatch', code: 'P0001' } }
       }
 
       let chargeWritten = false
@@ -286,5 +292,46 @@ describe('recordPaymentChargeIdentity — direct write-rule tests', () => {
     // write — the already-known charge id must not be discarded.
     expect(transactions[0].stripe_charge_id).toBe('ch_1')
     expect(transactions[0].stripe_transfer_id).toBeNull()
+  })
+
+  it('records a succeeded Direct Charge without inventing or requiring a Transfer object', async () => {
+    transactions.push({
+      id: 'tx-direct', stripe_payment_intent_id: 'pi_direct', stripe_charge_id: null, stripe_transfer_id: null,
+      stripe_charge_model: 'direct', stripe_connected_account_id: 'acct_agent_1',
+    })
+    const db = makeFakeDb()
+    const stripe = makeStripe({})
+
+    const result = await recordPaymentChargeIdentity(
+      db as any,
+      'tx-direct',
+      makeIntent({ id: 'pi_direct', latest_charge: 'ch_direct', status: 'succeeded' }),
+      stripe,
+      { chargeModel: 'direct', connectedAccountId: 'acct_agent_1' },
+    )
+
+    expect(result).toEqual({ stripeChargeId: 'ch_direct', stripeTransferId: null })
+    expect(transactions[0].stripe_charge_id).toBe('ch_direct')
+    expect(transactions[0].stripe_transfer_id).toBeNull()
+    expect(stripe.charges.retrieve).toHaveBeenCalledWith('ch_direct', { stripeAccount: 'acct_agent_1' })
+  })
+
+  it('fails closed if a Direct Charge is observed in a different connected-account namespace', async () => {
+    transactions.push({
+      id: 'tx-direct', stripe_payment_intent_id: 'pi_direct', stripe_charge_id: null, stripe_transfer_id: null,
+      stripe_charge_model: 'direct', stripe_connected_account_id: 'acct_agent_1',
+    })
+    const db = makeFakeDb()
+    const stripe = makeStripe({})
+
+    await expect(recordPaymentChargeIdentity(
+      db as any,
+      'tx-direct',
+      makeIntent({ id: 'pi_direct', latest_charge: 'ch_direct' }),
+      stripe,
+      { chargeModel: 'direct', connectedAccountId: 'acct_attacker' },
+    )).rejects.toThrow(/charge context mismatch/i)
+
+    expect(transactions[0].stripe_charge_id).toBeNull()
   })
 })

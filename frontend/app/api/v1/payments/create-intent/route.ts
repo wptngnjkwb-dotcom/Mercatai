@@ -7,6 +7,12 @@ import { getTokenFromRequest } from '@/lib/server/auth'
 import { reconcilePaymentIntent } from '@/lib/server/paymentState'
 import { computeStripeAccountReadiness, isMethodReady, syncOnboardingCompletedFlag } from '@/lib/server/stripeAccountReadiness'
 import { getOnboardingCountry } from '@/lib/onboardingCountries'
+import {
+  bindDirectChargeContext,
+  directChargeCreateOptions,
+  paymentContextFromTransaction,
+  stripeRequestOptions,
+} from '@/lib/server/stripePaymentContext'
 
 const MIN_AMOUNT = 1
 
@@ -139,36 +145,6 @@ export async function POST(request: NextRequest) {
     const Stripe = (await import('stripe')).default
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
-    // Re-verify capability for the REQUESTED payment method directly with
-    // Stripe — before any path that could return a usable client_secret
-    // (reusing a pending intent below), resume a pending one, or create a
-    // new one. agentOnboardingDone is a stored database boolean that can go
-    // stale the moment Stripe restricts a capability Mercatai had
-    // previously recorded as active; a pending intent created while the
-    // account was ready must not stay redeemable after that.
-    const accountForReadiness = await stripe.accounts.retrieve(agentStripeAccount)
-    const connectedCountry = typeof accountForReadiness.country === 'string'
-      ? getOnboardingCountry(accountForReadiness.country.toUpperCase())
-      : undefined
-    if (paymentMethod === 'sepa_debit' && connectedCountry && !connectedCountry.supportsSepaDebit) {
-      return NextResponse.json({
-        error: `SEPA Direct Debit is not available for the agent's ${connectedCountry.label} payout account. Use card payment instead.`,
-        payment_method_unavailable: true,
-        supported_payment_methods: ['card'],
-      }, { status: 400 })
-    }
-    const readiness = computeStripeAccountReadiness(accountForReadiness)
-    await syncOnboardingCompletedFlag(db, (task.agents as any)?.id, agentOnboardingDone, readiness.onboardingComplete)
-    if (!isMethodReady(readiness, paymentMethod)) {
-      return NextResponse.json({
-        error: `Agent's Stripe account is not currently ready to accept ${paymentMethod === 'card' ? 'card' : 'SEPA Direct Debit'} payments.`,
-        stripe_onboarding_required: true,
-        payout_ready: readiness.payoutReady,
-        card_ready: readiness.cardReady,
-        sepa_debit_ready: readiness.sepaDebitReady,
-      }, { status: 402 })
-    }
-
     // Freeze the financial terms in one transaction row before talking to
     // Stripe. The database task lock + partial unique index make concurrent
     // requests converge on this same claim; payment_attempt_key then serves
@@ -206,8 +182,62 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Payment claim was not confirmed' }, { status: 500 })
     }
 
-    if (paymentTx.stripe_payment_intent_id?.startsWith('pi_')) {
-      const existingIntent = await stripe.paymentIntents.retrieve(paymentTx.stripe_payment_intent_id)
+    // Read the durable namespace after claiming the transaction. Existing
+    // PaymentIntents must finish in the namespace where they were created;
+    // only a brand-new attempt is bound to the Direct Charge model. This is
+    // required for a safe rolling deploy from destination charges.
+    const { data: claimedTx, error: claimedTxError } = await db
+      .from('transactions')
+      .select('id,stripe_payment_intent_id,stripe_charge_model,stripe_connected_account_id')
+      .eq('id', paymentTx.transaction_id)
+      .maybeSingle()
+    if (claimedTxError) throw claimedTxError
+    if (!claimedTx) throw new Error('Claimed payment transaction could not be reloaded')
+
+    const existingPaymentIntentId = claimedTx.stripe_payment_intent_id ?? paymentTx.stripe_payment_intent_id
+    const paymentContext = existingPaymentIntentId?.startsWith('pi_')
+      ? paymentContextFromTransaction(claimedTx)
+      : await bindDirectChargeContext(db, paymentTx.transaction_id, agentStripeAccount)
+
+    if (paymentContext.chargeModel === 'direct' && paymentContext.connectedAccountId !== agentStripeAccount) {
+      return NextResponse.json({
+        error: 'This payment attempt is tied to a different Stripe account. Contact support before retrying it.',
+      }, { status: 409 })
+    }
+
+    // Re-verify the capability before returning a usable client_secret or
+    // creating a PaymentIntent. For Direct Charges this is the immutable
+    // connected-account namespace stored on the transaction; legacy
+    // destination rows continue to use the assigned agent's account.
+    const readinessAccountId = paymentContext.connectedAccountId ?? agentStripeAccount
+    const accountForReadiness = await stripe.accounts.retrieve(readinessAccountId)
+    const connectedCountry = typeof accountForReadiness.country === 'string'
+      ? getOnboardingCountry(accountForReadiness.country.toUpperCase())
+      : undefined
+    if (paymentMethod === 'sepa_debit' && connectedCountry && !connectedCountry.supportsSepaDebit) {
+      return NextResponse.json({
+        error: `SEPA Direct Debit is not available for the agent's ${connectedCountry.label} payout account. Use card payment instead.`,
+        payment_method_unavailable: true,
+        supported_payment_methods: ['card'],
+      }, { status: 400 })
+    }
+    const readiness = computeStripeAccountReadiness(accountForReadiness)
+    await syncOnboardingCompletedFlag(db, (task.agents as any)?.id, agentOnboardingDone, readiness.onboardingComplete)
+    if (!isMethodReady(readiness, paymentMethod)) {
+      return NextResponse.json({
+        error: `Agent's Stripe account is not currently ready to accept ${paymentMethod === 'card' ? 'card' : 'SEPA Direct Debit'} payments.`,
+        stripe_onboarding_required: true,
+        payout_ready: readiness.payoutReady,
+        card_ready: readiness.cardReady,
+        sepa_debit_ready: readiness.sepaDebitReady,
+      }, { status: 402 })
+    }
+
+    if (existingPaymentIntentId?.startsWith('pi_')) {
+      const existingIntent = await stripe.paymentIntents.retrieve(
+        existingPaymentIntentId,
+        stripeRequestOptions(paymentContext),
+      )
       const existingMethod = existingIntent.payment_method_types[0]
       const canReuse = existingMethod === paymentMethod && existingIntent.status !== 'canceled'
 
@@ -230,6 +260,8 @@ export async function POST(request: NextRequest) {
           review_deadline_at: null,
           capture_mode: existingIntent.capture_method === 'manual' ? 'manual' : 'immediate',
           payment_method: existingMethod,
+          stripe_connected_account_id: paymentContext.connectedAccountId,
+          charge_model: paymentContext.chargeModel,
         })
       }
 
@@ -252,19 +284,12 @@ export async function POST(request: NextRequest) {
       currency: 'eur',
       payment_method_types: [paymentMethod],
       ...(captureMode === 'manual' ? { capture_method: 'manual' as const } : {}),
-      // Destination charge: the connected agent receives the net amount and
-      // Mercatai keeps the calculated application fee. This on_behalf_of
-      // shape, fixed to EUR, is not automatically valid for every country
-      // in the onboarding catalog (frontend/lib/onboardingCountries.ts) or
-      // even every currently-enabled one — see "destination charges +
-      // on_behalf_of are not automatically valid for every catalog country"
-      // in docs/stripe-connect-country-support.md. A country whose
-      // connected accounts can't be the on_behalf_of merchant of record in
-      // EUR would need a different flow entirely (e.g. separate charges and
-      // transfers, or a recipient-only account), not a parameter tweak here.
-      on_behalf_of: agentStripeAccount,
+      // Direct Charge: the PaymentIntent/Charge is created in the agent's
+      // connected-account namespace. Gross funds never settle into
+      // Mercatai's platform balance; Stripe sends only this application fee
+      // to Mercatai. This also avoids the cross-border on_behalf_of limitation
+      // of the previous destination-charge architecture.
       application_fee_amount: Math.round((frozenPlatformFee + frozenProcessingDeduction) * 100),
-      transfer_data: { destination: agentStripeAccount },
       metadata: {
         task_id,
         buyer_org_id: resolvedBuyerOrgId,
@@ -272,8 +297,9 @@ export async function POST(request: NextRequest) {
         platform: 'mercatai',
         free_task: isFreeTask ? 'true' : 'false',
         capture_mode: captureMode,
+        charge_model: 'direct',
       },
-    }, { idempotencyKey: `mercatai-payment-${paymentTx.payment_attempt_key}` })
+    }, directChargeCreateOptions(agentStripeAccount, `mercatai-payment-${paymentTx.payment_attempt_key}`))
     if (!intent.client_secret) throw new Error('Stripe returned no client_secret')
 
     const { data: bound, error: bindError } = await db
@@ -330,6 +356,8 @@ export async function POST(request: NextRequest) {
       review_deadline_at: null,
       capture_mode: captureMode,
       payment_method: paymentMethod,
+      stripe_connected_account_id: agentStripeAccount,
+      charge_model: 'direct',
     }, { status: paymentTx.created ? 201 : 200 })
 
   } catch (err) {

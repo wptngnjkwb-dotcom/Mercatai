@@ -3,6 +3,7 @@ import type Stripe from 'stripe'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { recordPaymentChargeIdentity } from '@/lib/server/paymentState'
+import { paymentContextFromTransaction, stripeRequestOptions } from '@/lib/server/stripePaymentContext'
 
 /**
  * Dispute resolution — the missing exit from the 'disputed' state.
@@ -47,9 +48,11 @@ export async function PUT(request: NextRequest, { params }: { params: { taskId: 
 
   const Stripe = (await import('stripe')).default
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
+  const context = paymentContextFromTransaction(tx)
+  const requestOptions = stripeRequestOptions(context)
   let intent
   try {
-    intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+    intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id, requestOptions)
   } catch (err) {
     console.error('Stripe dispute lookup failed', err)
     return NextResponse.json({ error: 'Stripe payment could not be verified' }, { status: 502 })
@@ -60,11 +63,11 @@ export async function PUT(request: NextRequest, { params }: { params: { taskId: 
       if (intent.status === 'succeeded') {
         await stripe.refunds.create({
           payment_intent: tx.stripe_payment_intent_id,
-          reverse_transfer: true,
           refund_application_fee: true,
-        }, { idempotencyKey: `mercatai-admin-refund-${tx.id}` })
+          ...(context.chargeModel === 'destination' ? { reverse_transfer: true } : {}),
+        }, stripeRequestOptions(context, `mercatai-admin-refund-${tx.id}`))
       } else if (intent.status === 'requires_capture') {
-        await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id)
+        await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id, {}, requestOptions)
       } else if (intent.status === 'canceled') {
         // Retry after a successful Stripe cancellation and failed DB write.
       } else {
@@ -86,17 +89,17 @@ export async function PUT(request: NextRequest, { params }: { params: { taskId: 
     let capturedIntent: Stripe.PaymentIntent
     try {
       if (intent.capture_method === 'manual' && intent.status === 'requires_capture') {
-        await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+        await stripe.paymentIntents.capture(tx.stripe_payment_intent_id, {}, requestOptions)
       } else if (intent.status !== 'succeeded') {
         return NextResponse.json({ error: `Stripe payment cannot be paid from status ${intent.status}` }, { status: 409 })
       }
-      capturedIntent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+      capturedIntent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id, requestOptions)
     } catch (err) {
       console.error('Stripe dispute capture failed', err)
       return NextResponse.json({ error: 'Stripe capture failed' }, { status: 502 })
     }
     try {
-      await recordPaymentChargeIdentity(db, tx.id, capturedIntent, stripe)
+      await recordPaymentChargeIdentity(db, tx.id, capturedIntent, stripe, context)
     } catch (identityErr) {
       console.error('Failed to record charge/transfer identity after admin capture:', identityErr)
       return NextResponse.json({ error: 'Payment was captured but its charge/transfer identity could not be recorded — retry required' }, { status: 500 })

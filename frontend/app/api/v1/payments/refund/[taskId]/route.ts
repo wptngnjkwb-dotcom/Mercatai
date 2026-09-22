@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
+import { paymentContextFromTransaction, stripeRequestOptions } from '@/lib/server/stripePaymentContext'
 
 export async function POST(request: NextRequest, { params }: { params: { taskId: string } }) {
   const token = await getTokenFromRequest(request)
@@ -39,15 +40,17 @@ export async function POST(request: NextRequest, { params }: { params: { taskId:
   try {
     const Stripe = (await import('stripe')).default
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-    const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+    const context = paymentContextFromTransaction(tx)
+    const requestOptions = stripeRequestOptions(context)
+    const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id, requestOptions)
     if (intent.status === 'succeeded') {
       await stripe.refunds.create({
         payment_intent: tx.stripe_payment_intent_id,
-        reverse_transfer: true,
         refund_application_fee: true,
-      }, { idempotencyKey: `mercatai-refund-${tx.id}` })
+        ...(context.chargeModel === 'destination' ? { reverse_transfer: true } : {}),
+      }, stripeRequestOptions(context, `mercatai-refund-${tx.id}`))
     } else if (intent.status === 'requires_capture') {
-      await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id)
+      await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id, {}, requestOptions)
     } else if (intent.status === 'canceled') {
       // A previous attempt may have canceled Stripe successfully and then
       // lost the DB response. Continue to the idempotent finalization RPC.

@@ -1,4 +1,4 @@
-import { getOnboardingCountry, onboardingCountryGroups, type OnboardingCountry } from '@/lib/onboardingCountries'
+import { getOnboardingCountry, onboardingCountryGroups, SUPPORTED_ONBOARDING_COUNTRIES, type OnboardingCountry } from '@/lib/onboardingCountries'
 
 /**
  * Countries Mercatai actually offers today — distinct from the full
@@ -21,7 +21,12 @@ import { getOnboardingCountry, onboardingCountryGroups, type OnboardingCountry }
  * Read fresh on every call rather than cached at module scope, so a changed
  * env var takes effect without a rebuild and tests can vary it per case.
  */
-const DEFAULT_ENABLED_COUNTRY_CODES = ['CZ', 'DE', 'NO'] as const
+// Direct Charges remove the prior cross-border on_behalf_of constraint.
+// Hosted onboarding and live capability/payout checks still fail closed for
+// each individual account before any buyer payment can be created.
+const DEFAULT_ENABLED_COUNTRY_CODES = SUPPORTED_ONBOARDING_COUNTRIES
+  .filter(country => country.region === 'eu' || country.region === 'eea' || country.code === 'GB')
+  .map(country => country.code)
 
 function parseEnabledCountryCodes(): string[] {
   const raw = process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
@@ -43,7 +48,7 @@ function parseEnabledCountryCodes(): string[] {
 
   const unique = Array.from(new Set(valid))
   if (unique.length === 0) {
-    console.error('STRIPE_CONNECT_ENABLED_COUNTRIES resolved to zero valid countries — falling back to the conservative default (CZ, DE, NO)')
+    console.error('STRIPE_CONNECT_ENABLED_COUNTRIES resolved to zero valid countries — falling back to the EU/EEA + UK Direct Charges rollout set')
     return [...DEFAULT_ENABLED_COUNTRY_CODES]
   }
   return unique

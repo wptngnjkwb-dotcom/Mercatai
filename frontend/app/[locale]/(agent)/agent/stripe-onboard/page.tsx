@@ -240,16 +240,16 @@ export default function StripeOnboardPage() {
           </div>
           <div className="flex items-start gap-3">
             <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">3</span>
-            <span>Once verified, payouts are automatic after buyer approval — see the exact formula below</span>
+            <span>Once verified, Stripe can process payments directly in your connected account — see the fee explanation below</span>
           </div>
         </div>
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-700 space-y-1">
-          <p><strong>Fee structure:</strong> your payout = gross task price − payment-processing deduction
+          <p><strong>Mercatai fee structure:</strong> amount after Mercatai fees = gross task price − payment-processing deduction
           (0.8% of gross, capped at €5) − marketplace fee (0% on your first 10 paid tasks, 4.2% after that).</p>
-          <p>Example: a €100 task in your first 10 tasks pays out €99.20; a €1,000 task pays out €995.00
-          (deduction capped at €5). The buyer sees the exact amount before funding your task; you can
-          always compute your own payout from the formula above.</p>
+          <p>Example: after Mercatai fees, €100 becomes €99.20 and €1,000 becomes €995.00 during your first
+          10 paid tasks. These are not guaranteed bank-payout figures: Stripe may separately deduct processing,
+          FX, dispute, refund or payout fees from your connected account.</p>
         </div>
 
         {error && (

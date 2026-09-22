@@ -177,9 +177,6 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (requiredCapabilities.sepa_debit_payments && readiness.sepaDebitPaymentsStatus !== 'active') {
       missingCapabilities.sepa_debit_payments = { requested: true }
     }
-    if (requiredCapabilities.transfers && readiness.transfersStatus !== 'active') {
-      missingCapabilities.transfers = { requested: true }
-    }
     const hasMissingCapabilities = Object.keys(missingCapabilities).length > 0
 
     if (readiness.onboardingComplete && !hasMissingCapabilities) {
@@ -214,10 +211,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         type: 'express',
         country,
         email: agent.owner_email,
-        // All supported countries request card_payments + transfers. SEPA
-        // Direct Debit is additionally requested for EU/EEA accounts only;
-        // imposing it on every global account can make an otherwise valid
-        // Stripe Connect onboarding impossible.
+        // Direct Charges need the connected account's payments capability,
+        // not the legacy `transfers` capability used by destination-charge
+        // architectures. SEPA is requested only where Stripe documents the
+        // connected account's country as a supported business location.
         capabilities: requiredCapabilities,
         ...(rawBusinessType ? { business_type: rawBusinessType as any } : {}),
         metadata: {

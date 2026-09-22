@@ -18,7 +18,7 @@ function account(overrides: Record<string, unknown> = {}) {
 }
 
 describe('computeStripeAccountReadiness', () => {
-  it('is fully ready when identity is verified, transfers/payouts are active, and both payment methods are active', () => {
+  it('is fully ready when identity is verified, payouts are enabled, and both payment methods are active', () => {
     const readiness = computeStripeAccountReadiness(account())
     expect(readiness.identityVerified).toBe(true)
     expect(readiness.payoutReady).toBe(true)
@@ -39,16 +39,16 @@ describe('computeStripeAccountReadiness', () => {
     expect(readiness.onboardingComplete).toBe(false)
   })
 
-  it('is not complete when transfers capability is not active, even if details_submitted and currently_due are clean', () => {
+  it('does not block Direct Charges when the legacy transfers capability is not active', () => {
     const readiness = computeStripeAccountReadiness(
       account({ capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'pending' } })
     )
     expect(readiness.transfersStatus).toBe('pending')
-    expect(readiness.payoutReady).toBe(false)
-    expect(readiness.onboardingComplete).toBe(false)
+    expect(readiness.payoutReady).toBe(true)
+    expect(readiness.onboardingComplete).toBe(true)
   })
 
-  it('is not complete when payouts_enabled is false, even with transfers active', () => {
+  it('is not complete when payouts_enabled is false', () => {
     const readiness = computeStripeAccountReadiness(account({ payouts_enabled: false }))
     expect(readiness.payoutReady).toBe(false)
     expect(readiness.onboardingComplete).toBe(false)
@@ -71,7 +71,7 @@ describe('computeStripeAccountReadiness', () => {
     expect(readiness.onboardingComplete).toBe(false)
   })
 
-  it('is not complete when neither card nor SEPA is active, even with transfers/payouts ready', () => {
+  it('is not complete when neither card nor SEPA is active, even with payouts ready', () => {
     const readiness = computeStripeAccountReadiness(
       account({ capabilities: { card_payments: 'inactive', sepa_debit_payments: 'inactive', transfers: 'active' } })
     )

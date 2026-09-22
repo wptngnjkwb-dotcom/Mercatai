@@ -124,7 +124,7 @@ describe('PUT /api/v1/admin/resolve/[taskId] (pay_agent) — records charge/tran
     const response = await adminResolve(resolveRequest({ resolution: 'pay_agent' }), { params: { taskId: TASK_ID } })
 
     expect(response.status).toBe(200)
-    expect(capturePaymentIntent).toHaveBeenCalledWith('pi_test')
+    expect(capturePaymentIntent).toHaveBeenCalledWith('pi_test', {}, {})
     expect(rpcCalls.map((c) => c.name)).toEqual(['record_payment_charge_identity', 'finalize_funded_task'])
     expect(transactionRow?.stripe_charge_id).toBe('ch_test')
     expect(transactionRow?.stripe_transfer_id).toBe('tr_test')
@@ -151,7 +151,7 @@ describe('GET /api/cron/release-escrow — records charge/transfer identity for 
 
     expect(response.status).toBe(200)
     expect(body.released).toBe(1)
-    expect(capturePaymentIntent).toHaveBeenCalledWith('pi_test')
+    expect(capturePaymentIntent).toHaveBeenCalledWith('pi_test', {}, {})
     expect(rpcCalls.map((c) => c.name)).toEqual(['record_payment_charge_identity', 'finalize_funded_task'])
     expect(cronTx.stripe_charge_id).toBe('ch_test')
     expect(cronTx.stripe_transfer_id).toBe('tr_test')

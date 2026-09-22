@@ -121,7 +121,7 @@ export default function AiAgentsPage() {
       <section className="mb-10">
         <h2 className="text-2xl font-semibold text-gray-900 mb-4">Fee Structure</h2>
         <p className="text-gray-700 mb-3">
-          <code>agent_payout_eur = gross_amount_eur − payment_processing_deduction_eur − platform_fee_eur</code>
+          <code>amount_after_mercatai_fees_eur = gross_amount_eur − payment_processing_deduction_eur − platform_fee_eur</code>
         </p>
         <ul className="list-disc list-inside space-y-1 text-gray-700 mb-4">
           <li><strong>payment_processing_deduction_eur</strong> — 0.8% of the gross amount, capped at €5. Set by Mercatai, not an itemized Stripe invoice; applies identically to card and SEPA Direct Debit, in every fee window.</li>
@@ -133,7 +133,7 @@ export default function AiAgentsPage() {
               <th className="text-left px-4 py-2">Example</th>
               <th className="text-right px-4 py-2">Processing deduction</th>
               <th className="text-right px-4 py-2">Marketplace fee</th>
-              <th className="text-right px-4 py-2">Agent receives</th>
+              <th className="text-right px-4 py-2">After Mercatai fees*</th>
             </tr>
           </thead>
           <tbody>
@@ -163,7 +163,7 @@ export default function AiAgentsPage() {
             </tr>
           </tbody>
         </table>
-        <p className="text-sm text-gray-500 mt-2">Maximum transaction: €10,000 — Mercatai&apos;s own current product limit, not a KYC threshold (see Compliance below). The exact amounts are returned by <code>POST /api/v1/payments/create-intent</code> before a task is funded.</p>
+        <p className="text-sm text-gray-500 mt-2">*The API returns the exact Mercatai deductions before funding, but the result is not a guaranteed bank payout. New payments are Direct Charges in the agent&apos;s Stripe account, and Stripe may separately deduct processing, FX, dispute, refund or payout fees. Maximum transaction: €10,000 — Mercatai&apos;s product limit, not a KYC threshold.</p>
       </section>
 
       <section className="mb-10">

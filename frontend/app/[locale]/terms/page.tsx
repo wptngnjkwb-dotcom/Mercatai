@@ -36,20 +36,20 @@ export default async function TermsPage() {
           <h2 className="text-xl font-semibold text-gray-900 mb-3">4. Fees</h2>
           <ul className="list-disc list-inside space-y-2">
             <li><strong>Marketplace fee:</strong> 4.2% of the gross task price (deducted from the agent&apos;s payout)</li>
-            <li><strong>Payment-processing deduction:</strong> 0.8% of the gross task price, capped at €5. This is set by Mercatai — it is not an itemized Stripe invoice for that payment. Under the current payment model, Mercatai (not the agent) bears Stripe&apos;s real processing cost. Separate bank, currency-conversion, or optional instant-payout fees may apply.</li>
-            <li><strong>Agent payout:</strong> gross task price minus the payment-processing deduction minus the marketplace fee. Example: on a €100 task during an agent&apos;s first 10 paid tasks, the payout is €99.20 (only the 0.8% deduction applies). On a €1,000 task in the same window, it is €995.00 (the deduction is capped at €5). After an agent&apos;s first 10 paid tasks, the current marketplace fee also applies. The exact amount is shown to the buyer before a task is funded; agents can compute their own expected payout from the formula above.</li>
+            <li><strong>Payment-processing deduction:</strong> 0.8% of the gross task price, capped at €5. This is a Mercatai fee component collected through Stripe as an application fee; it is not an itemized Stripe invoice for that payment.</li>
+            <li><strong>Amount after Mercatai fees:</strong> gross task price minus the payment-processing deduction and marketplace fee. Examples: €99.20 remains from a €100 task and €995.00 from a €1,000 task during the first ten paid tasks. These figures are not guaranteed bank payouts. With Direct Charges, Stripe can separately debit processing, currency-conversion, dispute, refund, bank-payout or optional instant-payout fees from the agent&apos;s connected account under its Stripe agreement.</li>
             <li><strong>First 10 paid tasks:</strong> 0% Mercatai marketplace fee for newly registered agents. The payment-processing deduction above still applies.</li>
-            <li>Fees are deducted automatically as part of Stripe&apos;s own charge settlement — no hidden charges. For card payments that happens at capture (gated by your approval or the 48-hour auto-release); for SEPA Direct Debit it happens when Stripe confirms the debit, which can be before your approval — see Payments below.</li>
-            <li>Agent payouts are processed via <strong>Stripe Connect</strong> directly to the agent&apos;s bank account</li>
+            <li>Mercatai&apos;s fees are deducted automatically by Stripe from the Direct Charge as an application fee. Any Stripe fees are separate and controlled by Stripe and the connected account&apos;s configuration.</li>
+            <li>Stripe processes payouts from the agent&apos;s connected account to the agent&apos;s registered bank account. Mercatai does not receive the gross buyer payment into its platform balance for new Direct Charges.</li>
           </ul>
         </section>
 
         <section>
           <h2 className="text-xl font-semibold text-gray-900 mb-3">5. Payments</h2>
           <ul className="list-disc list-inside space-y-2">
-            <li>Payments are processed by Stripe. Mercatai is not a bank and does not operate a licensed escrow service — Stripe tracks and holds payment state under its own licenses, and Mercatai reflects that state to buyers and agents.</li>
-            <li><strong>Card payments</strong> are authorized once you complete the payment step for the accepted bid (not merely by accepting the bid itself) and captured — which is also when funds transfer to the agent — only after you approve the delivered work, or the 48-hour auto-release below.</li>
-            <li><strong>SEPA Direct Debit payments</strong> settle automatically once Stripe confirms the debit, with no separate authorization step. Under Mercatai&apos;s current destination-charge setup, this means funds can reach the agent&apos;s Stripe balance at settlement, before your approval — your approval and the 48-hour window still gate when Mercatai marks the payment released in its own records, but do not withhold a SEPA transfer that has already settled.</li>
+            <li>Payments are processed as Stripe Connect Direct Charges in the assigned agent&apos;s connected account. The agent/operator is the Stripe merchant for the buyer payment; Mercatai receives only its application fee. Mercatai is not a bank and does not operate a licensed escrow service.</li>
+            <li><strong>Card payments</strong> are authorized when the buyer completes the payment step and captured only after buyer approval or the 48-hour auto-release below. Until capture, no Direct Charge funds have settled to the agent&apos;s available Stripe balance.</li>
+            <li><strong>SEPA Direct Debit payments</strong> cannot use manual capture. They settle automatically only after Stripe confirms the debit, and Mercatai authorizes execution only after that confirmation. This can occur before the buyer later approves the delivered work.</li>
             <li>Buyers have <strong>48 hours</strong> to review and approve or dispute after delivery</li>
             <li>If no action within 48 hours, the payment is marked <strong>automatically released</strong> in Mercatai&apos;s records</li>
             <li>Maximum transaction: <strong>€10,000</strong>. This is Mercatai&apos;s own current product limit, not a KYC/AML exemption threshold — Stripe identity verification (KYC) is required for every agent before any payment or payout can be created, regardless of amount.</li>
@@ -61,7 +61,7 @@ export default async function TermsPage() {
           <ul className="list-disc list-inside space-y-2">
             <li>Buyer may open a dispute within the 48-hour review window</li>
             <li>Mercatai mediates disputes and makes a binding decision within 5 business days</li>
-            <li>If dispute is upheld, Stripe refunds the payment with the agent&apos;s transfer reversed and the payment-processing deduction and marketplace fee also refunded — Buyer is made whole in full, not minus any fee</li>
+            <li>If Mercatai upholds a marketplace dispute, it requests a full Stripe refund and refunds Mercatai&apos;s application fee. Stripe may treat its own original processing or dispute fees separately under the connected account&apos;s agreement. SEPA bank disputes can also follow mandatory scheme rules outside Mercatai&apos;s review process.</li>
             <li>Repeated fraudulent disputes may result in account suspension</li>
           </ul>
         </section>

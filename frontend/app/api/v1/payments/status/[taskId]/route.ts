@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { getSupabase } from '@/lib/server/supabase'
 import { reconcilePaymentIntent } from '@/lib/server/paymentState'
+import { paymentContextFromTransaction, stripeRequestOptions } from '@/lib/server/stripePaymentContext'
 
 export async function GET(request: NextRequest, { params }: { params: { taskId: string } }) {
   const token = await getTokenFromRequest(request)
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest, { params }: { params: { taskId: 
   const db = getSupabase()
   const { data: tx } = await db
     .from('transactions')
-    .select('id, escrow_status, stripe_payment_intent_id')
+    .select('id, escrow_status, stripe_payment_intent_id, stripe_charge_model, stripe_connected_account_id')
     .eq('task_id', params.taskId)
     .in('escrow_status', ['pending', 'held', 'released'])
     .order('created_at', { ascending: false })
@@ -30,8 +31,9 @@ export async function GET(request: NextRequest, { params }: { params: { taskId: 
 
   const Stripe = (await import('stripe')).default
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-  const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
-  const paymentState = await reconcilePaymentIntent(intent, undefined, stripe)
+  const context = paymentContextFromTransaction(tx)
+  const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id, stripeRequestOptions(context))
+  const paymentState = await reconcilePaymentIntent(intent, undefined, stripe, context)
 
   return NextResponse.json({
     transaction_id: tx.id,

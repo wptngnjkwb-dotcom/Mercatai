@@ -71,6 +71,9 @@ vi.mock('@/lib/server/supabase', () => ({
           created: !tx,
         }], error: null }
       }
+      if (name === 'bind_payment_charge_context') {
+        return { data: [{ stripe_charge_model: args.p_charge_model, stripe_connected_account_id: args.p_stripe_connected_account_id }], error: null }
+      }
       throw new Error(`unexpected rpc ${name}`)
     },
     from(table: string) {
@@ -87,7 +90,13 @@ vi.mock('@/lib/server/supabase', () => ({
         maybeSingle: async () => {
           if (table === 'bids') return { data: bidRow, error: null }
           if (table === 'transactions' && pendingUpdate) return { data: { id: existingTxRow?.id ?? 'tx-fake-1' }, error: null }
-          if (table === 'transactions') return { data: existingTxRow, error: null }
+          if (table === 'transactions') return {
+            data: existingTxRow ?? {
+              id: 'tx-fake-1', stripe_payment_intent_id: null,
+              stripe_charge_model: null, stripe_connected_account_id: null,
+            },
+            error: null,
+          }
           return { data: null, error: null }
         },
         single: async () => {
@@ -249,7 +258,7 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
     expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
   })
 
-  it('allows a SEPA payment when card_payments is inactive but sepa_debit_payments and transfers are active', async () => {
+  it('allows a SEPA Direct Charge when SEPA and payouts are ready even if card payments are inactive', async () => {
     accountRetrieveResult.capabilities = { card_payments: 'inactive', sepa_debit_payments: 'active', transfers: 'active' }
     const response = await fundRequest('sepa_debit')()
 
@@ -284,6 +293,12 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
 
     expect(response.status).toBe(201)
     expect(stripePaymentIntentsCreate).toHaveBeenCalled()
+    const [params, options] = stripePaymentIntentsCreate.mock.calls.at(-1)!
+    expect(params).not.toHaveProperty('on_behalf_of')
+    expect(params).not.toHaveProperty('transfer_data')
+    expect(params).toMatchObject({ application_fee_amount: 350 })
+    expect(options).toMatchObject({ stripeAccount: 'acct_1', idempotencyKey: 'mercatai-payment-attempt-key-1' })
+    expect(await response.json()).toMatchObject({ stripe_connected_account_id: 'acct_1', charge_model: 'direct' })
   })
 
   it('rejects an invalid accepted-bid SLA before claiming or creating a Stripe payment', async () => {
@@ -368,6 +383,41 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
 
       expect(response.status).toBe(200)
       expect(body.client_secret).toBe('secret_existing_pending')
+      expect(body).toMatchObject({ charge_model: 'destination', stripe_connected_account_id: null })
+      expect(stripePaymentIntentsRetrieve).toHaveBeenCalledWith('pi_existing_pending', {})
+      expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
+    })
+
+    it('resumes an existing Direct Charge in its frozen connected-account namespace', async () => {
+      existingTxRow = {
+        ...existingTxRow,
+        stripe_charge_model: 'direct',
+        stripe_connected_account_id: 'acct_1',
+      }
+
+      const response = await fundRequest('card')()
+      const body = await response.json()
+
+      expect(response.status).toBe(200)
+      expect(body).toMatchObject({ charge_model: 'direct', stripe_connected_account_id: 'acct_1' })
+      expect(stripePaymentIntentsRetrieve).toHaveBeenCalledWith('pi_existing_pending', { stripeAccount: 'acct_1' })
+      expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
+    })
+
+    it('fails closed if an existing Direct Charge is frozen to a different account', async () => {
+      existingTxRow = {
+        ...existingTxRow,
+        stripe_charge_model: 'direct',
+        stripe_connected_account_id: 'acct_previous',
+      }
+
+      const response = await fundRequest('card')()
+      const body = await response.json()
+
+      expect(response.status).toBe(409)
+      expect(body.error).toMatch(/different Stripe account/i)
+      expect(stripeAccountsRetrieve).not.toHaveBeenCalled()
+      expect(stripePaymentIntentsRetrieve).not.toHaveBeenCalled()
       expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
     })
   })

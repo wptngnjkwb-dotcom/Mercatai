@@ -11,22 +11,25 @@ import {
 } from '@/lib/server/stripeConnectMonitoring'
 
 const PAYOUT_EVENT_TYPES = new Set(['payout.created', 'payout.updated', 'payout.paid', 'payout.failed'])
+const DISPUTE_EVENT_TYPES = new Set(['charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.closed'])
 
 /**
  * Stripe Connect webhook — events "on connected accounts"
- * (account.updated, account.external_account.updated, payout.*),
+ * (account.updated, account.external_account.updated, payout.* and the
+ * payment/dispute events produced by Direct Charges),
  * deliberately separate from the payment-lifecycle webhook at
  * /api/v1/payments/stripe-webhook and its own
  * STRIPE_CONNECT_WEBHOOK_SECRET: a production Stripe event destination
  * configured to receive connected-account events can have its own
  * signing secret, independent of the platform-account payment webhook's.
  *
- * This route only ever watches connected accounts and payouts — it never
- * writes to tasks or transactions. See stripeConnectMonitoring.ts for why
- * a payout can't be attached to a single task/transaction, and for why
- * every handler re-fetches current state from Stripe rather than
- * trusting the event's own embedded snapshot (Stripe does not guarantee
- * delivery order).
+ * Account/payout handlers never move task money. Direct-charge
+ * payment_intent handlers do reconcile transactions/tasks, while dispute
+ * handlers only record/alert and never move money. See
+ * stripeConnectMonitoring.ts for why a payout can't be attached to a
+ * single task/transaction. Every financial handler re-fetches current
+ * state from Stripe rather than trusting the event's embedded snapshot
+ * (Stripe does not guarantee delivery order).
  *
  * A 200 is returned ONLY once the claimed event's row is confirmed
  * 'completed' in the database — markConnectEventCompleted throws on any
@@ -73,6 +76,23 @@ export async function POST(request: NextRequest) {
       await handlePayoutEvent(db, stripe, event)
     } else if (event.type === 'account.external_account.updated') {
       await handleExternalAccountUpdated(db, event)
+    } else if (event.type.startsWith('payment_intent.')) {
+      if (!event.account) throw new Error('Direct-charge payment event has no connected account')
+      const { reconcilePaymentIntent } = await import('@/lib/server/paymentState')
+      const eventIntent = event.data.object as Stripe.PaymentIntent
+      const currentIntent = await stripe.paymentIntents.retrieve(eventIntent.id, { stripeAccount: event.account })
+      await reconcilePaymentIntent(currentIntent, event.type, stripe, {
+        chargeModel: 'direct',
+        connectedAccountId: event.account,
+      })
+    } else if (DISPUTE_EVENT_TYPES.has(event.type)) {
+      if (!event.account) throw new Error('Direct-charge dispute event has no connected account')
+      const { handleDisputeEvent } = await import('@/lib/server/paymentDisputes')
+      const { buildDisputeAdminAlertProviderPayload, sendDisputeAdminAlertOrThrow } = await import('@/lib/server/email')
+      await handleDisputeEvent(db, stripe, event, {
+        buildPayload: buildDisputeAdminAlertProviderPayload,
+        sendAlert: sendDisputeAdminAlertOrThrow,
+      }, event.account)
     }
     // Only reached — and only returns success — once every critical write
     // above has actually succeeded AND this specific completion write is

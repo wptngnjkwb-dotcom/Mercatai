@@ -21,16 +21,15 @@ export interface OnboardingCountry {
   region: OnboardingRegion
   /**
    * Decided per country, not inferred from `region` — Iceland is 'eea' but
-   * false (no Stripe SEPA business-location support); every other EU/EEA
-   * country is true. See the per-country comments on EU_COUNTRIES and
-   * EEA_COUNTRIES below.
+   * false (no Stripe SEPA business-location support); every other enabled
+   * EU/EEA country and the United Kingdom is true. See Stripe's published
+   * SEPA business-location list and the per-country comments below.
    */
   supportsSepaDebit: boolean
 }
 
 export interface RequiredStripeCapabilities {
   card_payments: { requested: true }
-  transfers: { requested: true }
   sepa_debit_payments?: { requested: true }
 }
 
@@ -149,7 +148,11 @@ const OTHER_STRIPE_CONNECT_COUNTRIES: readonly OnboardingCountry[] = [
   { code: 'TN', label: 'Tunisia', region: 'stripe_connect', supportsSepaDebit: false },
   { code: 'TR', label: 'Turkey', region: 'stripe_connect', supportsSepaDebit: false },
   { code: 'AE', label: 'United Arab Emirates', region: 'stripe_connect', supportsSepaDebit: false },
-  { code: 'GB', label: 'United Kingdom', region: 'stripe_connect', supportsSepaDebit: false },
+  // Stripe lists GB as a supported SEPA Direct Debit business location.
+  // Direct Charges use the connected account's own payment-method settings
+  // and Creditor ID, so capability readiness is still checked live before
+  // every payment.
+  { code: 'GB', label: 'United Kingdom', region: 'stripe_connect', supportsSepaDebit: true },
   { code: 'US', label: 'United States', region: 'stripe_connect', supportsSepaDebit: false },
   { code: 'UY', label: 'Uruguay', region: 'stripe_connect', supportsSepaDebit: false },
   { code: 'UZ', label: 'Uzbekistan', region: 'stripe_connect', supportsSepaDebit: false },
@@ -181,7 +184,6 @@ export function requiredCapabilitiesForCountry(code: string): RequiredStripeCapa
   return {
     card_payments: { requested: true },
     ...(country.supportsSepaDebit ? { sepa_debit_payments: { requested: true as const } } : {}),
-    transfers: { requested: true },
   }
 }
 

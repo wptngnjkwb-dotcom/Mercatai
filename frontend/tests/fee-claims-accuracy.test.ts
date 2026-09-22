@@ -65,7 +65,7 @@ const FORBIDDEN_PHRASES = [
   'in compliance with the eu ai act',
   // The old claim tied card authorization to bid acceptance and applied a
   // single release-gated model to both payment methods, which doesn't hold
-  // for SEPA Direct Debit under the destination-charge model in use.
+  // for SEPA Direct Debit under either the legacy or Direct Charge model.
   'authorized via stripe when you accept a bid',
   'autorizována přes stripe při přijetí nabídky',
   'wird per stripe autorisiert, wenn sie ein gebot annehmen',

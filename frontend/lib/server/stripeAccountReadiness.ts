@@ -20,7 +20,7 @@ export interface StripeAccountReadiness {
   cardReady: boolean
   sepaDebitReady: boolean
   payoutReady: boolean
-  /** True only when identity is verified, payouts/transfers are active, and at least one payment method (card or SEPA) is active. */
+  /** True only when identity is verified, payouts are enabled, and at least one payment method (card or SEPA) is active. */
   onboardingComplete: boolean
 }
 
@@ -37,8 +37,10 @@ export function computeStripeAccountReadiness(account: Stripe.Account): StripeAc
   const chargesEnabled = !!account.charges_enabled
   const cardReady = cardPaymentsStatus === 'active' && chargesEnabled
   const sepaDebitReady = sepaDebitPaymentsStatus === 'active' && chargesEnabled
-  const transfersReady = transfersStatus === 'active'
-  const payoutReady = transfersReady && !!account.payouts_enabled
+  // Direct Charges settle on the connected account itself. The legacy
+  // `transfers` capability controls receiving platform Transfers and is
+  // not a prerequisite for charging or paying out a Direct Charge.
+  const payoutReady = !!account.payouts_enabled
 
   const identityVerified = !!account.details_submitted && !(account.requirements?.currently_due?.length)
 

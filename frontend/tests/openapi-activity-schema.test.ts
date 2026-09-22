@@ -105,14 +105,14 @@ describe('OpenAPI spec — Stripe Connect countries', () => {
     })
   })
 
-  it('falls back to the conservative CZ,DE,NO default when the env var is unset', async () => {
+  it('falls back to the EU/EEA + UK Direct Charges rollout when the env var is unset', async () => {
     const original = process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
     delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
     try {
       const spec = await (await GET()).json()
       const country = spec.paths['/api/v1/agents/{id}/stripe-onboard']
         .post.requestBody.content['application/json'].schema.properties.country
-      expect(country.enum).toEqual(['CZ', 'DE', 'NO'])
+      expect(country.enum).toEqual(['AT','BE','BG','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','IS','NO','GB'])
     } finally {
       if (original === undefined) delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
       else process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = original

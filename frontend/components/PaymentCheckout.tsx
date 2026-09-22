@@ -17,7 +17,7 @@ type StripeClient = {
 
 declare global {
   interface Window {
-    Stripe?: (publishableKey: string) => StripeClient
+    Stripe?: (publishableKey: string, options?: { stripeAccount?: string }) => StripeClient
   }
 }
 
@@ -78,7 +78,12 @@ export default function PaymentCheckout({ taskId, buyerToken, amountEur, onCompl
     ])
       .then(([, publishableKey]) => {
         if (disposed || !window.Stripe || !paymentElementHost.current) return
-        const stripeClient = window.Stripe(publishableKey)
+        const stripeClient = window.Stripe(
+          publishableKey,
+          intent.charge_model === 'direct' && intent.stripe_connected_account_id
+            ? { stripeAccount: intent.stripe_connected_account_id }
+            : undefined,
+        )
         const stripeElements = stripeClient.elements({
           clientSecret: intent.client_secret,
           appearance: { theme: 'stripe', variables: { colorPrimary: '#4f46e5', borderRadius: '10px' } },

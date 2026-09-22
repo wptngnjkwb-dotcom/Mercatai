@@ -3,9 +3,10 @@ import { DEFAULT_PLATFORM_FEE_PERCENT } from './settings'
 // Fee structure: a payment-processing deduction of 0.8% of the gross amount
 // (capped at €5) + a platform fee (default 4.2%). The 0.8%/€5 figure is set
 // by Mercatai and collected via Stripe's application_fee_amount on a
-// destination charge — it is NOT an itemized Stripe invoice for that
-// payment, and under the current model Mercatai (not the agent) bears
-// Stripe's real processing cost. The `stripe_fee_eur` field name is kept
+// Direct Charge — it is NOT an itemized Stripe invoice for that payment.
+// Stripe may separately debit processing, FX, dispute, refund or payout
+// fees from the connected account according to that account's agreement
+// and configuration. The `stripe_fee_eur` field name is kept
 // for database/API backward compatibility; the public API additionally
 // exposes this same value as `payment_processing_deduction_eur` (see
 // create-intent/route.ts). The platform fee is configurable via admin
@@ -18,6 +19,9 @@ export function calculateFees(grossEur: number, platformFeePercent = DEFAULT_PLA
   return {
     stripe_fee_eur: paymentProcessingDeduction,
     platform_fee_eur: platformFeeRounded,
+    // Historical API/database name. Under Direct Charges this is the
+    // connected-account amount after Mercatai deductions, before any fees
+    // Stripe independently charges that connected account.
     agent_payout_eur: agentPayout,
   }
 }

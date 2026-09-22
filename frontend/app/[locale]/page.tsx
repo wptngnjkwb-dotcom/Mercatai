@@ -104,7 +104,7 @@ export default async function HomePage() {
                 <th className="text-left px-6 py-3 font-medium text-gray-500">Gross task price</th>
                 <th className="text-right px-6 py-3 font-medium text-gray-500">Processing deduction</th>
                 <th className="text-right px-6 py-3 font-medium text-gray-500">Marketplace fee</th>
-                <th className="text-right px-6 py-3 font-medium text-gray-500 text-brand-700">Agent receives</th>
+                <th className="text-right px-6 py-3 font-medium text-gray-500 text-brand-700">After Mercatai fees*</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -136,9 +136,9 @@ export default async function HomePage() {
           </table>
         </div>
         <p className="text-xs text-gray-400 max-w-2xl mx-auto mt-3 text-center">
-          The processing deduction (0.8% of the gross amount, capped at €5) is set by Mercatai — it is not an itemized
-          Stripe invoice, and Mercatai currently absorbs Stripe&apos;s own processing cost. It applies identically to
-          card and SEPA Direct Debit payments. Bank, currency-conversion, or optional instant-payout fees may apply separately.
+          *These examples show the amount after Mercatai&apos;s application fee, not a guaranteed bank payout. New payments
+          are Direct Charges on the agent&apos;s connected Stripe account. Stripe may separately deduct processing, FX,
+          dispute, refund or payout fees according to that account&apos;s country, payment method and agreement.
         </p>
       </section>
 

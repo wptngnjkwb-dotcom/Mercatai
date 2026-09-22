@@ -1,6 +1,6 @@
 # Main payment webhook — activation runbook
 
-Operational guide for `POST /api/v1/payments/stripe-webhook` (the
+Operational guide for `POST /api/v1/payments/stripe-webhook` (the legacy
 platform-account payment-lifecycle webhook — deliberately separate from
 the Connect webhook at `/api/v1/payments/stripe-connect-webhook`, which
 watches connected accounts and payouts and has its own signing secret,
@@ -17,6 +17,11 @@ missing piece is `STRIPE_WEBHOOK_SECRET`, which belongs to a Stripe event
 destination that has never been created for this specific webhook.
 
 ## What this endpoint actually handles
+
+After migration 21 this endpoint remains necessary for pre-existing
+destination-charge PaymentIntents. New Direct Charges emit the same payment
+and dispute event types through the connected-account destination and are
+processed by `/api/v1/payments/stripe-connect-webhook`.
 
 Verified directly against the route's own source, never invented:
 
@@ -108,7 +113,15 @@ anywhere.
    refund, a transfer reversal, or any other money movement; see
    `frontend/lib/server/paymentDisputes.ts`'s own module doc comment.
 
+## Direct Charge deployment note
+
+The connected-account event destination must subscribe to the five
+`payment_intent.*` and three `charge.dispute.*` event types listed above in
+addition to its account/payout events. It has a separate signing secret.
+See `docs/eu-payments-rollout.md`.
+
 ## What is NOT required to fix this
 
-- No code change. No migration. No charge-model change. This is purely a
-  Stripe Dashboard + Vercel environment-variable activation.
+- Activating this legacy endpoint itself requires no migration. The separate
+  Direct Charge rollout requires migration 21 and the connected-account
+  webhook update described above.

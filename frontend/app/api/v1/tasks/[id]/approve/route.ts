@@ -6,6 +6,7 @@ import { fireWebhooks } from '@/lib/server/webhooks'
 import { recordAffiliateEarning } from '@/lib/server/affiliate'
 import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
 import { recordPaymentChargeIdentity } from '@/lib/server/paymentState'
+import { paymentContextFromTransaction, stripeRequestOptions } from '@/lib/server/stripePaymentContext'
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   // 1. Autentizace — buyer token for this task, or admin token
@@ -77,9 +78,11 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   try {
     const Stripe = (await import('stripe')).default
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-    const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+    const context = paymentContextFromTransaction(tx)
+    const requestOptions = stripeRequestOptions(context)
+    const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id, requestOptions)
     if (intent.capture_method === 'manual' && intent.status === 'requires_capture') {
-      await stripe.paymentIntents.capture(tx.stripe_payment_intent_id)
+      await stripe.paymentIntents.capture(tx.stripe_payment_intent_id, {}, requestOptions)
     } else if (intent.capture_method === 'manual' && intent.status !== 'succeeded') {
       return NextResponse.json({ error: `Card authorization is not capturable (Stripe status: ${intent.status})` }, { status: 409 })
     } else if (intent.capture_method !== 'manual' && intent.status !== 'succeeded') {
@@ -91,9 +94,9 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     // A failure here must surface as its own retryable error, never as
     // "capture failed" (it didn't) and never silently swallowed — see
     // recordPaymentChargeIdentity's own doc comment.
-    const capturedIntent: Stripe.PaymentIntent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id)
+    const capturedIntent: Stripe.PaymentIntent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id, requestOptions)
     try {
-      await recordPaymentChargeIdentity(db, tx.id, capturedIntent, stripe)
+      await recordPaymentChargeIdentity(db, tx.id, capturedIntent, stripe, context)
     } catch (identityErr) {
       console.error('Failed to record charge/transfer identity after capture:', identityErr)
       return NextResponse.json({ error: 'Payment was captured but its charge/transfer identity could not be recorded — retry required' }, { status: 500 })

@@ -46,6 +46,7 @@ services:
       - ../frontend/sql/18_payment_charge_identity_and_disputes.sql:/docker-entrypoint-initdb.d/35_payment_charge_identity_and_disputes.sql:ro
       - ../frontend/sql/19_restrict_service_role_rpcs.sql:/docker-entrypoint-initdb.d/36_restrict_service_role_rpcs.sql:ro
       - ../frontend/sql/20_payment_charge_transfer_identity.sql:/docker-entrypoint-initdb.d/37_payment_charge_transfer_identity.sql:ro
+      - ../frontend/sql/21_direct_charges.sql:/docker-entrypoint-initdb.d/38_direct_charges.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d mercatai"]
       interval: 5s
@@ -90,14 +91,15 @@ services:
       # webhook both answer 503 — the buyer cannot pay at all.
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
-      # Falls back to the conservative default (CZ,DE,NO) inside the app
-      # itself when unset — see frontend/lib/server/stripeConnectCountries.ts.
+      # Falls back to the reviewed EU/EEA + UK Direct Charges rollout set
+      # inside the app when unset — see stripeConnectCountries.ts.
       STRIPE_CONNECT_ENABLED_COUNTRIES: ${STRIPE_CONNECT_ENABLED_COUNTRIES:-}
       # Signing secret of the SEPARATE Connect webhook endpoint
       # (/api/v1/payments/stripe-connect-webhook) — a production Stripe
       # event destination for "events on connected accounts" can have its
-      # own secret, independent of STRIPE_WEBHOOK_SECRET above. Without it
-      # that endpoint answers 503 and account/payout monitoring is dark.
+      # own secret, independent of STRIPE_WEBHOOK_SECRET above. It must
+      # include account/payout monitoring plus the payment_intent.* and
+      # charge.dispute.* events listed in the payment-webhook runbook.
       STRIPE_CONNECT_WEBHOOK_SECRET: ${STRIPE_CONNECT_WEBHOOK_SECRET:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       # Where payout-failure and moderation alerts are sent. Without it,

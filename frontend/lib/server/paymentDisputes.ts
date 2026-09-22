@@ -75,6 +75,7 @@ export function buildDisputeAlertIdempotencyKey(disputeId: string, payload: Froz
 interface DisputeRowFields {
   stripe_charge_id: string | null
   stripe_payment_intent_id: string | null
+  stripe_connected_account_id: string | null
   transaction_id: string | null
   status: string
   reason: string | null
@@ -316,16 +317,23 @@ async function ensureDisputeAdminAlertSent(
 
 /**
  * Handles charge.dispute.created / .updated / .closed. Called by
- * POST /api/v1/payments/stripe-webhook — see that route for why disputes
- * belong there and not the Connect webhook: Mercatai's destination
- * charges create the Charge object on the PLATFORM's own Stripe account
- * (on_behalf_of only changes the settlement-merchant attribution, not
- * which account the Charge/Dispute lives on), so charge.dispute.* events
- * fire on the platform's own event stream.
+ * Called by both payment webhook namespaces. Legacy destination-charge
+ * disputes arrive on the platform stream; Direct Charge disputes arrive
+ * on the connected-account stream and pass that account id explicitly.
+ * In both cases current state is re-fetched from the same Stripe namespace
+ * as the original Charge before anything is persisted.
  */
-export async function handleDisputeEvent(db: Db, stripe: Stripe, event: Stripe.Event, deps: DisputeAlertDeps): Promise<void> {
+export async function handleDisputeEvent(
+  db: Db,
+  stripe: Stripe,
+  event: Stripe.Event,
+  deps: DisputeAlertDeps,
+  connectedAccountId: string | null = null,
+): Promise<void> {
   const eventDispute = event.data.object as Stripe.Dispute
-  const dispute = await stripe.disputes.retrieve(eventDispute.id)
+  const dispute = connectedAccountId
+    ? await stripe.disputes.retrieve(eventDispute.id, { stripeAccount: connectedAccountId })
+    : await stripe.disputes.retrieve(eventDispute.id)
 
   const chargeId = typeof dispute.charge === 'string' ? dispute.charge : (dispute.charge as Stripe.Charge | null)?.id ?? null
   const paymentIntentId = typeof dispute.payment_intent === 'string' ? dispute.payment_intent : (dispute.payment_intent as Stripe.PaymentIntent | null)?.id ?? null
@@ -334,16 +342,26 @@ export async function handleDisputeEvent(db: Db, stripe: Stripe, event: Stripe.E
   if (paymentIntentId) {
     const { data: tx, error: txError } = await db
       .from('transactions')
-      .select('id')
+      .select('id, stripe_charge_model, stripe_connected_account_id')
       .eq('stripe_payment_intent_id', paymentIntentId)
       .maybeSingle()
     if (txError) throw txError
+    if (tx && connectedAccountId && (
+      tx.stripe_charge_model !== 'direct'
+      || tx.stripe_connected_account_id !== connectedAccountId
+    )) {
+      throw new Error('Connected-account dispute context does not match the transaction')
+    }
+    if (tx && !connectedAccountId && tx.stripe_charge_model === 'direct') {
+      throw new Error('Direct-charge dispute arrived without a connected-account context')
+    }
     transactionId = tx?.id ?? null
   }
 
   const { rowId, statusChanged } = await upsertDisputeRow(db, dispute.id, {
     stripe_charge_id: chargeId,
     stripe_payment_intent_id: paymentIntentId,
+    stripe_connected_account_id: connectedAccountId,
     transaction_id: transactionId,
     status: dispute.status,
     reason: dispute.reason ?? null,

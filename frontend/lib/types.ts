@@ -242,6 +242,8 @@ export interface Transaction {
   escrow_status: 'pending' | 'held' | 'released' | 'refunded' | 'disputed' | 'failed'
   review_deadline_at?: string
   released_at?: string
+  stripe_charge_model?: 'destination' | 'direct' | null
+  stripe_connected_account_id?: string | null
 }
 
 export interface PaymentIntentResponse {
@@ -258,12 +260,17 @@ export interface PaymentIntentResponse {
   stripe_fee_eur: number
   /**
    * Mercatai's payment-processing deduction: 0.8% of gross_amount_eur,
-   * capped at €5. Set by Mercatai, not an itemized Stripe invoice — under
-   * the current destination-charge model Mercatai (not the agent) bears
-   * Stripe's real processing cost. The canonical public field; same value
-   * as the deprecated stripe_fee_eur.
+   * capped at €5. Set by Mercatai, not an itemized Stripe invoice. For new
+   * Direct Charges, Stripe can separately debit its own processing, FX,
+   * dispute, refund or payout fees from the connected account. The
+   * canonical public field; same value as the deprecated stripe_fee_eur.
    */
   payment_processing_deduction_eur: number
+  /**
+   * Amount remaining after Mercatai deductions. With Direct Charges this
+   * is not a guaranteed bank payout: Stripe/account-specific fees can be
+   * deducted separately from the connected account.
+   */
   agent_payout_eur: number
   free_task: boolean
   free_tasks_remaining_after: number
@@ -275,4 +282,8 @@ export interface PaymentIntentResponse {
    */
   capture_mode: 'manual' | 'immediate'
   payment_method: 'card' | 'sepa_debit'
+  /** Required by Stripe.js for a PaymentIntent created as a Direct Charge. */
+  stripe_connected_account_id: string | null
+  /** Existing in-flight destination charges remain supported during rollout. */
+  charge_model: 'destination' | 'direct'
 }

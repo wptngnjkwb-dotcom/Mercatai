@@ -58,7 +58,7 @@ describe('Stripe Connect onboarding countries', () => {
     expect(['IS', 'NO'].every((code) => getOnboardingCountry(code)?.region === 'eea')).toBe(true)
   })
 
-  it('requests only card and transfers for Iceland, unlike every other EU/EEA country', () => {
+  it('requests only card for Iceland, unlike SEPA-capable EU/EEA countries', () => {
     // Iceland has Express connected-account availability but is absent from
     // Stripe's SEPA Direct Debit business-location list (checked
     // 2026-09-09) — requesting sepa_debit_payments for an 'IS' account
@@ -66,25 +66,23 @@ describe('Stripe Connect onboarding countries', () => {
     expect(getOnboardingCountry('IS')?.supportsSepaDebit).toBe(false)
     expect(requiredCapabilitiesForCountry('IS')).toEqual({
       card_payments: { requested: true },
-      transfers: { requested: true },
     })
   })
 
-  it('requests card, SEPA Direct Debit, and transfers for every other EU/EEA country', () => {
+  it('requests card and SEPA Direct Debit for every other enabled EU/EEA country', () => {
     for (const country of SUPPORTED_ONBOARDING_COUNTRIES.filter((item) => item.region !== 'stripe_connect' && item.code !== 'IS')) {
       expect(requiredCapabilitiesForCountry(country.code)).toEqual({
         card_payments: { requested: true },
         sepa_debit_payments: { requested: true },
-        transfers: { requested: true },
       })
     }
   })
 
-  it('requests only card and transfers for other Stripe Connect countries', () => {
+  it('requests only the payment capabilities supported by each other Stripe Connect country', () => {
     for (const country of SUPPORTED_ONBOARDING_COUNTRIES.filter((item) => item.region === 'stripe_connect')) {
       expect(requiredCapabilitiesForCountry(country.code)).toEqual({
         card_payments: { requested: true },
-        transfers: { requested: true },
+        ...(country.supportsSepaDebit ? { sepa_debit_payments: { requested: true } } : {}),
       })
     }
   })
