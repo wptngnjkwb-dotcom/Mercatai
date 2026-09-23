@@ -31,6 +31,11 @@ export default function StripeOnboardPage() {
   // rather than imported statically, since the enabled subset depends on an
   // env var a client bundle cannot read.
   const [countryGroups, setCountryGroups] = useState<OnboardingCountryGroup[]>([])
+  // Registration-supported (countryGroups above) is NOT the same as
+  // payment-enabled — a country can accept onboarding while Mercatai has
+  // not yet turned on live Direct Charge payments for it. See
+  // GET /api/v1/onboarding-countries's own payment_enabled_country_codes.
+  const [paymentEnabledCountryCodes, setPaymentEnabledCountryCodes] = useState<string[]>([])
   const [countriesLoaded, setCountriesLoaded] = useState(false)
   // React Strict Mode double-invokes effects in development — without this
   // guard, landing on ?refresh=1 there would fire the link-refresh request
@@ -43,8 +48,14 @@ export default function StripeOnboardPage() {
   useEffect(() => {
     fetch('/api/v1/onboarding-countries')
       .then((res) => res.json())
-      .then((data) => setCountryGroups(data.groups || []))
-      .catch(() => setCountryGroups([]))
+      .then((data) => {
+        setCountryGroups(data.groups || [])
+        setPaymentEnabledCountryCodes(data.payment_enabled_country_codes || [])
+      })
+      .catch(() => {
+        setCountryGroups([])
+        setPaymentEnabledCountryCodes([])
+      })
       .finally(() => setCountriesLoaded(true))
   }, [])
 
@@ -156,6 +167,14 @@ export default function StripeOnboardPage() {
   }
 
   if (success && stripeStatus?.onboarding_completed) {
+    // Verified onboarding is necessary but NOT sufficient for live
+    // payments — Mercatai gates actual Direct Charge creation separately,
+    // per country (see stripeStatus.payment_enabled, computed server-side
+    // from the SAME gate POST /api/v1/payments/create-intent enforces).
+    // Claiming "you will receive payments" for a country that gate would
+    // currently refuse is exactly the false promise this field exists to
+    // prevent.
+    const paymentEnabled = stripeStatus.payment_enabled === true
     return (
       <div className="max-w-lg mx-auto px-4 py-20 text-center">
         <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6">
@@ -163,12 +182,15 @@ export default function StripeOnboardPage() {
         </div>
         <h1 className="text-2xl font-bold text-gray-900 mb-3">Stripe Connect active!</h1>
         <p className="text-gray-500 mb-6">
-          Your payout account is verified. You will receive payments directly after task approval.
+          {paymentEnabled
+            ? 'Your payout account is verified. You will receive payments directly after task approval.'
+            : 'Your payout account is verified. However, Mercatai has not yet enabled live payments for your account\'s country — you will not be able to receive real payments until it is. We will announce country activations separately; no action is needed from you now.'}
         </p>
         <div className="card p-4 text-left text-sm space-y-2">
           <div className="flex justify-between"><span className="text-gray-500">Stripe account</span><span className="font-mono text-xs">{stripeStatus.stripe_account_id}</span></div>
           <div className="flex justify-between"><span className="text-gray-500">Charges enabled</span><span>{stripeStatus.charges_enabled ? '✅ Yes' : '❌ No'}</span></div>
           <div className="flex justify-between"><span className="text-gray-500">Payouts enabled</span><span>{stripeStatus.payouts_enabled ? '✅ Yes' : '❌ No'}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">Live payments enabled for your country</span><span>{paymentEnabled ? '✅ Yes' : '⏳ Not yet'}</span></div>
         </div>
         <a href="/agent/dashboard" className="btn-primary mt-6 inline-flex">Go to Dashboard</a>
       </div>
@@ -227,6 +249,12 @@ export default function StripeOnboardPage() {
             })()}
             {' '}Stripe confirms availability during onboarding.
           </p>
+          {country && countriesLoaded && !paymentEnabledCountryCodes.includes(country) && (
+            <p className="text-xs text-amber-600 mt-1">
+              You can complete account setup for this country now, but Mercatai has not yet enabled live
+              payments for it — you will not be able to receive real payments until it does.
+            </p>
+          )}
         </div>
 
         <div className="space-y-3 text-sm text-gray-600">

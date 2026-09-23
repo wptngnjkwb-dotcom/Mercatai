@@ -6,8 +6,9 @@ import { auditLog } from '@/lib/server/audit'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { reconcilePaymentIntent } from '@/lib/server/paymentState'
 import { computeStripeAccountReadiness, isMethodReady, syncOnboardingCompletedFlag } from '@/lib/server/stripeAccountReadiness'
+import type Stripe from 'stripe'
 import { getOnboardingCountry } from '@/lib/onboardingCountries'
-import { isDirectChargeCountryEnabled } from '@/lib/server/stripeConnectCountries'
+import { isPaymentCountryEnabled } from '@/lib/server/stripeConnectCountries'
 import {
   bindDirectChargeContext,
   directChargeCreateOptions,
@@ -143,8 +144,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Stripe is not configured' }, { status: 503 })
     }
 
-    const Stripe = (await import('stripe')).default
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
+    const StripeCtor = (await import('stripe')).default
+    const stripe = new StripeCtor(process.env.STRIPE_SECRET_KEY)
+
+    // Fail-closed country gate — checked, and enforced, BEFORE
+    // claim_task_payment ever runs, so a disallowed country produces ZERO
+    // database writes: no 'pending' transaction row, no frozen
+    // payment_method that could make a later retry (even with a different
+    // payment_method) collide into a 409. Only a brand-new attempt is
+    // gated — an existing transaction already carrying a real PaymentIntent
+    // for this task (this mirrors claim_task_payment's own lookup: the most
+    // recent transaction in 'pending'/'held'/'released') is a resume, and
+    // resumes are never re-evaluated; old destination-charge rows included.
+    //
+    // isPaymentCountryEnabled is the intersection of BOTH allowlists —
+    // checking STRIPE_DIRECT_CHARGE_COUNTRIES alone would let a country
+    // removed from (or never added to) STRIPE_CONNECT_ENABLED_COUNTRIES
+    // still accept live payments. See stripeConnectCountries.ts.
+    const { data: existingTxForGate, error: existingTxForGateError } = await db
+      .from('transactions')
+      .select('stripe_payment_intent_id')
+      .eq('task_id', task_id)
+      .in('escrow_status', ['pending', 'held', 'released'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (existingTxForGateError) throw existingTxForGateError
+    const isNewChargeAttempt = !existingTxForGate?.stripe_payment_intent_id?.startsWith('pi_')
+
+    let accountForGate: Stripe.Account | null = null
+    if (isNewChargeAttempt) {
+      accountForGate = await stripe.accounts.retrieve(agentStripeAccount)
+      const gateCountryCode = typeof accountForGate.country === 'string' ? accountForGate.country.toUpperCase() : undefined
+      if (!gateCountryCode || !isPaymentCountryEnabled(gateCountryCode)) {
+        return NextResponse.json({
+          error: gateCountryCode
+            ? `Direct Charge payments are not yet enabled for ${gateCountryCode}. Contact support.`
+            : 'Could not determine the connected account\'s country — payment cannot be created.',
+          direct_charge_country_enabled: false,
+        }, { status: 403 })
+      }
+    }
 
     // Freeze the financial terms in one transaction row before talking to
     // Stripe. The database task lock + partial unique index make concurrent
@@ -196,30 +236,13 @@ export async function POST(request: NextRequest) {
     if (!claimedTx) throw new Error('Claimed payment transaction could not be reloaded')
 
     const existingPaymentIntentId = claimedTx.stripe_payment_intent_id ?? paymentTx.stripe_payment_intent_id
-    const isNewChargeAttempt = !existingPaymentIntentId?.startsWith('pi_')
-
-    // Fail-closed country gate — ONLY for a brand-new payment attempt that
-    // is about to freeze a Direct Charge context for the first time.
-    // STRIPE_DIRECT_CHARGE_COUNTRIES (see stripeConnectCountries.ts)
-    // defaults to empty, so an unconfigured deployment permits none, and
-    // being onboarding-enabled is never silently treated as payment-
-    // enabled. A disallowed country is refused outright — this must never
-    // fall back to the legacy destination-charge model, silently or
-    // otherwise. Already-bound transactions (an existing PaymentIntent,
-    // old destination rows included) are untouched: see
-    // paymentContextFromTransaction below, which reads the immutably
-    // stored charge model instead of re-deciding it.
-    const accountForGate = isNewChargeAttempt ? await stripe.accounts.retrieve(agentStripeAccount) : null
-    if (isNewChargeAttempt) {
-      const gateCountryCode = typeof accountForGate!.country === 'string' ? accountForGate!.country.toUpperCase() : undefined
-      if (!gateCountryCode || !isDirectChargeCountryEnabled(gateCountryCode)) {
-        return NextResponse.json({
-          error: gateCountryCode
-            ? `Direct Charge payments are not yet enabled for ${gateCountryCode}. Contact support.`
-            : 'Could not determine the connected account\'s country — payment cannot be created.',
-          direct_charge_country_enabled: false,
-        }, { status: 403 })
-      }
+    // Must agree with the pre-claim gate's own determination — it does,
+    // barring a concurrent claim on the same task racing in between (see
+    // claim_task_payment's row locking), in which case this transaction is
+    // simply whichever one won that race, and this call correctly defers
+    // to it as an existing attempt rather than starting a second one.
+    if (Boolean(existingPaymentIntentId?.startsWith('pi_')) === isNewChargeAttempt) {
+      throw new Error('Payment claim state disagreed with the pre-claim country-gate check')
     }
 
     const paymentContext = isNewChargeAttempt

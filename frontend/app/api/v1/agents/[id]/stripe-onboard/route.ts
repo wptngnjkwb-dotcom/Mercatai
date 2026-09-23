@@ -6,7 +6,7 @@ import {
   getOnboardingCountry,
   requiredCapabilitiesForCountry,
 } from '@/lib/onboardingCountries'
-import { isOnboardingCountryEnabled } from '@/lib/server/stripeConnectCountries'
+import { isOnboardingCountryEnabled, isPaymentCountryEnabled } from '@/lib/server/stripeConnectCountries'
 import {
   computeStripeAccountReadiness,
   syncOnboardingCompletedFlag,
@@ -331,6 +331,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   // or a later restriction at all.
   await syncOnboardingCompletedFlag(db, agent.id, agent.stripe_onboarding_completed, completed)
 
+  const accountCountry = typeof account.country === 'string' ? account.country.toUpperCase() : null
+
   return NextResponse.json({
     onboarding_completed: completed,
     stripe_account_id: agent.stripe_account_id,
@@ -343,5 +345,13 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     charges_enabled: account.charges_enabled,
     payouts_enabled: account.payouts_enabled,
     requirements: account.requirements?.currently_due ?? [],
+    country: accountCountry,
+    // Whether this specific account's country currently permits a NEW
+    // Direct Charge payment (see isPaymentCountryEnabled — the same
+    // intersection gate POST /api/v1/payments/create-intent enforces).
+    // A verified, fully-ready account can still be payment_enabled=false
+    // if Mercatai hasn't turned on live payments for its country yet —
+    // the UI must not claim otherwise once onboarding completes.
+    payment_enabled: accountCountry ? isPaymentCountryEnabled(accountCountry) : false,
   })
 }

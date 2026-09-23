@@ -7,6 +7,7 @@ import {
   getDirectChargeEnabledCountryCodes,
   isDirectChargeCountryEnabled,
   getPaymentEnabledCountryCodes,
+  isPaymentCountryEnabled,
 } from '@/lib/server/stripeConnectCountries'
 
 // Every test restores the env var afterward — this module reads
@@ -195,5 +196,32 @@ describe('getPaymentEnabledCountryCodes — publicly "payment supported" require
     process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'FR,ES,DE'
     process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'ES,DE,GB'
     expect(getPaymentEnabledCountryCodes().sort()).toEqual(['DE', 'ES'])
+  })
+})
+
+describe('isPaymentCountryEnabled — the single-code intersection check a real payment gate must use', () => {
+  it('is true only when the code is on BOTH lists', () => {
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'FR,DE'
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'DE,ES'
+    expect(isPaymentCountryEnabled('DE')).toBe(true)
+    // Onboarding-enabled but NOT Direct-Charge-enabled.
+    expect(isPaymentCountryEnabled('FR')).toBe(false)
+    // Direct-Charge-enabled but NOT onboarding-enabled — the exact P0 gap
+    // an earlier version of the payment gate had (it checked
+    // isDirectChargeCountryEnabled alone).
+    expect(isPaymentCountryEnabled('ES')).toBe(false)
+  })
+
+  it('is false for every code when either list is empty/unset', () => {
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ'
+    delete process.env.STRIPE_DIRECT_CHARGE_COUNTRIES
+    expect(isPaymentCountryEnabled('CZ')).toBe(false)
+  })
+
+  it('is case-insensitive, matching isOnboardingCountryEnabled/isDirectChargeCountryEnabled', () => {
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'DE'
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'DE'
+    expect(isPaymentCountryEnabled('de')).toBe(true)
+    expect(isPaymentCountryEnabled('De')).toBe(true)
   })
 })

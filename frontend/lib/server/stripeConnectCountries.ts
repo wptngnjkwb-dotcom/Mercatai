@@ -126,6 +126,25 @@ export function isDirectChargeCountryEnabled(code: string): boolean {
 }
 
 /**
+ * The ONE function that should ever gate an actual Direct Charge payment
+ * attempt — true only when the connected account's country is enabled for
+ * BOTH onboarding AND Direct Charges. isDirectChargeCountryEnabled alone
+ * is deliberately NOT sufficient for that: STRIPE_CONNECT_ENABLED_COUNTRIES
+ * and STRIPE_DIRECT_CHARGE_COUNTRIES are independent env vars, so a country
+ * could be listed in the latter while having been removed from (or never
+ * added to) the former — e.g. an operator error, or a country whose
+ * onboarding was later disabled without anyone touching the payment list.
+ * That must never leave a live payment path open for it. Matches
+ * getPaymentEnabledCountryCodes()'s own intersection semantics exactly —
+ * this is the single-code equivalent, meant for a hot-path check that
+ * doesn't need the full list materialized.
+ */
+export function isPaymentCountryEnabled(code: string): boolean {
+  const upper = code.toUpperCase()
+  return isOnboardingCountryEnabled(upper) && isDirectChargeCountryEnabled(upper)
+}
+
+/**
  * A country is publicly describable as "payments enabled" only when it is
  * enabled for BOTH onboarding (registration) AND Direct Charge payment
  * creation — being in only one of the two lists must never be reported as

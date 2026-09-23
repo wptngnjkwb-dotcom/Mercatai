@@ -124,4 +124,15 @@ describe('Registration-supported vs. payments-enabled — the two lists must nev
     expect(onboardingCountries.note).toMatch(/not that a payment can be created/i)
     expect(discovery.stripe_connect_payment_enabled_countries_note).toMatch(/registration support is never itself a promise of payment support/i)
   })
+
+  it('the OpenAPI spec actually documents payment_enabled_country_codes and the country gate\'s 403 — a prior version tested only the onboarding list and left this unverified', async () => {
+    const spec = await (await getOpenApiSpec()).json()
+    const onboardingCountriesPath = spec.paths['/api/v1/onboarding-countries'].get
+    const createIntent403 = spec.paths['/api/v1/payments/create-intent'].post.responses['403'].description
+
+    expect(onboardingCountriesPath.description).toContain('payment_enabled_country_codes')
+    expect(onboardingCountriesPath.responses['200'].description).toContain('payment_enabled_country_codes')
+    expect(createIntent403).toMatch(/direct_charge_country_enabled/i)
+    expect(createIntent403).toMatch(/country/i)
+  })
 })

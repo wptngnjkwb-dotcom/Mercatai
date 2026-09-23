@@ -13,6 +13,11 @@ let agentStripeOnboardingCompleted = true
 let acceptedBidAgentVisibility = 'public'
 const taskUpdates: Record<string, unknown>[] = []
 const agentUpdates: Record<string, unknown>[] = []
+// Proves a rejected country-gate attempt makes literally zero database
+// writes — not just "no PaymentIntent was created" (stripePaymentIntentsCreate),
+// but that claim_task_payment (the RPC that would insert a 'pending'
+// transaction row and freeze payment_method) was never even called.
+const rpcCallNames: string[] = []
 
 const bidRow = { id: BID_ID, task_id: TASK_ID, agent_id: 'agent-1', price_eur: 50, delivery_hours: 24, status: 'pending' }
 
@@ -52,6 +57,7 @@ vi.mock('stripe', () => ({
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
     async rpc(name: string, args: Record<string, any>) {
+      rpcCallNames.push(name)
       if (name === 'accept_task_bid') {
         if (taskModerationStatus !== 'approved') return { data: null, error: { code: 'P0001' } }
         taskUpdates.push({ status: 'assigned', assigned_at: '2026-09-01T00:00:00.000Z', delivery_deadline_at: null })
@@ -148,12 +154,17 @@ beforeEach(() => {
   acceptedBidAgentVisibility = 'public'
   taskUpdates.length = 0
   agentUpdates.length = 0
+  rpcCallNames.length = 0
   existingTxRow = null
   resetAccountRetrieveResult()
   // Matches accountRetrieveResult.country ('CZ') above — represents a
   // properly configured deployment. The country-gate's own fail-closed
   // behavior (empty/unset, a disallowed country) is covered by its
   // dedicated describe block further down, which overrides this per test.
+  // STRIPE_CONNECT_ENABLED_COUNTRIES is left unset by default (falls back
+  // to the EU/EEA+UK rollout, which already includes CZ) — a test that
+  // needs a non-default onboarding allowlist sets it explicitly.
+  delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
   process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'CZ'
   stripeAccountsRetrieve.mockClear()
   stripePaymentIntentsCreate.mockClear()
@@ -274,9 +285,11 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
 
   it('rejects SEPA for a non-EEA connected account with an actionable card-only response', async () => {
     accountRetrieveResult.country = 'PE'
-    // Enable PE for the Direct Charge gate too — this test is specifically
-    // about the SEPA-availability check, not the country gate (which has
-    // its own dedicated describe block below).
+    // Enable PE for BOTH allowlists (isPaymentCountryEnabled needs the
+    // intersection) — this test is specifically about the SEPA-
+    // availability check, not the country gate (which has its own
+    // dedicated describe block below).
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ,PE'
     process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'CZ,PE'
     const response = await fundRequest('sepa_debit')()
     const body = await response.json()
@@ -482,6 +495,34 @@ describe('POST /api/v1/payments/create-intent — STRIPE_DIRECT_CHARGE_COUNTRIES
       expect(stripePaymentIntentsCreate).toHaveBeenCalled()
     })
   }
+
+  it('P0 — a country enabled for Direct Charges but NOT for onboarding is still refused (the true gate is the intersection, not STRIPE_DIRECT_CHARGE_COUNTRIES alone)', async () => {
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'FR' // CZ removed from onboarding
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'CZ' // but still present here
+    const response = await fundRequest('card')()
+    const body = await response.json()
+
+    expect(response.status).toBe(403)
+    expect(body.direct_charge_country_enabled).toBe(false)
+    expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
+  })
+
+  it('P1 — a refused country-gate attempt makes ZERO database writes: claim_task_payment is never even called, so no \'pending\' transaction is created or payment_method frozen', async () => {
+    delete process.env.STRIPE_DIRECT_CHARGE_COUNTRIES
+    const response = await fundRequest('card')()
+
+    expect(response.status).toBe(403)
+    expect(rpcCallNames).not.toContain('claim_task_payment')
+    expect(rpcCallNames).not.toContain('bind_payment_charge_context')
+    expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
+
+    // A later attempt with a DIFFERENT payment_method must be free to
+    // proceed normally — nothing from the refused attempt was frozen.
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'CZ'
+    const retry = await fundRequest('sepa_debit')()
+    expect(retry.status).toBe(201)
+    expect(rpcCallNames).toContain('claim_task_payment')
+  })
 
   it('an old, already-bound destination-charge transaction is fully served regardless of the Direct Charge gate — it is never re-evaluated', async () => {
     delete process.env.STRIPE_DIRECT_CHARGE_COUNTRIES // gate would refuse any brand-new attempt

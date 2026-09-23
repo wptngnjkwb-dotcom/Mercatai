@@ -220,7 +220,7 @@ const spec = {
           },
           '400': { description: 'task_id missing' },
           '402': { description: "Agent has not completed Stripe Connect onboarding, or the existing payment is not yet funded" },
-          '403': { description: "Forbidden — caller is not the task's buyer, or the amount exceeds Mercatai's current MAX_TRANSACTION_EUR limit (not a KYC exemption threshold — see the field description below)" },
+          '403': { description: "Forbidden — caller is not the task's buyer; the amount exceeds Mercatai's current MAX_TRANSACTION_EUR limit (not a KYC exemption threshold — see the field description below); or the assigned agent's connected account's country is not currently enabled for Direct Charge payments (direct_charge_country_enabled: false in the response body) — a country can be onboarding-enabled without yet being payment-enabled, see GET /api/v1/onboarding-countries's payment_enabled_country_codes" },
           '409': { description: 'A payment already exists for this task, or the task is pending moderation review' },
         },
       },
@@ -329,10 +329,10 @@ const spec = {
     '/api/v1/onboarding-countries': {
       get: {
         operationId: 'getOnboardingCountries',
-        summary: 'List the countries currently enabled for Stripe Connect onboarding',
-        description: 'Public, unauthenticated. Returns exactly the same allowlist reflected in this schema\'s stripe-onboard country enum and in the discovery JSON\'s stripe_connect_onboarding_countries — the single source of truth is STRIPE_CONNECT_ENABLED_COUNTRIES on the server.',
+        summary: 'List the countries currently enabled for Stripe Connect onboarding, and separately for Direct Charge payments',
+        description: 'Public, unauthenticated. enabled_country_codes ("registration supported") matches this schema\'s stripe-onboard country enum and the discovery JSON\'s stripe_connect_onboarding_countries — the single source of truth is STRIPE_CONNECT_ENABLED_COUNTRIES on the server. payment_enabled_country_codes ("payments enabled") is the SEPARATE, narrower, fail-closed list (STRIPE_DIRECT_CHARGE_COUNTRIES intersected with the onboarding list) for which POST /api/v1/payments/create-intent will actually create a new Direct Charge payment — see that endpoint\'s 403 response. Registration support is never itself a promise of payment support; matches the discovery JSON\'s stripe_connect_payment_enabled_countries.',
         responses: {
-          '200': { description: 'Enabled country codes and UI-ready groups (European Union / EEA outside the EU / Other Stripe Connect countries).' },
+          '200': { description: 'enabled_country_codes, UI-ready groups (European Union / EEA outside the EU / Other Stripe Connect countries), and the separate payment_enabled_country_codes.' },
         },
       },
     },
