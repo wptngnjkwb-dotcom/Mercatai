@@ -338,6 +338,7 @@ const spec = {
               'application/json': {
                 schema: {
                   type: 'object',
+                  required: ['enabled_country_codes', 'groups', 'payment_enabled_country_codes', 'note'],
                   properties: {
                     enabled_country_codes: {
                       type: 'array',
@@ -349,12 +350,14 @@ const spec = {
                       description: 'The same enabled_country_codes, grouped for UI display and with any now-empty group omitted.',
                       items: {
                         type: 'object',
+                        required: ['label', 'countries'],
                         properties: {
                           label: { type: 'string', enum: ['European Union', 'EEA (outside the EU)', 'Other Stripe Connect countries'] },
                           countries: {
                             type: 'array',
                             items: {
                               type: 'object',
+                              required: ['code', 'label', 'supportsSepaDebit'],
                               properties: {
                                 code: { type: 'string', description: 'ISO 3166-1 alpha-2.' },
                                 label: { type: 'string' },

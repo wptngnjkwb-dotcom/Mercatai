@@ -161,4 +161,22 @@ describe('Registration-supported vs. payments-enabled — the two lists must nev
       expect(liveResponse).toHaveProperty(key)
     }
   })
+
+  it('the OpenAPI schema marks every field required, at every nesting level, so a generated client cannot treat any of them as optional', async () => {
+    const spec = await (await getOpenApiSpec()).json()
+    const schema = spec.paths['/api/v1/onboarding-countries'].get.responses['200'].content['application/json'].schema
+    const groupItemSchema = schema.properties.groups.items
+    const countryItemSchema = groupItemSchema.properties.countries.items
+
+    expect(schema.required).toEqual(['enabled_country_codes', 'groups', 'payment_enabled_country_codes', 'note'])
+    expect(groupItemSchema.required).toEqual(['label', 'countries'])
+    expect(countryItemSchema.required).toEqual(['code', 'label', 'supportsSepaDebit'])
+
+    // Exhaustive, not just non-empty: every declared property at each
+    // level is actually required — nothing was added to `properties`
+    // without a matching `required` entry.
+    expect(schema.required.sort()).toEqual(Object.keys(schema.properties).sort())
+    expect(groupItemSchema.required.sort()).toEqual(Object.keys(groupItemSchema.properties).sort())
+    expect(countryItemSchema.required.sort()).toEqual(Object.keys(countryItemSchema.properties).sort())
+  })
 })
