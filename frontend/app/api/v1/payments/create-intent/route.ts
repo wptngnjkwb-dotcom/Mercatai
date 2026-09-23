@@ -170,10 +170,14 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .maybeSingle()
     if (existingTxForGateError) throw existingTxForGateError
-    const isNewChargeAttempt = !existingTxForGate?.stripe_payment_intent_id?.startsWith('pi_')
+    // A pre-claim snapshot ONLY — decides whether to run the gate at all.
+    // The authoritative "is this actually new" determination is
+    // recomputed after claim_task_payment (see isNewChargeAttempt below),
+    // since a race can make this snapshot stale by then.
+    const looksLikeNewAttempt = !existingTxForGate?.stripe_payment_intent_id?.startsWith('pi_')
 
     let accountForGate: Stripe.Account | null = null
-    if (isNewChargeAttempt) {
+    if (looksLikeNewAttempt) {
       accountForGate = await stripe.accounts.retrieve(agentStripeAccount)
       const gateCountryCode = typeof accountForGate.country === 'string' ? accountForGate.country.toUpperCase() : undefined
       if (!gateCountryCode || !isPaymentCountryEnabled(gateCountryCode)) {
@@ -235,15 +239,20 @@ export async function POST(request: NextRequest) {
     if (claimedTxError) throw claimedTxError
     if (!claimedTx) throw new Error('Claimed payment transaction could not be reloaded')
 
+    // Recomputed fresh from the post-claim row — deliberately NOT reused
+    // from the pre-claim gate's own looksLikeNewAttempt. Under a genuine
+    // race (two concurrent create-intent calls for the same task),
+    // claim_task_payment's row lock can hand this request back the OTHER
+    // request's already-further-along transaction, which may by now carry
+    // a real PaymentIntent even though THIS request's own pre-claim read
+    // saw none. That's not an error to surface — it's simply the two
+    // requests converging on one transaction — so it's recomputed here
+    // and read as an existing attempt, exactly like any other resume.
+    // Safe to fall through to the resume path without re-checking the
+    // country gate: it's the same task and therefore the same assigned
+    // agent/connected account either request would have gated on.
     const existingPaymentIntentId = claimedTx.stripe_payment_intent_id ?? paymentTx.stripe_payment_intent_id
-    // Must agree with the pre-claim gate's own determination — it does,
-    // barring a concurrent claim on the same task racing in between (see
-    // claim_task_payment's row locking), in which case this transaction is
-    // simply whichever one won that race, and this call correctly defers
-    // to it as an existing attempt rather than starting a second one.
-    if (Boolean(existingPaymentIntentId?.startsWith('pi_')) === isNewChargeAttempt) {
-      throw new Error('Payment claim state disagreed with the pre-claim country-gate check')
-    }
+    const isNewChargeAttempt = !existingPaymentIntentId?.startsWith('pi_')
 
     const paymentContext = isNewChargeAttempt
       ? await bindDirectChargeContext(db, paymentTx.transaction_id, agentStripeAccount)

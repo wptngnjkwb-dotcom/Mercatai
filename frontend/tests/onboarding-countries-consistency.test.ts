@@ -135,4 +135,30 @@ describe('Registration-supported vs. payments-enabled — the two lists must nev
     expect(createIntent403).toMatch(/direct_charge_country_enabled/i)
     expect(createIntent403).toMatch(/country/i)
   })
+
+  it('the OpenAPI spec gives /api/v1/onboarding-countries a real, machine-readable response schema — not just a text description an agent client would have to parse by hand', async () => {
+    const spec = await (await getOpenApiSpec()).json()
+    const schema = spec.paths['/api/v1/onboarding-countries'].get.responses['200'].content['application/json'].schema
+
+    expect(schema.type).toBe('object')
+    expect(schema.properties.enabled_country_codes).toMatchObject({ type: 'array', items: { type: 'string' } })
+    expect(schema.properties.payment_enabled_country_codes).toMatchObject({ type: 'array', items: { type: 'string' } })
+    expect(schema.properties.groups.type).toBe('array')
+    const countryItemProps = schema.properties.groups.items.properties.countries.items.properties
+    expect(countryItemProps).toMatchObject({
+      code: { type: 'string' },
+      label: { type: 'string' },
+      supportsSepaDebit: { type: 'boolean' },
+    })
+  })
+
+  it('the OpenAPI schema\'s field names actually match the real live response — the schema is not just plausible-looking, disconnected prose', async () => {
+    const spec = await (await getOpenApiSpec()).json()
+    const schema = spec.paths['/api/v1/onboarding-countries'].get.responses['200'].content['application/json'].schema
+    const liveResponse = await (await getOnboardingCountries()).json()
+
+    for (const key of Object.keys(schema.properties)) {
+      expect(liveResponse).toHaveProperty(key)
+    }
+  })
 })

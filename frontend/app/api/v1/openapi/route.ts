@@ -332,7 +332,50 @@ const spec = {
         summary: 'List the countries currently enabled for Stripe Connect onboarding, and separately for Direct Charge payments',
         description: 'Public, unauthenticated. enabled_country_codes ("registration supported") matches this schema\'s stripe-onboard country enum and the discovery JSON\'s stripe_connect_onboarding_countries — the single source of truth is STRIPE_CONNECT_ENABLED_COUNTRIES on the server. payment_enabled_country_codes ("payments enabled") is the SEPARATE, narrower, fail-closed list (STRIPE_DIRECT_CHARGE_COUNTRIES intersected with the onboarding list) for which POST /api/v1/payments/create-intent will actually create a new Direct Charge payment — see that endpoint\'s 403 response. Registration support is never itself a promise of payment support; matches the discovery JSON\'s stripe_connect_payment_enabled_countries.',
         responses: {
-          '200': { description: 'enabled_country_codes, UI-ready groups (European Union / EEA outside the EU / Other Stripe Connect countries), and the separate payment_enabled_country_codes.' },
+          '200': {
+            description: 'enabled_country_codes, UI-ready groups (European Union / EEA outside the EU / Other Stripe Connect countries), and the separate payment_enabled_country_codes.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    enabled_country_codes: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      description: '"Registration supported" — permitted to start Stripe Connect onboarding. STRIPE_CONNECT_ENABLED_COUNTRIES on the server.',
+                    },
+                    groups: {
+                      type: 'array',
+                      description: 'The same enabled_country_codes, grouped for UI display and with any now-empty group omitted.',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          label: { type: 'string', enum: ['European Union', 'EEA (outside the EU)', 'Other Stripe Connect countries'] },
+                          countries: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                code: { type: 'string', description: 'ISO 3166-1 alpha-2.' },
+                                label: { type: 'string' },
+                                supportsSepaDebit: { type: 'boolean' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    payment_enabled_country_codes: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      description: '"Payments enabled" — the SEPARATE, narrower, fail-closed subset of enabled_country_codes for which POST /api/v1/payments/create-intent will actually create a new Direct Charge payment today (STRIPE_DIRECT_CHARGE_COUNTRIES intersected with enabled_country_codes; empty when STRIPE_DIRECT_CHARGE_COUNTRIES is unset). Always a subset of enabled_country_codes — a country here that is not also in enabled_country_codes would be a bug, never a valid state. Matches the discovery JSON\'s stripe_connect_payment_enabled_countries exactly.',
+                    },
+                    note: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },

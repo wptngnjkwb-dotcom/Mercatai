@@ -35,6 +35,15 @@ function resetAccountRetrieveResult() {
 resetAccountRetrieveResult()
 
 let existingTxRow: Record<string, unknown> | null = null
+// Simulates a genuine race: successive from('transactions').maybeSingle()
+// reads (excluding the pendingUpdate/bind-result branch) within ONE
+// request pop values off this queue in order, instead of all returning
+// the same existingTxRow snapshot — the pre-claim gate read sees one
+// state, the post-claim claimedTx read sees a LATER one, exactly like two
+// concurrent create-intent calls for the same task converging on the
+// same claim_task_payment row lock. Empty by default (unchanged
+// behavior); a test sets it and restores it to [] afterward.
+let transactionsReadSequence: (Record<string, unknown> | null)[] = []
 
 const stripeAccountsRetrieve = vi.fn(async () => accountRetrieveResult)
 const stripePaymentIntentsCreate = vi.fn(async (_params?: unknown, _options?: unknown) => ({ id: 'pi_test_123', client_secret: 'secret_test' }))
@@ -97,6 +106,9 @@ vi.mock('@/lib/server/supabase', () => ({
         maybeSingle: async () => {
           if (table === 'bids') return { data: bidRow, error: null }
           if (table === 'transactions' && pendingUpdate) return { data: { id: existingTxRow?.id ?? 'tx-fake-1' }, error: null }
+          if (table === 'transactions' && transactionsReadSequence.length > 0) {
+            return { data: transactionsReadSequence.shift()!, error: null }
+          }
           if (table === 'transactions') return {
             data: existingTxRow ?? {
               id: 'tx-fake-1', stripe_payment_intent_id: null,
@@ -156,6 +168,7 @@ beforeEach(() => {
   agentUpdates.length = 0
   rpcCallNames.length = 0
   existingTxRow = null
+  transactionsReadSequence = []
   resetAccountRetrieveResult()
   // Matches accountRetrieveResult.country ('CZ') above — represents a
   // properly configured deployment. The country-gate's own fail-closed
@@ -522,6 +535,30 @@ describe('POST /api/v1/payments/create-intent — STRIPE_DIRECT_CHARGE_COUNTRIES
     const retry = await fundRequest('sepa_debit')()
     expect(retry.status).toBe(201)
     expect(rpcCallNames).toContain('claim_task_payment')
+  })
+
+  it('a genuine race — this request\'s pre-claim read sees no transaction, but claim_task_payment\'s row lock hands back another, already-further-along request\'s transaction (a real PaymentIntent already bound) — resumes gracefully instead of throwing a 500', async () => {
+    existingTxRow = {
+      id: 'tx-race-winner',
+      stripe_payment_intent_id: 'pi_race_winner',
+      stripe_charge_model: 'direct',
+      stripe_connected_account_id: 'acct_1',
+      escrow_status: 'pending',
+      gross_amount_eur: 50, platform_fee_eur: 2.1, stripe_fee_eur: 0.4, agent_payout_eur: 47.5,
+    }
+    // Only the FIRST (pre-claim gate) read is queued to see nothing — every
+    // subsequent read (including the post-claim claimedTx reload) falls
+    // through to existingTxRow above, exactly like a real second read
+    // arriving after the race resolved.
+    transactionsReadSequence = [null]
+
+    const response = await fundRequest('card')()
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body).toMatchObject({ charge_model: 'direct', stripe_connected_account_id: 'acct_1', client_secret: 'secret_existing_pending' })
+    expect(stripePaymentIntentsRetrieve).toHaveBeenCalledWith('pi_race_winner', { stripeAccount: 'acct_1' })
+    expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
   })
 
   it('an old, already-bound destination-charge transaction is fully served regardless of the Direct Charge gate — it is never re-evaluated', async () => {
