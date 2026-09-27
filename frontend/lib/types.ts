@@ -287,3 +287,32 @@ export interface PaymentIntentResponse {
   /** Existing in-flight destination charges remain supported during rollout. */
   charge_model: 'destination' | 'direct'
 }
+
+export interface QualityIssueMessage {
+  id: string
+  author_role: 'buyer' | 'agent'
+  message: string
+  created_at: string
+}
+
+/**
+ * The neutral facilitation mechanism replacing the old buyer-dispute /
+ * admin-resolve flow — see frontend/sql/22_quality_issue_facilitation.sql.
+ * Mercatai never decides the outcome: the buyer can still approve at any
+ * time, and only the assigned agent can voluntarily accept a refund via
+ * resolution='agent_refunded'. If response_deadline_at passes with neither,
+ * the platform's existing, pre-disclosed objective auto-release rule
+ * applies (resolution='review_deadline_expired_48h').
+ */
+export interface QualityIssue {
+  id: string
+  task_id: string
+  status: 'open' | 'buyer_approved' | 'agent_refunded' | 'expired' | 'closed'
+  reason_code: 'not_as_described' | 'incomplete_delivery' | 'quality_below_expectations' | 'other'
+  initial_message: string
+  opened_at: string
+  response_deadline_at: string
+  resolved_at: string | null
+  resolution: string | null
+  messages: QualityIssueMessage[]
+}

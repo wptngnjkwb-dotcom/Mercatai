@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Shield, ShieldAlert, RefreshCw, Power, Check, X } from 'lucide-react'
+import { Shield, ShieldAlert, RefreshCw, Power } from 'lucide-react'
 
 interface Overview {
   stats: {
@@ -85,17 +85,6 @@ export default function AdminPage() {
     await load(token)
   }
 
-  const resolveDispute = async (taskId: string, resolution: 'refund_buyer' | 'pay_agent') => {
-    if (!token) return
-    if (!confirm(`Resolve dispute as "${resolution.replace('_', ' ')}"? This moves money and cannot be undone.`)) return
-    try {
-      await adminFetch(`/resolve/${taskId}`, token, { method: 'PUT', body: JSON.stringify({ resolution }) })
-      await load(token)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Resolution failed')
-    }
-  }
-
   const saveFee = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!token) return
@@ -155,7 +144,7 @@ export default function AdminPage() {
               <p className="text-2xl font-bold">€{data.stats.gmv_eur.toFixed(2)}</p></div>
             <div className="card p-4"><p className="text-sm text-gray-500">Platform revenue</p>
               <p className="text-2xl font-bold">€{data.stats.platform_revenue_eur.toFixed(2)}</p></div>
-            <div className="card p-4"><p className="text-sm text-gray-500">Open disputes</p>
+            <div className="card p-4"><p className="text-sm text-gray-500">Disputed (legacy/funding failures)</p>
               <p className="text-2xl font-bold">{data.disputes.length}</p></div>
           </div>
 
@@ -169,13 +158,25 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* Disputes */}
+          {/* Disputed tasks — read-only. Mercatai is a technical marketplace,
+              not a party to the buyer/agent contract, and does not decide a
+              quality dispute between them — see /api/v1/tasks/{id}/issues
+              for the buyer/agent-facing Quality Issue flow, which this admin
+              screen deliberately has no financial action for. This list is
+              visibility for platform-safety review only: today's tasks here
+              are either historical (from before this flow existed) or a
+              genuinely objective Stripe funding-authorization failure
+              (invalidate_task_funding), unrelated to work quality. */}
           <section>
-            <h2 className="text-lg font-semibold mb-3">Disputes</h2>
-            {data.disputes.length === 0 && <p className="text-sm text-gray-400">No open disputes.</p>}
+            <h2 className="text-lg font-semibold mb-3">Disputed tasks</h2>
+            <p className="text-sm text-gray-500 mb-3">
+              Read-only. Mercatai does not decide the outcome of a quality dispute between a buyer and an
+              agent — see the Quality Issue flow. Use agent account limits below for platform-rule violations.
+            </p>
+            {data.disputes.length === 0 && <p className="text-sm text-gray-400">None.</p>}
             <div className="flex flex-col gap-2">
               {data.disputes.map(d => (
-                <div key={d.id} className="card p-4 flex flex-col md:flex-row md:items-start justify-between gap-3">
+                <div key={d.id} className="card p-4">
                   <div className="min-w-0">
                     <p className="font-medium">{d.title}</p>
                     <p className="text-sm text-gray-500">{d.category} · up to €{d.budget_max_eur}</p>
@@ -189,14 +190,6 @@ export default function AdminPage() {
                         {d.delivery_note || 'No delivery recorded.'}
                       </p>
                     </details>
-                  </div>
-                  <div className="flex gap-2 shrink-0">
-                    <button className="btn-secondary flex items-center gap-1" onClick={() => resolveDispute(d.id, 'refund_buyer')}>
-                      <X className="w-4 h-4" /> Refund buyer
-                    </button>
-                    <button className="btn-primary flex items-center gap-1" onClick={() => resolveDispute(d.id, 'pay_agent')}>
-                      <Check className="w-4 h-4" /> Pay agent
-                    </button>
                   </div>
                 </div>
               ))}

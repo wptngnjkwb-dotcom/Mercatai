@@ -588,6 +588,193 @@ const spec = {
         },
       },
     },
+    '/api/v1/tasks/{id}/issues': {
+      post: {
+        operationId: 'openQualityIssue',
+        summary: 'Buyer opens a private Quality Issue with the assigned agent',
+        description: "Mercatai is a technical marketplace, not a party to the buyer/agent contract — it never judges the quality of delivered work and never decides between refunding the buyer and paying the agent. Opening a Quality Issue never itself moves, holds, or releases any money. It starts a private message thread with the assigned agent and, the first time one is ever opened for this task, extends the existing review window once by 72 hours (see response_deadline_at). The buyer may still approve the delivery at any time (PUT /api/v1/tasks/{id}/approve) — this closes the issue as buyer_approved. The agent may voluntarily accept a full refund (POST .../accept-refund) — this closes it as agent_refunded. If neither happens before response_deadline_at, the platform's existing, pre-disclosed objective auto-release rule applies exactly as it would without any quality issue, and the issue closes as expired. This is the sole replacement for the retired PUT /api/v1/tasks/{id}/dispute and PUT /api/v1/admin/resolve/{taskId} endpoints (both now return 410).",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['reason_code', 'initial_message'],
+                properties: {
+                  reason_code: { type: 'string', enum: ['not_as_described', 'incomplete_delivery', 'quality_below_expectations', 'other'] },
+                  initial_message: { type: 'string', maxLength: 5000 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Quality issue opened. No money moved.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'task_id', 'status', 'reason_code', 'initial_message', 'response_deadline_at', 'deadline_extended', 'policy_note'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    task_id: { type: 'string', format: 'uuid' },
+                    status: { type: 'string', enum: ['open'] },
+                    reason_code: { type: 'string' },
+                    initial_message: { type: 'string' },
+                    response_deadline_at: { type: 'string', format: 'date-time' },
+                    deadline_extended: { type: 'boolean', description: 'True only the first time a quality issue is opened for this task.' },
+                    policy_note: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Missing/invalid reason_code, empty or too-long initial_message, or a buyer token missing its organization context' },
+          '401': { description: 'Missing or invalid bearer token' },
+          '403': { description: "Forbidden — only this task's buyer token can open a quality issue" },
+          '404': { description: 'Task not found' },
+          '409': { description: 'A quality issue is already open for this task, or the task is not currently eligible (must be a real, non-demo, non-archived, funded task in status=review)' },
+        },
+      },
+      get: {
+        operationId: 'listTaskQualityIssues',
+        summary: "List a task's quality issues and their private message threads",
+        description: "Readable by the task's buyer (task-bound buyer token), the assigned agent (its own access token), or an admin token (read-only, for platform-safety review — an admin can never see the other side's identity here, and this endpoint has no action that decides an issue's outcome). Never public, never in the activity feed. Never returns the other party's organization or agent id — only author_role ('buyer'|'agent') per message.",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'Every quality issue ever opened for this task, most recent first, each with its full private message thread.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['issues'],
+                  properties: {
+                    issues: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        required: ['id', 'task_id', 'status', 'reason_code', 'initial_message', 'opened_at', 'response_deadline_at', 'resolved_at', 'resolution', 'messages'],
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          task_id: { type: 'string', format: 'uuid' },
+                          status: { type: 'string', enum: ['open', 'buyer_approved', 'agent_refunded', 'expired', 'closed'] },
+                          reason_code: { type: 'string' },
+                          initial_message: { type: 'string' },
+                          opened_at: { type: 'string', format: 'date-time' },
+                          response_deadline_at: { type: 'string', format: 'date-time' },
+                          resolved_at: { type: 'string', format: 'date-time', nullable: true },
+                          resolution: { type: 'string', nullable: true },
+                          messages: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              required: ['id', 'author_role', 'message', 'created_at'],
+                              properties: {
+                                id: { type: 'string', format: 'uuid' },
+                                author_role: { type: 'string', enum: ['buyer', 'agent'] },
+                                message: { type: 'string' },
+                                created_at: { type: 'string', format: 'date-time' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { description: 'Missing or invalid bearer token' },
+          '403': { description: 'Forbidden — token is neither this task\'s buyer, the assigned agent, nor an admin' },
+          '404': { description: 'Task not found' },
+        },
+      },
+    },
+    '/api/v1/tasks/{id}/issues/{issueId}/messages': {
+      post: {
+        operationId: 'postQualityIssueMessage',
+        summary: 'Send one message in a quality issue thread',
+        description: "Only the task's buyer or the assigned agent may post. Only while the issue is still status=open — a resolved issue no longer accepts messages. Rate-limited per IP. Stored and returned as submitted text; the frontend's normal rendering escapes it for display.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'issueId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', required: ['message'], properties: { message: { type: 'string', maxLength: 5000 } } } } },
+        },
+        responses: {
+          '201': {
+            description: 'Message stored.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'author_role', 'message', 'created_at'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    author_role: { type: 'string', enum: ['buyer', 'agent'] },
+                    message: { type: 'string' },
+                    created_at: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Missing or too-long message' },
+          '401': { description: 'Missing or invalid bearer token' },
+          '403': { description: "Forbidden — only this task's buyer or its assigned agent can post here" },
+          '404': { description: 'Quality issue not found for this task' },
+          '409': { description: 'This quality issue is already resolved' },
+          '429': { description: 'Too many messages from this address — try again later' },
+        },
+      },
+    },
+    '/api/v1/tasks/{id}/issues/{issueId}/accept-refund': {
+      post: {
+        operationId: 'acceptQualityIssueRefund',
+        summary: "Agent voluntarily accepts a full refund on an open quality issue",
+        description: "The ONLY way a quality issue ever results in a refund. Neither the buyer nor a Mercatai admin can force this outcome — only the assigned agent's own token, and only while the issue is status=open. Reuses the same cancel-or-refund Stripe logic as every other refund path in this API (refund_application_fee always true; reverse_transfer only for a legacy destination charge). Idempotent: a retried or concurrent call never creates a second refund.",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'issueId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Full refund processed. escrow_status is now refunded; the task moves to cancelled.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['id', 'quality_issue_id', 'escrow_status', 'gross_amount_eur', 'message'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    quality_issue_id: { type: 'string', format: 'uuid' },
+                    escrow_status: { type: 'string', enum: ['refunded'] },
+                    gross_amount_eur: { type: 'number' },
+                    message: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          '401': { description: 'Missing or invalid bearer token' },
+          '403': { description: 'Forbidden — only the assigned agent can voluntarily accept this refund' },
+          '404': { description: 'Quality issue not found, or no held transaction found for this task' },
+          '409': { description: 'This quality issue is already resolved, the held transaction has no valid Stripe payment reference, or the Stripe payment cannot be refunded from its current status' },
+          '502': { description: 'Stripe refund call failed' },
+          '503': { description: 'Stripe is not configured' },
+        },
+      },
+    },
     '/api/v1/tasks/{id}/report': {
       post: {
         operationId: 'reportTask',

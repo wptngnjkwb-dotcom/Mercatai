@@ -58,7 +58,7 @@
       },
       "s4": {
         "title": "Approve delivery",
-        "desc": "Agent delivers the work. You review and approve — payment is released to the agent instantly."
+        "desc": "Agent delivers the work. You review and approve — Mercatai's workflow marks the task complete and the card is captured (or the SEPA payment had already settled). The agent's bank payout follows separately, on Stripe's own schedule."
       }
     },
     "tryDemo": "See it in action"
@@ -115,7 +115,7 @@
   },
   "terms": {
     "title": "Terms of Service",
-    "updated": "Last updated: August 2026"
+    "updated": "Last updated: September 2026 (draft — pending legal review)"
   },
   "privacy": {
     "title": "Privacy Policy",
@@ -224,7 +224,8 @@
     "placeholder": "Paste or describe the completed work the buyer will review.",
     "submitting": "Submitting…",
     "submitButton": "Submit delivery",
-    "errorFallback": "Delivery failed"
+    "errorFallback": "Delivery failed",
+    "viewReviewStatus": "View review status"
   },
   "footer": {
     "copyright": "© 2026 Mercatai — mercatai.eu",
@@ -258,5 +259,30 @@
       "await_review": "Delivery submitted — awaiting buyer review.",
       "closed": "Nothing to do here right now."
     }
+  },
+  "qualityIssue": {
+    "pageTitle": "Delivery review status",
+    "loading": "Loading task…",
+    "taskNotFound": "Task not found",
+    "backToTask": "Back to dashboard",
+    "noIssueBody": "The buyer hasn't reported a quality issue. Payment releases automatically after their review window, or sooner if they approve.",
+    "issueOpenTitle": "Quality issue open",
+    "issueReasonLabel": "Reason",
+    "issueDeadlineLabel": "Respond by",
+    "buyerLabel": "Buyer",
+    "youLabel": "You",
+    "replyPlaceholder": "Reply to the buyer…",
+    "acceptRefundButton": "Accept full refund",
+    "acceptRefundConfirm": "Voluntarily refund the buyer in full? This cannot be undone.",
+    "acceptRefundNote": "Only you can decide this — Mercatai never forces or decides a refund.",
+    "resolvedTitle": "Resolved",
+    "resolutionApproved": "The buyer approved the delivery.",
+    "resolutionRefunded": "You accepted a full refund.",
+    "resolutionExpired": "The review window passed without agreement — the platform's objective auto-release rule applied.",
+    "errorFallback": "Something went wrong",
+    "reasonNotAsDescribed": "Not as described",
+    "reasonIncomplete": "Incomplete delivery",
+    "reasonBelowExpectations": "Quality below expectations",
+    "reasonOther": "Other"
   }
 }

@@ -45,7 +45,27 @@ export const api = {
   getTask: (id: string) => request<import('./types').Task>(`/api/v1/tasks/${id}`),
   createTask: (body: object) => request<import('./types').Task>('/api/v1/tasks', { method: 'POST', body: JSON.stringify(body) }),
   approveTask: (id: string) => request(`/api/v1/tasks/${id}/approve`, { method: 'PUT', headers: buyerAuthHeader(id) }),
-  disputeTask: (id: string) => request(`/api/v1/tasks/${id}/dispute`, { method: 'PUT', headers: buyerAuthHeader(id) }),
+  // Quality Issue flow — replaces the old dispute/admin-resolve mechanism.
+  // Mercatai never decides the outcome: the buyer can still approve at any
+  // time, and only the assigned agent can voluntarily accept a refund.
+  openQualityIssue: (id: string, reason_code: string, initial_message: string) =>
+    request<import('./types').QualityIssue>(`/api/v1/tasks/${id}/issues`, {
+      method: 'POST',
+      body: JSON.stringify({ reason_code, initial_message }),
+      headers: buyerAuthHeader(id),
+    }),
+  // Same buyer-token-if-present-else-agent-access-token pattern as
+  // getTaskBids above — works for either caller without a separate branch.
+  getTaskIssues: (id: string) =>
+    request<{ issues: import('./types').QualityIssue[] }>(`/api/v1/tasks/${id}/issues`, { headers: buyerAuthHeader(id) }),
+  postQualityIssueMessage: (id: string, issueId: string, message: string) =>
+    request<import('./types').QualityIssueMessage>(`/api/v1/tasks/${id}/issues/${issueId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+      headers: buyerAuthHeader(id),
+    }),
+  acceptQualityIssueRefund: (id: string, issueId: string) =>
+    request(`/api/v1/tasks/${id}/issues/${issueId}/accept-refund`, { method: 'POST' }),
   // If a buyer_token for this task is stored, it's sent and takes priority
   // over the caller's own agent access_token (see buyerAuthHeader) — that's
   // what lets a buyer see a private agent's bid identity on their own task,

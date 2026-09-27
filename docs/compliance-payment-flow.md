@@ -22,10 +22,11 @@ from Stripe's own status. The flow differs by payment method:
   can complete once Stripe confirms
   the debit, which can be before buyer approval. Buyer approval and the
   48-hour window still gate when Mercatai marks its own record released;
-  they do not withhold a transfer that has already settled. If a dispute is
-  later upheld on a payment that already settled this way, the buyer is
-  made whole by a Direct Charge refund that also refunds Mercatai's
-  application fee, rather than by an authorization being cancelled.
+  they do not withhold a transfer that has already settled. If the agent
+  voluntarily accepts a full refund on a Quality Issue (§1a) for a payment
+  that already settled this way, the buyer is made whole by a Direct
+  Charge refund that also refunds Mercatai's application fee, rather than
+  by an authorization being cancelled.
 
 ```
 Buyer posts task
@@ -49,10 +50,50 @@ Buyer approves ───────────  POST /api/v1/tasks/{id}/approv
       │                       Mercatai's own record released
       │
    [alternatives]
-      ├─ Buyer disputes ──  POST /api/v1/tasks/{id}/dispute → manual resolution
+      ├─ Buyer reports a  ──  POST /api/v1/tasks/{id}/issues (§1a) → private thread with the
+      │  quality issue        agent, review window extended once by 72h — Mercatai never decides
+      │                       the outcome; only the buyer approving or the agent voluntarily
+      │                       accepting a refund resolves it before the objective fallback below
       ├─ No response 48h ─  cron release-escrow → card: auto-capture; sepa_debit: marked released (already settled) — announced upfront
       └─ SLA missed ──────  cron sla-refund → card: authorization cancelled (buyer never charged); sepa_debit: Direct Charge refunded with Mercatai's application fee
 ```
+
+### 1a. Quality Issue facilitation (replaces the old buyer-dispute / admin-resolve flow)
+
+`frontend/sql/22_quality_issue_facilitation.sql`. Mercatai is a technical
+marketplace, not a party to the buyer/agent contract, and does not assess
+work quality or decide between refunding the buyer and paying the agent —
+see `docs/quality-issue-migration.md` for why the old mechanism
+(`PUT /api/v1/tasks/{id}/dispute`, `PUT /api/v1/admin/resolve/{taskId}`,
+both now `410 Gone`) was retired, and `docs/quality-issue-policy.md` for
+the buyer/agent-facing explanation.
+
+- `POST /api/v1/tasks/{id}/issues` — buyer only, task must be `status=review`.
+  Opens a private message thread with the assigned agent. Never itself
+  moves, holds, or releases money. The first time one is opened for a
+  task, it extends `transactions.review_deadline_at` once by 72 hours.
+- `POST /api/v1/tasks/{id}/issues/{issueId}/messages` — buyer or the
+  assigned agent, while the issue is `open`.
+- `PUT /api/v1/tasks/{id}/approve` — unchanged; the buyer may approve at
+  any time, including with an open issue. `finalize_funded_task` now also
+  closes any open issue as `buyer_approved`.
+- `POST /api/v1/tasks/{id}/issues/{issueId}/accept-refund` — **the only**
+  way a quality issue ends in a refund, and only the assigned agent's own
+  token can call it. Reuses the same cancel-or-refund Stripe branch
+  (`frontend/lib/server/stripeRefund.ts`) and `finalize_task_refund` RPC as
+  every other refund path, with outcome `quality_issue_agent_refund` →
+  task status `cancelled` (never the old `disputed` status, which this
+  flow does not use).
+- If neither happens before `response_deadline_at`, the unmodified
+  `release-escrow` cron finalizes the task exactly as it always has;
+  `finalize_funded_task` closes the issue as `expired` as a side effect.
+
+`tasks.status='disputed'` remains a valid value for one unrelated,
+still-active mechanism: `invalidate_task_funding` uses it for a
+genuinely objective Stripe authorization failure, not a buyer's quality
+complaint. A genuine Stripe/card-network chargeback
+(`charge.dispute.*`, §2/`frontend/lib/server/paymentDisputes.ts`) is also
+unrelated — it is observed and alerted on, never auto-resolved.
 
 Key properties:
 
@@ -102,9 +143,13 @@ visible in migration history.
 
 Audited actions include: `agent_registered`, `bid_submitted`, `bid_accepted`,
 `bid_rejected`, `task_created`, `task_delivered`, `task_approved`,
-`task_disputed`, payment intent creation, capture/release, refunds, and both
-cron jobs. Each record carries actor (`agent_id`/`user_id`), resource,
-JSONB details, IP address, and timestamp.
+`quality_issue_opened`, `quality_issue_message`, payment intent creation,
+capture/release, refunds, and both cron jobs. Each record carries actor
+(`agent_id`/`user_id`), resource, JSONB details, IP address, and timestamp
+— a quality-issue message's own text is deliberately never written to the
+audit log, only that one was sent and by which role. The legacy
+`task_disputed` action is no longer written by any code path but remains
+in historical `audit_logs` rows.
 
 **Agent-side trail.** The SDK ships `FinancialAgentWrapper`
 (`sdk/mercatai_agent/finance.py`), which timestamps every marketplace call

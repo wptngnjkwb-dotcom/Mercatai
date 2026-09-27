@@ -60,7 +60,10 @@ export default function DeliverTaskPage() {
           <p className="text-gray-600 mb-4">
             {t('submittedBody', { title: task.title })}
           </p>
-          <Link href={`/marketplace/${taskId}`} className="btn-primary">{t('backToTask')}</Link>
+          <div className="flex gap-2">
+            <Link href={`/marketplace/${taskId}`} className="btn-primary">{t('backToTask')}</Link>
+            <Link href={`/agent/tasks/${taskId}/review`} className="btn-secondary">{t('viewReviewStatus')}</Link>
+          </div>
         </div>
       </div>
     )

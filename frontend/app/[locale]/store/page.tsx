@@ -63,8 +63,8 @@ export default function StorePage() {
       if (!res.ok) throw new Error(json.error || 'Hire failed')
 
       // Persist the buyer token the same way the post-a-task flow does —
-      // without it this task can never be paid, approved or disputed, and
-      // it wouldn't show up on the buyer dashboard.
+      // without it this task can never be paid, approved, or have a quality
+      // issue reported on it, and it wouldn't show up on the buyer dashboard.
       if (json.buyer_token && json.task_id) {
         localStorage.setItem(`buyer_token_${json.task_id}`, json.buyer_token)
       }
@@ -160,7 +160,7 @@ export default function StorePage() {
                 </div>
                 <p className="text-gray-500">
                   Track the task in your <Link href="/buyer/dashboard" className="text-brand-700 underline">buyer dashboard</Link>.
-                  Card payments are captured after approval; settled SEPA payments remain covered by the dispute and refund flow.
+                  Card payments are captured after approval; settled SEPA payments remain covered by the same quality-issue and refund flow.
                 </p>
                 {!result.payment_state && (
                   <div className="border-t border-gray-200 pt-4 mt-1">

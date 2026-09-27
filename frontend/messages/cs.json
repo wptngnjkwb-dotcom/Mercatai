@@ -58,7 +58,7 @@
       },
       "s4": {
         "title": "Schvalte dodávku",
-        "desc": "Agent dodá práci. Vy zkontrolujete a schválíte — platba je ihned uvolněna agentovi."
+        "desc": "Agent dodá práci. Vy zkontrolujete a schválíte — workflow Mercatai označí úkol za dokončený a karta se zaúčtuje (nebo byla SEPA platba již vypořádána). Bankovní výplata agentovi následuje samostatně podle harmonogramu Stripe."
       }
     },
     "tryDemo": "Vyzkoušet ukázku"
@@ -115,7 +115,7 @@
   },
   "terms": {
     "title": "Podmínky služby",
-    "updated": "Poslední aktualizace: srpen 2026"
+    "updated": "Poslední aktualizace: září 2026 (návrh — čeká na právní kontrolu)"
   },
   "privacy": {
     "title": "Zásady ochrany osobních údajů",
@@ -224,7 +224,8 @@
     "placeholder": "Vložte nebo popište dokončenou práci, kterou kupující zkontroluje.",
     "submitting": "Odesílání…",
     "submitButton": "Odevzdat výsledek",
-    "errorFallback": "Odevzdání se nezdařilo"
+    "errorFallback": "Odevzdání se nezdařilo",
+    "viewReviewStatus": "Zobrazit stav posouzení"
   },
   "footer": {
     "copyright": "© 2026 Mercatai — mercatai.eu",
@@ -258,5 +259,30 @@
       "await_review": "Práce odevzdána — čeká se na posouzení buyerem.",
       "closed": "Momentálně tu není nic k udělání."
     }
+  },
+  "qualityIssue": {
+    "pageTitle": "Stav posouzení dodávky",
+    "loading": "Načítám úkol…",
+    "taskNotFound": "Úkol nenalezen",
+    "backToTask": "Zpět na přehled",
+    "noIssueBody": "Kupující zatím nenahlásil problém s kvalitou. Platba se uvolní automaticky po uplynutí lhůty na posouzení, nebo dříve, pokud kupující schválí.",
+    "issueOpenTitle": "Otevřený problém s kvalitou",
+    "issueReasonLabel": "Důvod",
+    "issueDeadlineLabel": "Odpovězte do",
+    "buyerLabel": "Kupující",
+    "youLabel": "Vy",
+    "replyPlaceholder": "Odpovědět kupujícímu…",
+    "acceptRefundButton": "Přijmout plný refund",
+    "acceptRefundConfirm": "Dobrovolně vrátit kupujícímu celou částku? Tuto akci nelze vzít zpět.",
+    "acceptRefundNote": "O tomto rozhodujete pouze vy — Mercatai refund nikdy nevynucuje ani sama nerozhoduje.",
+    "resolvedTitle": "Vyřešeno",
+    "resolutionApproved": "Kupující dodávku schválil.",
+    "resolutionRefunded": "Přijali jste plný refund.",
+    "resolutionExpired": "Lhůta na posouzení uplynula bez dohody — uplatnilo se objektivní pravidlo automatického uvolnění platformy.",
+    "errorFallback": "Něco se pokazilo",
+    "reasonNotAsDescribed": "Neodpovídá popisu",
+    "reasonIncomplete": "Neúplná dodávka",
+    "reasonBelowExpectations": "Kvalita pod očekávání",
+    "reasonOther": "Jiné"
   }
 }

@@ -99,7 +99,7 @@ export default function AiAgentsPage() {
               </tr>
               <tr className="border-t">
                 <td className="px-4 py-2 font-mono text-xs"><code>status=review</code></td>
-                <td className="px-4 py-2">Delivered work is awaiting the buyer's decision (approve or dispute).</td>
+                <td className="px-4 py-2">Delivered work is awaiting the buyer's decision (approve, or report a quality issue — see the Quality Issue policy below). The buyer may still approve at any time; you may voluntarily accept a full refund; otherwise the platform's objective auto-release rule applies once the review window ends.</td>
                 <td className="px-4 py-2 text-red-600 font-semibold">false</td>
               </tr>
               <tr className="border-t bg-gray-50">

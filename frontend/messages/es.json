@@ -58,7 +58,7 @@
       },
       "s4": {
         "title": "Aprueba la entrega",
-        "desc": "El agente entrega el trabajo. Tú revisas y apruebas — el pago se libera al agente al instante."
+        "desc": "El agente entrega el trabajo. Tú revisas y apruebas — el flujo de Mercatai marca la tarea como completada y se captura la tarjeta (o el pago SEPA ya se había liquidado). El pago bancario al agente se realiza por separado, según el calendario propio de Stripe."
       }
     },
     "tryDemo": "Ver demo"
@@ -115,7 +115,7 @@
   },
   "terms": {
     "title": "Términos de servicio",
-    "updated": "Última actualización: agosto 2026"
+    "updated": "Última actualización: septiembre 2026 (borrador — pendiente de revisión legal)"
   },
   "privacy": {
     "title": "Política de privacidad",
@@ -224,7 +224,8 @@
     "placeholder": "Pega o describe el trabajo terminado que revisará el comprador.",
     "submitting": "Enviando…",
     "submitButton": "Enviar entrega",
-    "errorFallback": "No se pudo enviar la entrega"
+    "errorFallback": "No se pudo enviar la entrega",
+    "viewReviewStatus": "Ver estado de revisión"
   },
   "footer": {
     "copyright": "© 2026 Mercatai — mercatai.eu",
@@ -258,5 +259,30 @@
       "await_review": "Entrega enviada — esperando la revisión del comprador.",
       "closed": "No hay nada que hacer aquí ahora."
     }
+  },
+  "qualityIssue": {
+    "pageTitle": "Estado de revisión de la entrega",
+    "loading": "Cargando tarea…",
+    "taskNotFound": "Tarea no encontrada",
+    "backToTask": "Volver al panel",
+    "noIssueBody": "El comprador no ha reportado ningún problema de calidad. El pago se libera automáticamente al finalizar el plazo de revisión, o antes si el comprador aprueba.",
+    "issueOpenTitle": "Incidencia de calidad abierta",
+    "issueReasonLabel": "Motivo",
+    "issueDeadlineLabel": "Responder antes de",
+    "buyerLabel": "Comprador",
+    "youLabel": "Usted",
+    "replyPlaceholder": "Responder al comprador…",
+    "acceptRefundButton": "Aceptar reembolso completo",
+    "acceptRefundConfirm": "¿Reembolsar voluntariamente el importe completo al comprador? Esta acción no se puede deshacer.",
+    "acceptRefundNote": "Solo usted decide esto — Mercatai nunca fuerza ni decide un reembolso.",
+    "resolvedTitle": "Resuelto",
+    "resolutionApproved": "El comprador aprobó la entrega.",
+    "resolutionRefunded": "Usted aceptó un reembolso completo.",
+    "resolutionExpired": "El plazo de revisión expiró sin acuerdo — se aplicó la regla objetiva de liberación automática de la plataforma.",
+    "errorFallback": "Algo salió mal",
+    "reasonNotAsDescribed": "No coincide con la descripción",
+    "reasonIncomplete": "Entrega incompleta",
+    "reasonBelowExpectations": "Calidad por debajo de lo esperado",
+    "reasonOther": "Otro"
   }
 }

@@ -53,7 +53,7 @@ export async function sendTaskCreated(params: {
       </a>
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0"/>
       <p style="font-size:12px;color:#6b7280">
-        🔑 <strong>Save your buyer token</strong> — you'll need it to approve or dispute delivery:
+        🔑 <strong>Save your buyer token</strong> — you'll need it to approve delivery or report a quality issue:
       </p>
       <code style="display:block;background:#f3f4f6;padding:10px;border-radius:6px;font-size:11px;word-break:break-all">
         ${params.buyerToken}

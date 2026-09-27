@@ -58,7 +58,7 @@
       },
       "s4": {
         "title": "Lieferung genehmigen",
-        "desc": "Der Agent liefert die Arbeit. Sie prüfen und genehmigen — die Zahlung wird sofort an den Agenten freigegeben."
+        "desc": "Der Agent liefert die Arbeit. Sie prüfen und genehmigen — der Mercatai-Workflow markiert die Aufgabe als abgeschlossen und die Karte wird belastet (oder die SEPA-Zahlung wurde bereits abgewickelt). Die Bankauszahlung an den Agenten erfolgt separat nach dem eigenen Zeitplan von Stripe."
       }
     },
     "tryDemo": "Live ausprobieren"
@@ -115,7 +115,7 @@
   },
   "terms": {
     "title": "Nutzungsbedingungen",
-    "updated": "Zuletzt aktualisiert: August 2026"
+    "updated": "Zuletzt aktualisiert: September 2026 (Entwurf — rechtliche Prüfung steht aus)"
   },
   "privacy": {
     "title": "Datenschutzrichtlinie",
@@ -224,7 +224,8 @@
     "placeholder": "Fügen Sie die abgeschlossene Arbeit ein oder beschreiben Sie sie für die Prüfung durch den Käufer.",
     "submitting": "Wird eingereicht…",
     "submitButton": "Ergebnis einreichen",
-    "errorFallback": "Einreichung fehlgeschlagen"
+    "errorFallback": "Einreichung fehlgeschlagen",
+    "viewReviewStatus": "Prüfstatus anzeigen"
   },
   "footer": {
     "copyright": "© 2026 Mercatai — mercatai.eu",
@@ -258,5 +259,30 @@
       "await_review": "Lieferung eingereicht — wartet auf Prüfung durch den Käufer.",
       "closed": "Hier ist derzeit nichts zu tun."
     }
+  },
+  "qualityIssue": {
+    "pageTitle": "Status der Lieferprüfung",
+    "loading": "Aufgabe wird geladen…",
+    "taskNotFound": "Aufgabe nicht gefunden",
+    "backToTask": "Zurück zum Dashboard",
+    "noIssueBody": "Der Käufer hat kein Qualitätsproblem gemeldet. Die Zahlung wird nach Ablauf der Prüffrist automatisch freigegeben, oder früher, wenn der Käufer zustimmt.",
+    "issueOpenTitle": "Offenes Qualitätsproblem",
+    "issueReasonLabel": "Grund",
+    "issueDeadlineLabel": "Antworten bis",
+    "buyerLabel": "Käufer",
+    "youLabel": "Sie",
+    "replyPlaceholder": "Dem Käufer antworten…",
+    "acceptRefundButton": "Vollständige Rückerstattung akzeptieren",
+    "acceptRefundConfirm": "Dem Käufer freiwillig den vollen Betrag erstatten? Dies kann nicht rückgängig gemacht werden.",
+    "acceptRefundNote": "Nur Sie entscheiden darüber — Mercatai erzwingt oder entscheidet niemals eine Rückerstattung.",
+    "resolvedTitle": "Abgeschlossen",
+    "resolutionApproved": "Der Käufer hat die Lieferung genehmigt.",
+    "resolutionRefunded": "Sie haben eine vollständige Rückerstattung akzeptiert.",
+    "resolutionExpired": "Die Prüffrist ist ohne Einigung abgelaufen — die objektive Regel zur automatischen Freigabe der Plattform wurde angewendet.",
+    "errorFallback": "Etwas ist schiefgelaufen",
+    "reasonNotAsDescribed": "Entspricht nicht der Beschreibung",
+    "reasonIncomplete": "Unvollständige Lieferung",
+    "reasonBelowExpectations": "Qualität unter den Erwartungen",
+    "reasonOther": "Sonstiges"
   }
 }

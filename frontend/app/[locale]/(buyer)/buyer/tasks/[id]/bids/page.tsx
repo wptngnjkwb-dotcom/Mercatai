@@ -3,12 +3,19 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, CheckCircle, AlertTriangle, Lock, Star, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, CheckCircle, AlertTriangle, Lock, Star, ShieldCheck, Send } from 'lucide-react'
 import BidCard from '@/components/BidCard'
 import BuyerProtection from '@/components/BuyerProtection'
 import PaymentCheckout from '@/components/PaymentCheckout'
 import { api } from '@/lib/api'
-import type { Task, Bid } from '@/lib/types'
+import type { Task, Bid, QualityIssue } from '@/lib/types'
+
+const REASON_CODE_LABELS: Record<string, string> = {
+  not_as_described: 'Not as described',
+  incomplete_delivery: 'Incomplete delivery',
+  quality_below_expectations: 'Quality below expectations',
+  other: 'Other',
+}
 
 export default function TaskBidsPage() {
   const { id } = useParams<{ id: string }>()
@@ -18,6 +25,15 @@ export default function TaskBidsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [action, setAction] = useState<string | null>(null)
+
+  // Quality Issue flow — replaces the old dispute/admin-resolve mechanism.
+  const [issues, setIssues] = useState<QualityIssue[]>([])
+  const [showIssueForm, setShowIssueForm] = useState(false)
+  const [issueReasonCode, setIssueReasonCode] = useState('not_as_described')
+  const [issueMessage, setIssueMessage] = useState('')
+  const [issueBusy, setIssueBusy] = useState(false)
+  const [issueError, setIssueError] = useState('')
+  const [replyText, setReplyText] = useState('')
 
   // Payment step after bid acceptance
   const [pendingPayment, setPendingPayment] = useState<{ bidId: string; priceEur: number; agentName: string } | null>(null)
@@ -46,6 +62,9 @@ export default function TaskBidsPage() {
             agentName: accepted.agent_display_name ?? 'Agent',
           })
         }
+        if (t.status === 'review') {
+          api.getTaskIssues(id).then(r => setIssues(r.issues)).catch(() => {})
+        }
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -53,6 +72,42 @@ export default function TaskBidsPage() {
     const saved = localStorage.getItem(`buyer_token_${id}`)
     if (saved) setBuyerToken(saved)
   }, [id])
+
+  const openIssue = issues.find(i => i.status === 'open')
+
+  const handleOpenIssue = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!issueMessage.trim()) return
+    setIssueBusy(true)
+    setIssueError('')
+    try {
+      await api.openQualityIssue(id, issueReasonCode, issueMessage.trim())
+      const r = await api.getTaskIssues(id)
+      setIssues(r.issues)
+      setShowIssueForm(false)
+      setIssueMessage('')
+    } catch (e: any) {
+      setIssueError(e.message ?? 'Failed to open quality issue')
+    } finally {
+      setIssueBusy(false)
+    }
+  }
+
+  const handleSendReply = async () => {
+    if (!openIssue || !replyText.trim()) return
+    setIssueBusy(true)
+    setIssueError('')
+    try {
+      await api.postQualityIssueMessage(id, openIssue.id, replyText.trim())
+      const r = await api.getTaskIssues(id)
+      setIssues(r.issues)
+      setReplyText('')
+    } catch (e: any) {
+      setIssueError(e.message ?? 'Failed to send message')
+    } finally {
+      setIssueBusy(false)
+    }
+  }
 
   const handleAccept = async (bidId: string) => {
     if (!confirm('Accept this bid? All other bids will be rejected.')) return
@@ -262,9 +317,79 @@ export default function TaskBidsPage() {
               <button onClick={handleApproveTask} className="btn-primary flex-1 justify-center">
                 <CheckCircle size={16} /> Approve Delivery &amp; Release Payment
               </button>
-              <button onClick={() => api.disputeTask(id)} className="btn-danger">
-                <AlertTriangle size={16} /> Dispute
+              {!openIssue && (
+                <button onClick={() => setShowIssueForm(v => !v)} className="btn-danger">
+                  <AlertTriangle size={16} /> Report a quality issue
+                </button>
+              )}
+            </div>
+          )}
+
+          {task.status === 'review' && showIssueForm && !openIssue && (
+            <form onSubmit={handleOpenIssue} className="mt-4 border border-gray-200 rounded-lg p-4 space-y-3">
+              <p className="text-sm text-gray-600">
+                This opens a private message thread with the agent — it never moves or holds any money by
+                itself. You can still approve at any time. The agent may voluntarily offer a full refund. If
+                you don&apos;t reach agreement, the platform&apos;s existing rule (auto-release after the
+                review window) applies automatically — Mercatai does not judge the work or decide between you.
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+                <select
+                  className="input w-full"
+                  value={issueReasonCode}
+                  onChange={e => setIssueReasonCode(e.target.value)}
+                >
+                  {Object.entries(REASON_CODE_LABELS).map(([code, label]) => (
+                    <option key={code} value={code}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Describe the issue</label>
+                <textarea
+                  className="input w-full h-24 resize-none"
+                  maxLength={5000}
+                  value={issueMessage}
+                  onChange={e => setIssueMessage(e.target.value)}
+                  placeholder="What's missing or wrong with the delivery?"
+                />
+              </div>
+              {issueError && <p className="text-sm text-red-600">{issueError}</p>}
+              <button type="submit" disabled={issueBusy || !issueMessage.trim()} className="btn-danger disabled:opacity-50">
+                {issueBusy ? 'Sending…' : 'Open quality issue'}
               </button>
+            </form>
+          )}
+
+          {openIssue && (
+            <div className="mt-4 border border-amber-200 bg-amber-50 rounded-lg p-4 space-y-3">
+              <p className="text-sm text-amber-900">
+                <strong>Quality issue open</strong> — reason: {REASON_CODE_LABELS[openIssue.reason_code] ?? openIssue.reason_code}.
+                Respond deadline: {new Date(openIssue.response_deadline_at).toLocaleString()}. You can still
+                approve above at any time; the agent may voluntarily accept a full refund.
+              </p>
+              <div className="flex flex-col gap-2 max-h-64 overflow-y-auto bg-white rounded-lg p-3 border border-amber-100">
+                <p className="text-sm text-gray-700 whitespace-pre-wrap"><strong>You:</strong> {openIssue.initial_message}</p>
+                {openIssue.messages.map(m => (
+                  <p key={m.id} className="text-sm text-gray-700 whitespace-pre-wrap">
+                    <strong>{m.author_role === 'buyer' ? 'You' : 'Agent'}:</strong> {m.message}
+                  </p>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  maxLength={5000}
+                  value={replyText}
+                  onChange={e => setReplyText(e.target.value)}
+                  placeholder="Reply to the agent..."
+                />
+                <button onClick={handleSendReply} disabled={issueBusy || !replyText.trim()} className="btn-secondary disabled:opacity-50">
+                  <Send size={16} />
+                </button>
+              </div>
+              {issueError && <p className="text-sm text-red-600">{issueError}</p>}
             </div>
           )}
 

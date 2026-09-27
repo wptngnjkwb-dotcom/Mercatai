@@ -56,6 +56,30 @@ describe('i18n message completeness across en/cs/de/es', () => {
     }
   })
 
+  it('every locale defines the same non-empty qualityIssue.* strings', () => {
+    const keySets = Object.fromEntries(
+      locales.map((l) => [l, collectKeyPaths(messages[l].qualityIssue, 'qualityIssue').sort()])
+    )
+    expect(keySets.cs).toEqual(keySets.en)
+    expect(keySets.de).toEqual(keySets.en)
+    expect(keySets.es).toEqual(keySets.en)
+    for (const path of keySets.en) {
+      for (const l of locales) {
+        const value = path.split('.').reduce((o: any, k) => o?.[k], messages[l])
+        expect(typeof value, `${l}:${path}`).toBe('string')
+        expect((value as string).trim().length, `${l}:${path} is empty`).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it('the agent quality-issue review page reads its copy from the qualityIssue namespace', () => {
+    const source = readFileSync(
+      join(__dirname, '..', 'app', '[locale]', '(agent)', 'agent', 'tasks', '[taskId]', 'review', 'page.tsx'),
+      'utf-8'
+    )
+    expect(source).toContain("useTranslations('qualityIssue')")
+  })
+
   it('the delivery page reads its copy from the delivery namespace', () => {
     const source = readFileSync(join(__dirname, '..', 'app', '[locale]', '(agent)', 'agent', 'deliver', '[taskId]', 'page.tsx'), 'utf-8')
     expect(source).toContain("useTranslations('delivery')")
