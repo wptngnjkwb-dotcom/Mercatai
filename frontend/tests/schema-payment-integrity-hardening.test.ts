@@ -8,7 +8,6 @@ const compose = readFileSync(resolve(root, 'deploy/docker-compose.yml'), 'utf8')
 const createIntentRoute = readFileSync(resolve(root, 'frontend/app/api/v1/payments/create-intent/route.ts'), 'utf8')
 const refundRoute = readFileSync(resolve(root, 'frontend/app/api/v1/payments/refund/[taskId]/route.ts'), 'utf8')
 const slaRefundRoute = readFileSync(resolve(root, 'frontend/app/api/cron/sla-refund/route.ts'), 'utf8')
-const adminResolveRoute = readFileSync(resolve(root, 'frontend/app/api/v1/admin/resolve/[taskId]/route.ts'), 'utf8')
 
 describe('migration 17 payment-integrity boundaries', () => {
   it('is mounted after atomic delivery for every fresh self-hosted install', () => {
@@ -54,13 +53,15 @@ describe('migration 17 payment-integrity boundaries', () => {
     }
   })
 
-  it('routes every refund/dispute outcome through atomic DB finalization and stable Stripe retry keys', () => {
+  it('routes every refund outcome through atomic DB finalization and stable Stripe retry keys', () => {
     expect(refundRoute).toContain("db.rpc('finalize_task_refund'")
     expect(refundRoute).toContain('`mercatai-refund-${tx.id}`')
     expect(slaRefundRoute).toContain("db.rpc('finalize_task_refund'")
     expect(slaRefundRoute).toContain('`mercatai-sla-refund-${tx.id}`')
-    expect(adminResolveRoute).toContain("db.rpc('finalize_task_refund'")
-    expect(adminResolveRoute).toContain("db.rpc('finalize_funded_task'")
-    expect(adminResolveRoute).toContain('`mercatai-admin-refund-${tx.id}`')
+    // PUT /api/v1/admin/resolve/{taskId} used to route a 'pay_agent'/
+    // 'refund_buyer' admin decision through finalize_funded_task /
+    // finalize_task_refund here too — it is now a 410 stub with no RPC
+    // calls at all (frontend/sql/22_quality_issue_facilitation.sql),
+    // covered by tests/quality-issue-policy-language.test.ts.
   })
 })

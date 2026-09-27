@@ -1,22 +1,26 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
-// The real production handlers — not reimplementations of their logic.
-import { PUT as adminResolve } from '@/app/api/v1/admin/resolve/[taskId]/route'
+// The real production handler — not a reimplementation of its logic.
 import { GET as cronReleaseEscrow } from '@/app/api/cron/release-escrow/route'
 
 /**
- * Proves the two remaining capture-and-release paths — admin dispute
- * resolution (pay_agent) and the hourly escrow-release cron — record
+ * Proves the hourly escrow-release cron records
  * stripe_charge_id/stripe_transfer_id exactly like buyer approve does
  * (see tests/approve-unfunded.test.ts), via the SAME shared
  * recordPaymentChargeIdentity / record_payment_charge_identity RPC.
- * Neither route had any test coverage before this file.
+ *
+ * PUT /api/v1/admin/resolve/[taskId] (pay_agent) is no longer part of
+ * this — that endpoint used to capture-and-release a disputed payment as
+ * an admin decision. Mercatai no longer decides a marketplace dispute at
+ * all (see frontend/sql/22_quality_issue_facilitation.sql and
+ * tests/quality-issue-policy-language.test.ts, which covers its 410
+ * response), so there is nothing left here for it to record an identity
+ * for.
  */
 
 const TASK_ID = '22222222-2222-2222-2222-222222222222'
 
 type Row = Record<string, any>
-let taskRow: Row | null
 let transactionRow: Row | null
 // The cron route's query joins tasks!inner(...) and filters on
 // 'tasks.status' — the fake just returns this pre-built array directly
@@ -27,7 +31,6 @@ const rpcCalls: { name: string; args: Row }[] = []
 vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks: vi.fn(async () => {}) }))
 vi.mock('@/lib/server/affiliate', () => ({ recordAffiliateEarning: vi.fn(async () => {}) }))
 vi.mock('@/lib/server/agentVisibility', () => ({ agentIdentityForWebhook: async () => ({ agent_id: 'agent-1' }) }))
-vi.mock('@/lib/server/auth', () => ({ getTokenFromRequest: async () => ({ tier: 'admin' }) }))
 
 const { retrievePaymentIntent, capturePaymentIntent, retrieveCharge, stripeConstructor } = vi.hoisted(() => {
   const capture = vi.fn(async () => ({}))
@@ -75,8 +78,6 @@ vi.mock('@/lib/server/supabase', () => ({
       throw new Error(`unexpected rpc ${name}`)
     },
     from(table: string) {
-      // Admin route: tasks .select().eq().single()
-      // Admin route: transactions .select().eq().order().limit().maybeSingle()
       // Cron route: transactions .select().eq().lt().eq() awaited directly
       const builder: any = {
         select: () => builder,
@@ -85,7 +86,7 @@ vi.mock('@/lib/server/supabase', () => ({
         limit: () => builder,
         lt: () => builder,
         async single() {
-          return { data: table === 'tasks' ? taskRow : transactionRow, error: null }
+          return { data: transactionRow, error: null }
         },
         async maybeSingle() {
           return { data: table === 'transactions' ? transactionRow : null, error: null }
@@ -104,31 +105,10 @@ vi.mock('@/lib/server/supabase', () => ({
 beforeEach(() => {
   rpcCalls.length = 0
   vi.clearAllMocks()
-  taskRow = { id: TASK_ID, status: 'disputed' }
   transactionRow = { id: 'tx-1', task_id: TASK_ID, escrow_status: 'held', stripe_payment_intent_id: 'pi_test' }
   expiredCronRows = []
   process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'
   process.env.CRON_SECRET = 'cron-secret-test'
-})
-
-describe('PUT /api/v1/admin/resolve/[taskId] (pay_agent) — records charge/transfer identity', () => {
-  function resolveRequest(body: Row) {
-    return new NextRequest(`http://localhost/api/v1/admin/resolve/${TASK_ID}`, {
-      method: 'PUT',
-      headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-  }
-
-  it('captures the disputed payment, records both stripe_charge_id and stripe_transfer_id, then finalizes', async () => {
-    const response = await adminResolve(resolveRequest({ resolution: 'pay_agent' }), { params: { taskId: TASK_ID } })
-
-    expect(response.status).toBe(200)
-    expect(capturePaymentIntent).toHaveBeenCalledWith('pi_test', {}, {})
-    expect(rpcCalls.map((c) => c.name)).toEqual(['record_payment_charge_identity', 'finalize_funded_task'])
-    expect(transactionRow?.stripe_charge_id).toBe('ch_test')
-    expect(transactionRow?.stripe_transfer_id).toBe('tr_test')
-  })
 })
 
 describe('GET /api/cron/release-escrow — records charge/transfer identity for every auto-released transaction', () => {

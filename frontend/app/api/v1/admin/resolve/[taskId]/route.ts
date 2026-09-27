@@ -1,122 +1,36 @@
-import { NextRequest, NextResponse } from 'next/server'
-import type Stripe from 'stripe'
-import { getSupabase } from '@/lib/server/supabase'
-import { getTokenFromRequest } from '@/lib/server/auth'
-import { recordPaymentChargeIdentity } from '@/lib/server/paymentState'
-import { paymentContextFromTransaction, stripeRequestOptions } from '@/lib/server/stripePaymentContext'
+import { NextResponse } from 'next/server'
 
 /**
- * Dispute resolution — the missing exit from the 'disputed' state.
+ * Legacy endpoint intentionally disabled.
  *
- * PUT { resolution: 'refund_buyer' | 'pay_agent', note?: string }
- *   refund_buyer → cancel the Stripe authorization, task → cancelled
- *   pay_agent    → capture the payment, task → completed
+ * Mercatai does not decide a marketplace dispute — it never chooses
+ * between refunding the buyer and paying the agent. That judgment
+ * belonged to the two parties to the underlying contract, not to the
+ * platform. The replacement is the Quality Issue flow: the buyer can
+ * always approve (PUT /api/v1/tasks/{id}/approve), the agent can
+ * voluntarily accept a full refund
+ * (POST /api/v1/tasks/{id}/issues/{issueId}/accept-refund), and if
+ * neither happens the platform's existing, pre-disclosed objective rule
+ * (auto-release once the — possibly once-extended — review deadline
+ * passes) applies exactly as it always has. See
+ * frontend/sql/22_quality_issue_facilitation.sql.
+ *
+ * An admin may still read a Quality Issue for safety review
+ * (GET /api/v1/tasks/{id}/issues) and may still limit or deactivate an
+ * agent's account for violating platform rules
+ * (PUT /api/v1/admin/agents/{id}) — neither of those decides a contractual
+ * claim between a buyer and an agent, which is what this endpoint used to
+ * do and no longer does.
+ *
+ * A task this endpoint previously resolved, or a task still sitting in
+ * 'disputed' status because this endpoint was never called for it, is
+ * untouched by this change — see
+ * docs/quality-issue-migration.md (repo root) for the safe historical
+ * migration procedure. Nothing here deletes or auto-resolves that data.
  */
-export async function PUT(request: NextRequest, { params }: { params: { taskId: string } }) {
-  const token = await getTokenFromRequest(request)
-  if (!token || token.tier !== 'admin') {
-    return NextResponse.json({ error: 'Admin token required' }, { status: 403 })
-  }
-
-  const body = await request.json().catch(() => ({}))
-  const { resolution, note } = body
-  if (!['refund_buyer', 'pay_agent'].includes(resolution)) {
-    return NextResponse.json({ error: "resolution must be 'refund_buyer' or 'pay_agent'" }, { status: 400 })
-  }
-  if (note !== undefined && (typeof note !== 'string' || note.trim().length > 1000)) {
-    return NextResponse.json({ error: 'note must be text up to 1,000 characters' }, { status: 400 })
-  }
-
-  const db = getSupabase()
-
-  const { data: task, error: taskError } = await db.from('tasks').select('*').eq('id', params.taskId).single()
-  if (taskError && taskError.code !== 'PGRST116') return NextResponse.json({ error: 'Task could not be loaded' }, { status: 500 })
-  if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
-  if (task.status !== 'disputed') {
-    return NextResponse.json({ error: 'Task is not disputed' }, { status: 400 })
-  }
-
-  const { data: tx, error: txError } = await db
-    .from('transactions')
-    .select('*')
-    .eq('task_id', params.taskId)
-    .order('created_at', { ascending: false }).limit(1).maybeSingle()
-  if (txError) return NextResponse.json({ error: 'Payment could not be loaded' }, { status: 500 })
-  if (!tx || tx.escrow_status !== 'held') return NextResponse.json({ error: 'No funded payment found for this dispute' }, { status: 409 })
-  if (!process.env.STRIPE_SECRET_KEY) return NextResponse.json({ error: 'Stripe is not configured' }, { status: 503 })
-  if (!tx.stripe_payment_intent_id?.startsWith('pi_')) return NextResponse.json({ error: 'Funded transaction has no valid Stripe payment reference' }, { status: 409 })
-
-  const Stripe = (await import('stripe')).default
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-  const context = paymentContextFromTransaction(tx)
-  const requestOptions = stripeRequestOptions(context)
-  let intent
-  try {
-    intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id, requestOptions)
-  } catch (err) {
-    console.error('Stripe dispute lookup failed', err)
-    return NextResponse.json({ error: 'Stripe payment could not be verified' }, { status: 502 })
-  }
-
-  if (resolution === 'refund_buyer') {
-    try {
-      if (intent.status === 'succeeded') {
-        await stripe.refunds.create({
-          payment_intent: tx.stripe_payment_intent_id,
-          refund_application_fee: true,
-          ...(context.chargeModel === 'destination' ? { reverse_transfer: true } : {}),
-        }, stripeRequestOptions(context, `mercatai-admin-refund-${tx.id}`))
-      } else if (intent.status === 'requires_capture') {
-        await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id, {}, requestOptions)
-      } else if (intent.status === 'canceled') {
-        // Retry after a successful Stripe cancellation and failed DB write.
-      } else {
-        return NextResponse.json({ error: `Stripe payment cannot be refunded from status ${intent.status}` }, { status: 409 })
-      }
-    } catch (err) {
-      console.error('Stripe dispute refund failed', err)
-      return NextResponse.json({ error: 'Stripe refund failed' }, { status: 502 })
-    }
-    const { data, error } = await db.rpc('finalize_task_refund', {
-      p_task_id: params.taskId, p_transaction_id: tx.id,
-      p_outcome: 'admin_dispute_refund', p_reason: typeof note === 'string' ? note.trim() : 'admin dispute resolution',
-    })
-    const result = Array.isArray(data) ? data[0] : data
-    if (error || !result || result.task_status !== 'cancelled' || result.transaction_status !== 'refunded') {
-      return NextResponse.json({ error: 'Stripe refund succeeded but database finalization must be retried' }, { status: 500 })
-    }
-  } else {
-    let capturedIntent: Stripe.PaymentIntent
-    try {
-      if (intent.capture_method === 'manual' && intent.status === 'requires_capture') {
-        await stripe.paymentIntents.capture(tx.stripe_payment_intent_id, {}, requestOptions)
-      } else if (intent.status !== 'succeeded') {
-        return NextResponse.json({ error: `Stripe payment cannot be paid from status ${intent.status}` }, { status: 409 })
-      }
-      capturedIntent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id, requestOptions)
-    } catch (err) {
-      console.error('Stripe dispute capture failed', err)
-      return NextResponse.json({ error: 'Stripe capture failed' }, { status: 502 })
-    }
-    try {
-      await recordPaymentChargeIdentity(db, tx.id, capturedIntent, stripe, context)
-    } catch (identityErr) {
-      console.error('Failed to record charge/transfer identity after admin capture:', identityErr)
-      return NextResponse.json({ error: 'Payment was captured but its charge/transfer identity could not be recorded — retry required' }, { status: 500 })
-    }
-    const { data, error } = await db.rpc('finalize_funded_task', {
-      p_task_id: params.taskId, p_transaction_id: tx.id,
-      p_reason: 'admin_dispute_pay_agent',
-    })
-    const result = Array.isArray(data) ? data[0] : data
-    if (error || !result || result.task_status !== 'completed' || result.transaction_status !== 'released') {
-      return NextResponse.json({ error: 'Stripe payment succeeded but database finalization must be retried' }, { status: 500 })
-    }
-  }
-
+export async function PUT() {
   return NextResponse.json({
-    task_id: params.taskId,
-    resolution,
-    status: resolution === 'refund_buyer' ? 'cancelled' : 'completed',
-  })
+    error: 'This endpoint is no longer available. Mercatai does not decide marketplace disputes between a buyer and an agent. See the Quality Issue flow: POST /api/v1/tasks/{id}/issues and POST /api/v1/tasks/{id}/issues/{issueId}/accept-refund.',
+    canonical_endpoint: '/api/v1/tasks/{id}/issues',
+  }, { status: 410 })
 }

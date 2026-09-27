@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
-import { paymentContextFromTransaction, stripeRequestOptions } from '@/lib/server/stripePaymentContext'
+import { cancelOrRefundHeldPayment } from '@/lib/server/stripeRefund'
 
 /**
  * SLA deadline guarantee — Vercel Cron (hourly).
@@ -48,26 +48,11 @@ export async function GET(request: NextRequest) {
     try {
       if (!process.env.STRIPE_SECRET_KEY) throw new Error('Stripe is not configured')
       if (!tx.stripe_payment_intent_id?.startsWith('pi_')) throw new Error('Held transaction has no valid Stripe payment reference')
-      // Cancel an uncaptured card authorization; refund an already settled
-      // SEPA debit (automatic-capture intents cannot be canceled).
       const Stripe = (await import('stripe')).default
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-      const context = paymentContextFromTransaction(tx)
-      const requestOptions = stripeRequestOptions(context)
-      const intent = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id, requestOptions)
-      if (intent.status === 'succeeded') {
-        await stripe.refunds.create({
-          payment_intent: tx.stripe_payment_intent_id,
-          refund_application_fee: true,
-          ...(context.chargeModel === 'destination' ? { reverse_transfer: true } : {}),
-        }, stripeRequestOptions(context, `mercatai-sla-refund-${tx.id}`))
-      } else if (intent.status === 'requires_capture') {
-        await stripe.paymentIntents.cancel(tx.stripe_payment_intent_id, {}, requestOptions)
-      } else if (intent.status === 'canceled') {
-        // Previous cron attempt may have completed the Stripe cancellation
-        // but failed its DB commit; finalize that same outcome below.
-      } else {
-        throw new Error(`Stripe payment cannot be refunded from status ${intent.status}`)
+      const result = await cancelOrRefundHeldPayment(stripe, tx, `mercatai-sla-refund-${tx.id}`)
+      if (result.outcome === 'not_possible') {
+        throw new Error(`Stripe payment cannot be refunded from status ${result.stripeStatus}`)
       }
 
       const { data: finalizedData, error: finalizedError } = await db.rpc('finalize_task_refund', {
