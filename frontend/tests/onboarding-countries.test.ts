@@ -66,23 +66,34 @@ describe('Stripe Connect onboarding countries', () => {
     expect(getOnboardingCountry('IS')?.supportsSepaDebit).toBe(false)
     expect(requiredCapabilitiesForCountry('IS')).toEqual({
       card_payments: { requested: true },
+      transfers: { requested: true },
     })
   })
 
-  it('requests card and SEPA Direct Debit for every other enabled EU/EEA country', () => {
+  it('requests card, SEPA Direct Debit, and the paired transfers capability for every other enabled EU/EEA country', () => {
     for (const country of SUPPORTED_ONBOARDING_COUNTRIES.filter((item) => item.region !== 'stripe_connect' && item.code !== 'IS')) {
       expect(requiredCapabilitiesForCountry(country.code)).toEqual({
         card_payments: { requested: true },
         sepa_debit_payments: { requested: true },
+        transfers: { requested: true },
       })
     }
   })
 
-  it('requests only the payment capabilities supported by each other Stripe Connect country', () => {
+  it('requests card and transfers for every other Stripe Connect country, plus SEPA where supported', () => {
     for (const country of SUPPORTED_ONBOARDING_COUNTRIES.filter((item) => item.region === 'stripe_connect')) {
       expect(requiredCapabilitiesForCountry(country.code)).toEqual({
         card_payments: { requested: true },
+        transfers: { requested: true },
         ...(country.supportsSepaDebit ? { sepa_debit_payments: { requested: true } } : {}),
+      })
+    }
+  })
+
+  it('always pairs transfers with card_payments — Stripe rejects card_payments alone on an Express account', () => {
+    for (const country of SUPPORTED_ONBOARDING_COUNTRIES) {
+      expect(requiredCapabilitiesForCountry(country.code)).toMatchObject({
+        transfers: { requested: true },
       })
     }
   })

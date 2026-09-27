@@ -94,6 +94,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (requiredCapabilities.sepa_debit_payments && readiness.sepaDebitPaymentsStatus !== 'active') {
       missingCapabilities.sepa_debit_payments = { requested: true }
     }
+    // Stripe pairs `transfers` with `card_payments` at the request level —
+    // see RequiredStripeCapabilities in onboardingCountries.ts.
+    if (requiredCapabilities.transfers && readiness.transfersStatus !== 'active') {
+      missingCapabilities.transfers = { requested: true }
+    }
     if (Object.keys(missingCapabilities).length > 0) {
       try {
         await stripe.accounts.update(agent.stripe_account_id, { capabilities: missingCapabilities })

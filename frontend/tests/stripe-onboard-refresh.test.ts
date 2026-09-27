@@ -209,6 +209,31 @@ describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
       expect(accountsCreate).not.toHaveBeenCalled()
     })
 
+    it.each(['FR', 'ES', 'GB'])('requests the missing transfers capability for an existing %s account that never had it — the exact "card_payments without transfers" failure Stripe rejects', async (country) => {
+      accountsRetrieve.mockResolvedValueOnce({
+        id: EXISTING_ACCOUNT_ID,
+        country,
+        charges_enabled: true,
+        payouts_enabled: true,
+        details_submitted: true,
+        requirements: { disabled_reason: 'action_required.requested_capabilities', currently_due: [] },
+        // card_payments and sepa_debit_payments are active, but transfers
+        // was never requested — the accounts.create()-time bug this fix
+        // addresses, surfacing here on the remediation path instead.
+        capabilities: { card_payments: 'active', sepa_debit_payments: 'active' },
+      } as any)
+      const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+      const response = await POST(request(token), { params: { id: OWN_AGENT_ID } })
+      const body = await response.json()
+
+      expect(accountsUpdate).toHaveBeenCalledWith(EXISTING_ACCOUNT_ID, {
+        capabilities: { transfers: { requested: true } },
+      })
+      expect(response.status).toBe(200)
+      expect(body.onboarding_url).toBeTruthy()
+      expect(accountsCreate).not.toHaveBeenCalled()
+    })
+
     it('requirements.pending_verification waits for Stripe — 409, no new link, no claim that the user must do anything', async () => {
       accountsRetrieve.mockResolvedValueOnce({
         id: EXISTING_ACCOUNT_ID,

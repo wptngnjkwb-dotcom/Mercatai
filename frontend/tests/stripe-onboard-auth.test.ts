@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { signToken } from '@/lib/server/auth'
 import { POST, GET } from '@/app/api/v1/agents/[id]/stripe-onboard/route'
@@ -230,7 +230,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({ country: 'NO' }))
   })
 
-  it('accepts an EU member and requests the Direct Charge card and SEPA capabilities', async () => {
+  it('accepts an EU member and requests the Direct Charge card and SEPA capabilities, paired with the required transfers capability', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'DE' }), { params: { id: OWN_AGENT_ID } })
 
@@ -240,11 +240,12 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
       capabilities: {
         card_payments: { requested: true },
         sepa_debit_payments: { requested: true },
+        transfers: { requested: true },
       },
     }))
   })
 
-  it('accepts a documented non-EEA Stripe Connect country without requesting the EU-only SEPA capability', async () => {
+  it('accepts a documented non-EEA Stripe Connect country without requesting the EU-only SEPA capability, but still requests transfers', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'PE' }), { params: { id: OWN_AGENT_ID } })
     const body = await response.json()
@@ -255,6 +256,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
       country: 'PE',
       capabilities: {
         card_payments: { requested: true },
+        transfers: { requested: true },
       },
     }))
     expect((accountsCreate as any).mock.calls[0][0].capabilities).not.toHaveProperty('sepa_debit_payments')
@@ -285,20 +287,20 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(accountsCreate).not.toHaveBeenCalled()
   })
 
-  it('requests card and SEPA capabilities without the legacy transfers capability for Direct Charges', async () => {
+  it('requests card, SEPA, and transfers together for Direct Charges — Stripe rejects card_payments without transfers on an Express account', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
 
     expect(response.status).toBe(200)
     const createArgs = (accountsCreate as any).mock.calls[0][0]
-    expect(createArgs.capabilities).toMatchObject({
+    expect(createArgs.capabilities).toEqual({
       card_payments: { requested: true },
       sepa_debit_payments: { requested: true },
+      transfers: { requested: true },
     })
-    expect(createArgs.capabilities).not.toHaveProperty('transfers')
   })
 
-  it('requests SEPA for the United Kingdom because Stripe lists GB as a supported SEPA business location', async () => {
+  it('requests SEPA for the United Kingdom because Stripe lists GB as a supported SEPA business location, alongside the required transfers capability', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'GB' }), { params: { id: OWN_AGENT_ID } })
 
@@ -307,6 +309,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(createArgs.capabilities).toEqual({
       card_payments: { requested: true },
       sepa_debit_payments: { requested: true },
+      transfers: { requested: true },
     })
   })
 })
@@ -577,6 +580,100 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
     expect(body.onboarding_url).toBeTruthy()
     expect(accountsUpdate).not.toHaveBeenCalled()
     expect(accountLinksCreate).toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/v1/agents/[id]/stripe-onboard — FR/ES/GB pair transfers with card_payments (the Sept 2026 pilot regression)', () => {
+  // FR and ES are not in this file's top-level STRIPE_CONNECT_ENABLED_COUNTRIES
+  // ('CZ,DE,NO,PE,GB') by design (see the file-header comment) — enable all
+  // three here and restore afterward so this block doesn't affect the
+  // dedicated allowlist tests above, which rely on ES being disabled.
+  const originalEnabledCountries = process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
+
+  beforeEach(() => {
+    agentUpdates.length = 0
+    accountsCreate.mockClear()
+    accountsUpdate.mockClear()
+    accountLinksCreate.mockClear()
+    accountsRetrieve.mockClear()
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'FR,ES,GB'
+  })
+
+  afterEach(() => {
+    if (originalEnabledCountries === undefined) delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
+    else process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = originalEnabledCountries
+  })
+
+  function requestWithBody(bearer: string, body: Record<string, unknown>) {
+    return new NextRequest(`http://localhost/api/v1/agents/${OWN_AGENT_ID}/stripe-onboard`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
+      body: JSON.stringify(body),
+    })
+  }
+
+  // FR and ES both currently have supportsSepaDebit: true in the country
+  // catalog (lib/onboardingCountries.ts), same as GB — all three request
+  // card + SEPA + transfers, not just card + transfers.
+  it.each(['FR', 'ES', 'GB'])('creating a new %s account requests card_payments, sepa_debit_payments, and transfers together', async (country) => {
+    ;(agentRow as any).stripe_account_id = null
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country }), { params: { id: OWN_AGENT_ID } })
+
+    expect(response.status).toBe(200)
+    const createArgs = (accountsCreate as any).mock.calls[0][0]
+    expect(createArgs.country).toBe(country)
+    expect(createArgs.capabilities).toEqual({
+      card_payments: { requested: true },
+      sepa_debit_payments: { requested: true },
+      transfers: { requested: true },
+    })
+  })
+
+  // Mirrors the real failure this fix addresses: an existing connected
+  // account (e.g. created by the pre-fix code, or by Stripe's own hosted
+  // onboarding) that has card_payments active but was never granted
+  // transfers — accounts.update() must now request it explicitly, the same
+  // pairing accounts.create() requires for a brand-new account above.
+  it.each(['FR', 'ES', 'GB'])('remediating an existing %s account missing only transfers requests it via accounts.update, then still issues a fresh link', async (country) => {
+    ;(agentRow as any).stripe_account_id = 'acct_existing'
+    accountsRetrieve.mockResolvedValueOnce({
+      country,
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.onboarding_url).toBeTruthy()
+    expect(accountsUpdate).toHaveBeenCalledWith('acct_existing', {
+      capabilities: { transfers: { requested: true } },
+    })
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it.each(['FR', 'ES', 'GB'])('does not re-request transfers for an existing %s account where it is already active', async (country) => {
+    ;(agentRow as any).stripe_account_id = 'acct_existing'
+    accountsRetrieve.mockResolvedValueOnce({
+      country,
+      details_submitted: true,
+      requirements: { currently_due: [] },
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
+    } as any)
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await POST(requestWithBody(token, { country }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.message).toMatch(/already completed/i)
+    expect(accountsUpdate).not.toHaveBeenCalled()
   })
 })
 

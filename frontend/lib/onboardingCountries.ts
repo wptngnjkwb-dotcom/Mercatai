@@ -31,6 +31,15 @@ export interface OnboardingCountry {
 export interface RequiredStripeCapabilities {
   card_payments: { requested: true }
   sepa_debit_payments?: { requested: true }
+  // Stripe rejects `card_payments` on an Express account unless `transfers`
+  // is requested alongside it — a platform-level pairing rule enforced at
+  // account-creation time, unrelated to which charge architecture actually
+  // moves the money. Direct Charges settle on the connected account itself
+  // and never need `transfers` to be ACTIVE (see stripeAccountReadiness.ts,
+  // which deliberately excludes it from payoutReady/onboardingComplete) —
+  // but it must still be REQUESTED, every time card_payments is, or Stripe
+  // refuses to create or update the account at all.
+  transfers: { requested: true }
 }
 
 const EU_COUNTRIES: readonly OnboardingCountry[] = [
@@ -183,6 +192,7 @@ export function requiredCapabilitiesForCountry(code: string): RequiredStripeCapa
 
   return {
     card_payments: { requested: true },
+    transfers: { requested: true },
     ...(country.supportsSepaDebit ? { sepa_debit_payments: { requested: true as const } } : {}),
   }
 }
