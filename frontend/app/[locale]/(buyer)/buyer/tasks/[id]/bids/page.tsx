@@ -4,22 +4,24 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, CheckCircle, AlertTriangle, Lock, Star, ShieldCheck, Send } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import BidCard from '@/components/BidCard'
 import BuyerProtection from '@/components/BuyerProtection'
 import PaymentCheckout from '@/components/PaymentCheckout'
 import { api } from '@/lib/api'
 import type { Task, Bid, QualityIssue } from '@/lib/types'
 
-const REASON_CODE_LABELS: Record<string, string> = {
-  not_as_described: 'Not as described',
-  incomplete_delivery: 'Incomplete delivery',
-  quality_below_expectations: 'Quality below expectations',
-  other: 'Other',
+const REASON_CODE_KEYS: Record<string, string> = {
+  not_as_described: 'reasonNotAsDescribed',
+  incomplete_delivery: 'reasonIncomplete',
+  quality_below_expectations: 'reasonBelowExpectations',
+  other: 'reasonOther',
 }
 
 export default function TaskBidsPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const t = useTranslations('qualityIssue')
   const [task, setTask] = useState<Task | null>(null)
   const [bids, setBids] = useState<Bid[]>([])
   const [loading, setLoading] = useState(true)
@@ -87,7 +89,7 @@ export default function TaskBidsPage() {
       setShowIssueForm(false)
       setIssueMessage('')
     } catch (e: any) {
-      setIssueError(e.message ?? 'Failed to open quality issue')
+      setIssueError(e.message ?? t('openIssueErrorFallback'))
     } finally {
       setIssueBusy(false)
     }
@@ -103,7 +105,7 @@ export default function TaskBidsPage() {
       setIssues(r.issues)
       setReplyText('')
     } catch (e: any) {
-      setIssueError(e.message ?? 'Failed to send message')
+      setIssueError(e.message ?? t('sendMessageErrorFallback'))
     } finally {
       setIssueBusy(false)
     }
@@ -319,7 +321,7 @@ export default function TaskBidsPage() {
               </button>
               {!openIssue && (
                 <button onClick={() => setShowIssueForm(v => !v)} className="btn-danger">
-                  <AlertTriangle size={16} /> Report a quality issue
+                  <AlertTriangle size={16} /> {t('reportButton')}
                 </button>
               )}
             </div>
@@ -327,37 +329,32 @@ export default function TaskBidsPage() {
 
           {task.status === 'review' && showIssueForm && !openIssue && (
             <form onSubmit={handleOpenIssue} className="mt-4 border border-gray-200 rounded-lg p-4 space-y-3">
-              <p className="text-sm text-gray-600">
-                This opens a private message thread with the agent — it never moves or holds any money by
-                itself. You can still approve at any time. The agent may voluntarily offer a full refund. If
-                you don&apos;t reach agreement, the platform&apos;s existing rule (auto-release after the
-                review window) applies automatically — Mercatai does not judge the work or decide between you.
-              </p>
+              <p className="text-sm text-gray-600">{t('formIntro')}</p>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('issueReasonLabel')}</label>
                 <select
                   className="input w-full"
                   value={issueReasonCode}
                   onChange={e => setIssueReasonCode(e.target.value)}
                 >
-                  {Object.entries(REASON_CODE_LABELS).map(([code, label]) => (
-                    <option key={code} value={code}>{label}</option>
+                  {Object.entries(REASON_CODE_KEYS).map(([code, key]) => (
+                    <option key={code} value={code}>{t(key)}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Describe the issue</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('describeLabel')}</label>
                 <textarea
                   className="input w-full h-24 resize-none"
                   maxLength={5000}
                   value={issueMessage}
                   onChange={e => setIssueMessage(e.target.value)}
-                  placeholder="What's missing or wrong with the delivery?"
+                  placeholder={t('describePlaceholder')}
                 />
               </div>
               {issueError && <p className="text-sm text-red-600">{issueError}</p>}
               <button type="submit" disabled={issueBusy || !issueMessage.trim()} className="btn-danger disabled:opacity-50">
-                {issueBusy ? 'Sending…' : 'Open quality issue'}
+                {issueBusy ? t('sendingButton') : t('submitButton')}
               </button>
             </form>
           )}
@@ -365,15 +362,14 @@ export default function TaskBidsPage() {
           {openIssue && (
             <div className="mt-4 border border-amber-200 bg-amber-50 rounded-lg p-4 space-y-3">
               <p className="text-sm text-amber-900">
-                <strong>Quality issue open</strong> — reason: {REASON_CODE_LABELS[openIssue.reason_code] ?? openIssue.reason_code}.
-                Respond deadline: {new Date(openIssue.response_deadline_at).toLocaleString()}. You can still
-                approve above at any time; the agent may voluntarily accept a full refund.
+                <strong>{t('issueOpenTitle')}</strong> — {t('issueReasonLabel').toLowerCase()}: {t(REASON_CODE_KEYS[openIssue.reason_code] ?? 'reasonOther')}.{' '}
+                {t('issueDeadlineLabel')}: {new Date(openIssue.response_deadline_at).toLocaleString()}. {t('buyerCanApproveNote')}
               </p>
               <div className="flex flex-col gap-2 max-h-64 overflow-y-auto bg-white rounded-lg p-3 border border-amber-100">
-                <p className="text-sm text-gray-700 whitespace-pre-wrap"><strong>You:</strong> {openIssue.initial_message}</p>
+                <p className="text-sm text-gray-700 whitespace-pre-wrap"><strong>{t('youLabel')}:</strong> {openIssue.initial_message}</p>
                 {openIssue.messages.map(m => (
                   <p key={m.id} className="text-sm text-gray-700 whitespace-pre-wrap">
-                    <strong>{m.author_role === 'buyer' ? 'You' : 'Agent'}:</strong> {m.message}
+                    <strong>{m.author_role === 'buyer' ? t('youLabel') : t('agentLabel')}:</strong> {m.message}
                   </p>
                 ))}
               </div>
@@ -383,7 +379,7 @@ export default function TaskBidsPage() {
                   maxLength={5000}
                   value={replyText}
                   onChange={e => setReplyText(e.target.value)}
-                  placeholder="Reply to the agent..."
+                  placeholder={t('replyToAgentPlaceholder')}
                 />
                 <button onClick={handleSendReply} disabled={issueBusy || !replyText.trim()} className="btn-secondary disabled:opacity-50">
                   <Send size={16} />

@@ -6,7 +6,6 @@ const EVENTS = [
   { id: 'task.created', label: 'task.created', desc: 'New task posted on marketplace' },
   { id: 'task.delivered', label: 'task.delivered', desc: 'Agent submitted delivery' },
   { id: 'task.completed', label: 'task.completed', desc: 'Payment released, task done' },
-  { id: 'task.disputed', label: 'task.disputed', desc: 'Buyer opened dispute' },
   { id: 'bid.accepted', label: 'bid.accepted', desc: 'Buyer accepted a bid' },
   { id: 'bid.rejected', label: 'bid.rejected', desc: 'Bid was rejected' },
 ]

@@ -119,7 +119,7 @@
   },
   "privacy": {
     "title": "Datenschutzrichtlinie",
-    "updated": "Zuletzt aktualisiert: August 2026"
+    "updated": "Zuletzt aktualisiert: September 2026 (Entwurf — rechtliche Prüfung steht aus)"
   },
   "safety": {
     "title": "Vertrauens- und Sicherheitskodex",
@@ -260,6 +260,17 @@
       "closed": "Hier ist derzeit nichts zu tun."
     }
   },
+  "buyerProtection": {
+    "title": "Käuferschutz",
+    "paymentTitle": "Geschützter Zahlungsablauf",
+    "paymentDescription": "Kartenzahlungen werden autorisiert und erst nach Genehmigung eingezogen. SEPA-finanzierte Arbeit beginnt erst, nachdem Stripe die Zahlung bestätigt hat.",
+    "deadlineTitle": "Termingarantie",
+    "deadlineDescription": "Wenn der Agent die Arbeit nicht fristgerecht liefert, wird die Zahlung automatisch zurückerstattet.",
+    "qualityTitle": "Qualitätsproblem",
+    "qualityDescription": "Melden Sie vor der Genehmigung ein Qualitätsproblem, um einen privaten Austausch mit dem Agenten zu eröffnen. Mercatai bewertet die Arbeit nicht — Sie können jederzeit genehmigen und der Agent kann freiwillig eine vollständige Rückerstattung anbieten.",
+    "trackRecordTitle": "Nachvollziehbare Erfolgsbilanz",
+    "trackRecordDescription": "Jeder Agent hat einen transparenten Mercatai Score aus realen Ergebnissen, Bewertungen und Verifizierung."
+  },
   "qualityIssue": {
     "pageTitle": "Status der Lieferprüfung",
     "loading": "Aufgabe wird geladen…",
@@ -283,6 +294,17 @@
     "reasonNotAsDescribed": "Entspricht nicht der Beschreibung",
     "reasonIncomplete": "Unvollständige Lieferung",
     "reasonBelowExpectations": "Qualität unter den Erwartungen",
-    "reasonOther": "Sonstiges"
+    "reasonOther": "Sonstiges",
+    "reportButton": "Qualitätsproblem melden",
+    "formIntro": "Dadurch wird ein privater Nachrichtenverlauf mit dem Agenten geöffnet — dabei werden nie von sich aus Gelder bewegt oder einbehalten. Sie können jederzeit weiterhin genehmigen. Der Agent kann freiwillig eine vollständige Rückerstattung anbieten. Falls Sie sich nicht einigen, greift automatisch die bestehende Plattformregel (automatische Freigabe nach Ablauf der Prüffrist) — Mercatai bewertet die Arbeit nicht und entscheidet nicht zwischen Ihnen.",
+    "describeLabel": "Problem beschreiben",
+    "describePlaceholder": "Was fehlt oder ist an der Lieferung falsch?",
+    "sendingButton": "Wird gesendet…",
+    "submitButton": "Qualitätsproblem öffnen",
+    "buyerCanApproveNote": "Sie können oben weiterhin jederzeit genehmigen; der Agent kann freiwillig eine vollständige Rückerstattung akzeptieren.",
+    "agentLabel": "Agent",
+    "replyToAgentPlaceholder": "Dem Agenten antworten…",
+    "openIssueErrorFallback": "Qualitätsproblem konnte nicht geöffnet werden",
+    "sendMessageErrorFallback": "Nachricht konnte nicht gesendet werden"
   }
 }

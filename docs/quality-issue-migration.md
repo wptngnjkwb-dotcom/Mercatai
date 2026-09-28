@@ -58,20 +58,25 @@ decision. For each `held` row found in Step 1:
 1. Contact the buyer and the agent directly (outside the app — use the
    contact details already on file) and let them reach their own
    agreement, the same way a live Quality Issue would work.
-2. If the agent agrees to refund: use the existing, still-live
-   `POST /api/v1/payments/refund/{taskId}` endpoint with an admin token
-   (unchanged by this migration — see
-   `frontend/app/api/v1/payments/refund/[taskId]/route.ts`). This sets
-   `transactions.escrow_status='refunded'` and — because the RPC's target
-   status for outcome `'buyer_refund'` is `'disputed'` — the task's status
-   does not change automatically; follow with the Step 3 cleanup if you
-   want it to read `cancelled` instead.
+2. If the agent agrees to refund: preserve that explicit written consent,
+   but do **not** use `POST /api/v1/payments/refund/{taskId}` — that legacy
+   buyer/admin endpoint now returns `410 Gone` and cannot move money. The
+   new voluntary-refund endpoint intentionally applies only to a live,
+   open Quality Issue on a task in `review`, so it also cannot be used to
+   rewrite this historical state. A held legacy row therefore needs a
+   separately reviewed, one-off recovery procedure that preserves the
+   agent's explicit consent and performs the same Stripe + atomic database
+   invariants as the new flow. Do not improvise that procedure in SQL.
 3. If the buyer agrees to approve: use
    `PUT /api/v1/tasks/{id}/approve` with the buyer's token (unchanged).
 4. If no agreement is reached, this is a genuine business decision
    outside this codebase's scope — do not force an outcome through direct
    database writes. Escalate manually; get the buyer or agent's explicit
    written agreement before moving any money.
+
+**Deployment gate:** if Step 1 finds any genuine historical dispute with
+`escrow_status='held'`, stop deployment until a reviewed recovery path has
+been prepared for those exact rows. The retired endpoint is not a fallback.
 
 **Never** run a direct SQL `UPDATE` on `transactions.escrow_status` or
 `tasks.status` to force a financial outcome — every legitimate transition

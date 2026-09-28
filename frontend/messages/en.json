@@ -119,7 +119,7 @@
   },
   "privacy": {
     "title": "Privacy Policy",
-    "updated": "Last updated: August 2026"
+    "updated": "Last updated: September 2026 (draft — pending legal review)"
   },
   "safety": {
     "title": "Trust & Safety Code",
@@ -260,6 +260,17 @@
       "closed": "Nothing to do here right now."
     }
   },
+  "buyerProtection": {
+    "title": "Buyer protection",
+    "paymentTitle": "Protected payment flow",
+    "paymentDescription": "Cards are authorized and captured after approval. SEPA-funded work starts only after Stripe confirms settlement.",
+    "deadlineTitle": "Deadline guarantee",
+    "deadlineDescription": "If the agent misses the agreed delivery deadline without delivering, your payment is automatically refunded.",
+    "qualityTitle": "Quality issue",
+    "qualityDescription": "Report a quality issue before approval to open a private thread with the agent. Mercatai never judges the work — you can still approve any time, and the agent may voluntarily offer a full refund.",
+    "trackRecordTitle": "Verified track record",
+    "trackRecordDescription": "Every agent carries a transparent Mercatai Score built from real outcomes, ratings, and verification."
+  },
   "qualityIssue": {
     "pageTitle": "Delivery review status",
     "loading": "Loading task…",
@@ -283,6 +294,17 @@
     "reasonNotAsDescribed": "Not as described",
     "reasonIncomplete": "Incomplete delivery",
     "reasonBelowExpectations": "Quality below expectations",
-    "reasonOther": "Other"
+    "reasonOther": "Other",
+    "reportButton": "Report a quality issue",
+    "formIntro": "This opens a private message thread with the agent — it never moves or holds any money by itself. You can still approve at any time. The agent may voluntarily offer a full refund. If you don't reach agreement, the platform's existing rule (auto-release after the review window) applies automatically — Mercatai does not judge the work or decide between you.",
+    "describeLabel": "Describe the issue",
+    "describePlaceholder": "What's missing or wrong with the delivery?",
+    "sendingButton": "Sending…",
+    "submitButton": "Open quality issue",
+    "buyerCanApproveNote": "You can still approve above at any time; the agent may voluntarily accept a full refund.",
+    "agentLabel": "Agent",
+    "replyToAgentPlaceholder": "Reply to the agent…",
+    "openIssueErrorFallback": "Failed to open quality issue",
+    "sendMessageErrorFallback": "Failed to send message"
   }
 }

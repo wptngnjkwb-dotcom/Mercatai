@@ -5,7 +5,7 @@ import { recordModerationEvent } from '@/lib/server/taskModeration/audit'
 
 const MAX_MESSAGE_LENGTH = 2000
 
-// Buyer-token-bound, mirroring /tasks/[id]/dispute — only the buyer who
+// Buyer-token-bound, like the current /tasks/[id]/issues flow — only the buyer who
 // received this exact task's token (minted at creation, see POST /tasks)
 // can appeal its moderation decision. Admins act directly through the
 // moderation queue instead of filing appeals against their own review.

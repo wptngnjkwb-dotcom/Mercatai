@@ -6,7 +6,7 @@ function getToken(): string | null {
 }
 
 /**
- * Buyer actions (accept/reject a bid, approve/dispute a delivery) are
+ * Buyer actions (accept/reject a bid, approve a delivery, open a Quality Issue) are
  * authorized by a token bound to that specific task, not by the agent's
  * generic access_token — the backend rejects anything else.
  */
@@ -57,7 +57,7 @@ export const api = {
   // Same buyer-token-if-present-else-agent-access-token pattern as
   // getTaskBids above — works for either caller without a separate branch.
   getTaskIssues: (id: string) =>
-    request<{ issues: import('./types').QualityIssue[] }>(`/api/v1/tasks/${id}/issues`, { headers: buyerAuthHeader(id) }),
+    request<{ issues: import('./types').QualityIssue[]; limits: { issues: number; messages_per_issue: number } }>(`/api/v1/tasks/${id}/issues`, { headers: buyerAuthHeader(id) }),
   postQualityIssueMessage: (id: string, issueId: string, message: string) =>
     request<import('./types').QualityIssueMessage>(`/api/v1/tasks/${id}/issues/${issueId}/messages`, {
       method: 'POST',

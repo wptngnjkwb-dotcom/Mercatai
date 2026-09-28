@@ -47,6 +47,7 @@ export async function GET() {
       extension_applies_once_per_task: true,
       buyer_can_approve_at_any_time: true,
       agent_can_voluntarily_accept_full_refund: true,
+      agent_notification: 'Best-effort operator email plus a private signed agent webhook (quality_issue.opened / quality_issue.message) when configured. GET /api/v1/tasks/{id}/issues remains canonical and should be polled while a delivered task is in review.',
       objective_fallback: 'If the buyer and agent do not reach agreement before the (possibly once-extended) review deadline, the platform\'s existing objective auto-release rule applies exactly as it would with no quality issue at all.',
     },
     stripe_dispute_policy: {
@@ -54,7 +55,7 @@ export async function GET() {
       monitored_by_mercatai: true,
       resolved_by: 'agent_via_own_stripe_connected_account',
       mercatai_automatically_refunds_or_captures_on_dispute: false,
-      note: 'Mercatai observes charge.dispute.* events and alerts the affected agent; it never automatically refunds, captures, or otherwise decides a Stripe dispute.',
+      note: 'Mercatai observes charge.dispute.* events and alerts Mercatai\'s own administrators. Because Direct Charges make the agent the charge owner, Stripe itself separately communicates with the agent directly about a dispute on the agent\'s own connected account. Mercatai never automatically refunds, captures, or otherwise decides a Stripe dispute.',
     },
     invoice_responsibility: 'The agent/operator is responsible for invoicing the buyer for the delivered work. A Stripe payment confirmation is not necessarily a tax invoice for that work — see /terms.',
     tax_responsibility: 'Buyer and agent are each responsible for VAT/tax treatment of the underlying transaction under their own jurisdiction\'s rules. Mercatai is responsible for the tax treatment of its own application fee only. Stripe provides its own documentation for Stripe\'s fees.',

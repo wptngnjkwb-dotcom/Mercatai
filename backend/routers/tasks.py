@@ -213,25 +213,14 @@ async def approve_task(task_id: str, token: dict = Depends(require_auth)):
 
 @router.put("/{task_id}/dispute", status_code=status.HTTP_200_OK)
 async def dispute_task(task_id: str, token: dict = Depends(require_auth)):
-    db = get_supabase()
-
-    task = db.table("tasks").select("*").eq("id", task_id).execute()
-    if not task.data:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    task_row = task.data[0]
-    if task_row["posted_by_org_id"] != token.get("org_id"):
-        raise HTTPException(status_code=403, detail="Only the task buyer can open a dispute")
-    if task_row["status"] not in ("review", "in_progress"):
-        raise HTTPException(status_code=409, detail="Dispute can only be opened for tasks in review or in_progress")
-
-    db.table("tasks").update({"status": "disputed"}).eq("id", task_id).execute()
-    db.table("audit_logs").insert({
-        "user_id": token.get("sub"),
-        "action": "task_disputed",
-        "resource_type": "task",
-        "resource_id": task_id,
-        "details": {"agent_id": task_row.get("assigned_agent_id")},
-    }).execute()
-
-    return {"task_id": task_id, "status": "disputed", "message": "Dispute opened. Mercatai team will review."}
+    # This FastAPI service is not production (see backend/main.py), but it
+    # must not preserve a contradictory legacy action for anyone running it
+    # manually. The canonical Next.js API exposes the neutral Quality Issue
+    # flow at POST /api/v1/tasks/{id}/issues.
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "This endpoint is retired. Use POST /api/v1/tasks/{id}/issues; "
+            "Mercatai does not adjudicate delivered-work quality."
+        ),
+    )

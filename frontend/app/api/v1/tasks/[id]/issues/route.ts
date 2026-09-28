@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
+import { sendQualityIssueOpened } from '@/lib/server/email'
+import { notifyAgentWebhook } from '@/lib/server/agentNotifications'
 
 const REASON_CODES = ['not_as_described', 'incomplete_delivery', 'quality_below_expectations', 'other'] as const
 const MAX_MESSAGE_LENGTH = 5000
@@ -98,6 +100,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   const result = Array.isArray(data) ? data[0] : data
   if (!result) return NextResponse.json({ error: 'Quality issue was not confirmed' }, { status: 500 })
 
+  // Best-effort: without this, the agent only ever finds out by polling
+  // GET /api/v1/tasks/{id}/issues. Never blocks or fails the response —
+  // the issue is already durably opened above regardless of whether
+  // either of these reaches its destination.
+  await notifyAgentOfNewIssue(db, params.id, result.issue_id).catch(() => {})
+
   return NextResponse.json({
     id: result.issue_id,
     task_id: params.id,
@@ -108,6 +116,21 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     deadline_extended: result.deadline_extended,
     policy_note: 'Opening this never moves or holds any money. You can still approve the delivery at any time. The assigned agent may voluntarily accept a full refund. If neither happens before response_deadline_at, the platform\'s existing objective rule applies (auto-release to the agent) — Mercatai does not judge the quality of the work or decide between you and the agent.',
   }, { status: 201 })
+}
+
+async function notifyAgentOfNewIssue(db: ReturnType<typeof getSupabase>, taskId: string, issueId: string) {
+  const { data: task } = await db.from('tasks').select('title, assigned_agent_id').eq('id', taskId).maybeSingle()
+  if (!task?.assigned_agent_id) return
+  const { data: agent } = await db.from('agents').select('owner_email').eq('id', task.assigned_agent_id).maybeSingle()
+  await Promise.allSettled([
+    ...(agent?.owner_email
+      ? [sendQualityIssueOpened({ to: agent.owner_email, taskTitle: task.title, taskId })]
+      : []),
+    notifyAgentWebhook(db, task.assigned_agent_id, 'quality_issue.opened', {
+      task_id: taskId,
+      quality_issue_id: issueId,
+    }),
+  ])
 }
 
 // GET /api/v1/tasks/{id}/issues
@@ -136,8 +159,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     .select('id, task_id, status, reason_code, initial_message, opened_at, response_deadline_at, resolved_at, resolution, quality_issue_messages(id, author_role, message, created_at)')
     .eq('task_id', params.id)
     .order('opened_at', { ascending: false })
+    .order('created_at', { ascending: true, referencedTable: 'quality_issue_messages' })
+    .limit(20)
+    .limit(100, { referencedTable: 'quality_issue_messages' })
 
   if (error) return NextResponse.json({ error: 'Quality issues could not be loaded' }, { status: 500 })
 
-  return NextResponse.json({ issues: (issues ?? []).map((row) => publicIssueShape(row as unknown as QualityIssueRow)) })
+  return NextResponse.json({
+    issues: (issues ?? []).map((row) => publicIssueShape(row as unknown as QualityIssueRow)),
+    limits: { issues: 20, messages_per_issue: 100 },
+  })
 }

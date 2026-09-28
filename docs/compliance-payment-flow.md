@@ -79,14 +79,21 @@ the buyer/agent-facing explanation.
   closes any open issue as `buyer_approved`.
 - `POST /api/v1/tasks/{id}/issues/{issueId}/accept-refund` — **the only**
   way a quality issue ends in a refund, and only the assigned agent's own
-  token can call it. Reuses the same cancel-or-refund Stripe branch
-  (`frontend/lib/server/stripeRefund.ts`) and `finalize_task_refund` RPC as
-  every other refund path, with outcome `quality_issue_agent_refund` →
-  task status `cancelled` (never the old `disputed` status, which this
-  flow does not use).
+  token can call it. It acquires a durable database lease before calling
+  the shared cancel-or-refund Stripe helper
+  (`frontend/lib/server/stripeRefund.ts`), then commits the result through
+  the dedicated `finalize_quality_issue_refund` RPC. Buyer approval and
+  auto-release must back off while that lease exists, so concurrent paths
+  cannot leave Stripe refunded while Mercatai says released. A successful
+  refund moves the task to `cancelled` (never the old `disputed` status,
+  which this flow does not use).
 - If neither happens before `response_deadline_at`, the unmodified
   `release-escrow` cron finalizes the task exactly as it always has;
   `finalize_funded_task` closes the issue as `expired` as a side effect.
+- The legacy `POST /api/v1/payments/refund/{taskId}` buyer/admin endpoint
+  is retired (`410 Gone`). Objective missed-delivery refunds remain in the
+  SLA cron; subjective Quality Issues can be refunded only by the assigned
+  agent through the endpoint above.
 
 `tasks.status='disputed'` remains a valid value for one unrelated,
 still-active mechanism: `invalidate_task_funding` uses it for a

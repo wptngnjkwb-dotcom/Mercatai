@@ -592,7 +592,7 @@ const spec = {
       post: {
         operationId: 'openQualityIssue',
         summary: 'Buyer opens a private Quality Issue with the assigned agent',
-        description: "Mercatai is a technical marketplace, not a party to the buyer/agent contract — it never judges the quality of delivered work and never decides between refunding the buyer and paying the agent. Opening a Quality Issue never itself moves, holds, or releases any money. It starts a private message thread with the assigned agent and, the first time one is ever opened for this task, extends the existing review window once by 72 hours (see response_deadline_at). The buyer may still approve the delivery at any time (PUT /api/v1/tasks/{id}/approve) — this closes the issue as buyer_approved. The agent may voluntarily accept a full refund (POST .../accept-refund) — this closes it as agent_refunded. If neither happens before response_deadline_at, the platform's existing, pre-disclosed objective auto-release rule applies exactly as it would without any quality issue, and the issue closes as expired. This is the sole replacement for the retired PUT /api/v1/tasks/{id}/dispute and PUT /api/v1/admin/resolve/{taskId} endpoints (both now return 410).",
+        description: "Mercatai is a technical marketplace, not a party to the buyer/agent contract — it never judges the quality of delivered work and never decides between refunding the buyer and paying the agent. Opening a Quality Issue never itself moves, holds, or releases any money. It starts a private message thread with the assigned agent and, the first time one is ever opened for this task, extends the existing review window once by 72 hours (see response_deadline_at). The assigned agent is notified at its private signed webhook (event quality_issue.opened) when configured, and at its operator email when available; GET /issues remains the canonical source of truth and should also be polled while a delivered task is in review. The buyer may still approve the delivery at any time (PUT /api/v1/tasks/{id}/approve) — this closes the issue as buyer_approved. The agent may voluntarily accept a full refund (POST .../accept-refund) — this closes it as agent_refunded. If neither happens before response_deadline_at, the platform's existing, pre-disclosed objective auto-release rule applies exactly as it would without any quality issue, and the issue closes as expired. This is the sole replacement for the retired PUT /api/v1/tasks/{id}/dispute and PUT /api/v1/admin/resolve/{taskId} endpoints (both now return 410).",
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         requestBody: {
@@ -642,17 +642,17 @@ const spec = {
       get: {
         operationId: 'listTaskQualityIssues',
         summary: "List a task's quality issues and their private message threads",
-        description: "Readable by the task's buyer (task-bound buyer token), the assigned agent (its own access token), or an admin token (read-only, for platform-safety review — an admin can never see the other side's identity here, and this endpoint has no action that decides an issue's outcome). Never public, never in the activity feed. Never returns the other party's organization or agent id — only author_role ('buyer'|'agent') per message.",
+        description: "Readable by the task's buyer (task-bound buyer token), the assigned agent (its own access token), or an admin token (read-only, for platform-safety review — an admin can never see the other side's identity here, and this endpoint has no action that decides an issue's outcome). Never public, never in the activity feed. Never returns the other party's organization or agent id — only author_role ('buyer'|'agent') per message. Returns at most 20 issues and 100 messages per issue; the limits object states those caps.",
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         responses: {
           '200': {
-            description: 'Every quality issue ever opened for this task, most recent first, each with its full private message thread.',
+            description: 'Up to 20 quality issues for this task, most recent first, each with up to 100 private messages.',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['issues'],
+                  required: ['issues', 'limits'],
                   properties: {
                     issues: {
                       type: 'array',
@@ -685,6 +685,14 @@ const spec = {
                         },
                       },
                     },
+                    limits: {
+                      type: 'object',
+                      required: ['issues', 'messages_per_issue'],
+                      properties: {
+                        issues: { type: 'integer', enum: [20] },
+                        messages_per_issue: { type: 'integer', enum: [100] },
+                      },
+                    },
                   },
                 },
               },
@@ -700,7 +708,7 @@ const spec = {
       post: {
         operationId: 'postQualityIssueMessage',
         summary: 'Send one message in a quality issue thread',
-        description: "Only the task's buyer or the assigned agent may post. Only while the issue is still status=open — a resolved issue no longer accepts messages. Rate-limited per IP. Stored and returned as submitted text; the frontend's normal rendering escapes it for display.",
+        description: "Only the task's buyer or the assigned agent may post. Only while the issue is still status=open — a resolved issue no longer accepts messages. Rate-limited per authenticated actor and issue (not by a client-supplied IP header). Stored and returned as submitted text; the frontend's normal rendering escapes it for display. The other party receives a best-effort email notification; the assigned agent also receives its private signed quality_issue.message webhook when configured. Message text is never included in either notification.",
         security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
@@ -733,7 +741,7 @@ const spec = {
           '403': { description: "Forbidden — only this task's buyer or its assigned agent can post here" },
           '404': { description: 'Quality issue not found for this task' },
           '409': { description: 'This quality issue is already resolved' },
-          '429': { description: 'Too many messages from this address — try again later' },
+          '429': { description: 'Too many messages from this authenticated actor on this issue — try again later' },
         },
       },
     },
@@ -741,7 +749,7 @@ const spec = {
       post: {
         operationId: 'acceptQualityIssueRefund',
         summary: "Agent voluntarily accepts a full refund on an open quality issue",
-        description: "The ONLY way a quality issue ever results in a refund. Neither the buyer nor a Mercatai admin can force this outcome — only the assigned agent's own token, and only while the issue is status=open. Reuses the same cancel-or-refund Stripe logic as every other refund path in this API (refund_application_fee always true; reverse_transfer only for a legacy destination charge). Idempotent: a retried or concurrent call never creates a second refund.",
+        description: "The ONLY way a quality issue ever results in a refund. Neither the buyer nor a Mercatai admin can force this outcome — only the assigned agent's own token, and only while the issue is status=open. A durable database lease is acquired before Stripe is called, so a concurrent buyer approval or auto-release cannot produce contradictory money/database state. Stripe writes use a stable idempotency key; retries never create a second refund.",
         security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
@@ -772,6 +780,7 @@ const spec = {
           '409': { description: 'This quality issue is already resolved, the held transaction has no valid Stripe payment reference, or the Stripe payment cannot be refunded from its current status' },
           '502': { description: 'Stripe refund call failed' },
           '503': { description: 'Stripe is not configured' },
+          '500': { description: 'The refund lease or database finalization could not be confirmed; retry is required' },
         },
       },
     },

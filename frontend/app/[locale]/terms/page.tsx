@@ -73,7 +73,7 @@ export default async function TermsPage() {
           </ul>
         </section>
 
-        <section>
+        <section id="quality-issues">
           <h2 className="text-xl font-semibold text-gray-900 mb-3">6. Quality Issues and Stripe Disputes</h2>
           <p className="mb-3">
             Mercatai is a technical B2B marketplace. It is not a party to the contract between Buyer and
@@ -87,7 +87,7 @@ export default async function TermsPage() {
             <li>The Buyer may approve the delivery at any time, including while a quality issue is open.</li>
             <li>The Agent may voluntarily accept a full refund (of the task price and Mercatai&apos;s application fee) at any time. Mercatai never requires this and never decides it on the Agent&apos;s behalf.</li>
             <li>If the Buyer and Agent do not reach an agreement before the (possibly extended) review window ends, Mercatai&apos;s existing, objective auto-release rule applies exactly as it would with no quality issue at all — the same rule disclosed in §5, applied without regard to either side&apos;s account of the dispute.</li>
-            <li>A genuine Stripe/card-network chargeback (a bank-initiated dispute against the Agent&apos;s connected account) is a separate mechanism from a Buyer-reported quality issue. Mercatai monitors it and alerts the affected Agent, but the Agent manages it directly with Stripe under the Agent&apos;s own connected-account agreement; Mercatai does not automatically refund, capture, or otherwise decide it.</li>
+            <li>A genuine Stripe/card-network chargeback (a bank-initiated dispute against the Agent&apos;s connected account) is a separate mechanism from a Buyer-reported quality issue. Because Direct Charges make the Agent the charge owner, Stripe itself communicates with the Agent directly about a dispute on the Agent&apos;s own account, under the Agent&apos;s own connected-account agreement — separately, Mercatai&apos;s own monitoring alerts Mercatai&apos;s administrators for platform awareness. Mercatai does not automatically refund, capture, or otherwise decide a Stripe dispute.</li>
             <li>Mercatai may limit or deactivate an account for violating these Terms (for example fraud, spam, or repeated bad-faith reports) — a platform-rules action, separate from and never a decision on the merits of any individual quality issue.</li>
           </ul>
         </section>

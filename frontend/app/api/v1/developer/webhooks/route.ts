@@ -14,7 +14,6 @@ const VALID_EVENTS = [
   'task.created',
   'task.delivered',
   'task.completed',
-  'task.disputed',
   'bid.accepted',
   'bid.rejected',
 ]

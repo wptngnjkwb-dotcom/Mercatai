@@ -5,6 +5,10 @@ import { PUT as putDispute } from '@/app/api/v1/tasks/[id]/dispute/route'
 import { PUT as putResolve } from '@/app/api/v1/admin/resolve/[taskId]/route'
 import { GET as getOpenApiSpec } from '@/app/api/v1/openapi/route'
 import { GET as getDiscoveryJson } from '@/app/api/discovery/agent-json/route'
+import { POST as legacyRefund } from '@/app/api/v1/payments/refund/[taskId]/route'
+import { signToken } from '@/lib/server/auth'
+
+process.env.JWT_SECRET_KEY = 'test-secret-for-quality-policy-32-chars'
 
 const root = resolve(process.cwd(), '..')
 
@@ -23,6 +27,17 @@ describe('legacy dispute/admin-resolve endpoints are retired, not just hidden', 
     expect(body.error).toMatch(/does not decide/i)
   })
 
+  it('the old buyer/admin refund endpoint is also retired with 410', async () => {
+    const token = await signToken({ tier: 'admin' }, '15m')
+    const req = new Request('http://localhost/api/v1/payments/refund/task-1', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const res = await legacyRefund(req as any, { params: { taskId: 'task-1' } })
+    expect(res.status).toBe(410)
+    expect(await res.text()).toMatch(/does not decide marketplace refunds/i)
+  })
+
   it('neither retired route file references refund_buyer, pay_agent, or a Stripe call any more', () => {
     const disputeSrc = readFileSync(resolve(root, 'frontend/app/api/v1/tasks/[id]/dispute/route.ts'), 'utf8')
     const resolveSrc = readFileSync(resolve(root, 'frontend/app/api/v1/admin/resolve/[taskId]/route.ts'), 'utf8')
@@ -31,6 +46,14 @@ describe('legacy dispute/admin-resolve endpoints are retired, not just hidden', 
       expect(src).not.toMatch(/stripe\.(refunds|paymentIntents)\./)
       expect(src).not.toContain("import Stripe")
     }
+  })
+
+  it('the non-production Python API cannot preserve the retired dispute transition either', () => {
+    const legacyTasks = readFileSync(resolve(root, 'backend/routers/tasks.py'), 'utf8')
+    const disputeHandler = legacyTasks.match(/@router\.put\("\/\{task_id\}\/dispute"[\s\S]*?(?=\n@router\.|\s*$)/)?.[0] ?? ''
+    expect(disputeHandler).toContain('HTTP_410_GONE')
+    expect(disputeHandler).not.toContain('task_disputed')
+    expect(disputeHandler).not.toContain('.update({"status": "disputed"})')
   })
 
   it('the admin UI no longer calls /resolve or renders a "Refund buyer" / "Pay agent" action', () => {
@@ -104,6 +127,31 @@ describe('no leftover claim that Mercatai makes a binding decision on a dispute'
     expect(terms).not.toMatch(/binding decision within \d+ business days/i)
     expect(terms).toMatch(/does not (assess|judge)/i)
   })
+
+  it('/ai-agents gives operators the complete polling, messaging, and voluntary-refund path', () => {
+    const guide = readFileSync(resolve(root, "frontend/app/[locale]/ai-agents/page.tsx"), 'utf8')
+    expect(guide).toContain('GET /api/v1/tasks/&#123;id&#125;/issues')
+    expect(guide).toContain('/messages')
+    expect(guide).toContain('/accept-refund')
+    expect(guide).toMatch(/Neither the buyer nor a Mercatai admin can force/i)
+    expect(guide).toMatch(/message text is never included in the webhook/i)
+  })
+
+  it('public/internal policy text matches the implemented Stripe-dispute and private-webhook behavior', () => {
+    const policy = readFileSync(resolve(root, 'docs/quality-issue-policy.md'), 'utf8')
+    expect(policy).toMatch(/alerts\s+its own administrators/i)
+    expect(policy).toMatch(/private,\s*signed webhook/i)
+    expect(policy).not.toMatch(/Mercatai only observes and alerts the agent/i)
+    expect(policy).not.toMatch(/never sent to a third-party webhook/i)
+  })
+
+  it('the public Privacy Policy discloses private-thread storage and notification processors without claiming message text is emailed', () => {
+    const privacy = readFileSync(resolve(root, "frontend/app/[locale]/privacy/page.tsx"), 'utf8')
+    expect(privacy).toMatch(/Quality Issue messages/i)
+    expect(privacy).toMatch(/Resend.*transactional email delivery/i)
+    expect(privacy).toMatch(/message text is not included in notification emails/i)
+    expect(privacy).toMatch(/Do not include passwords, API keys, identity documents/i)
+  })
 })
 
 describe('OpenAPI documents the full quality-issue surface with real schemas and every response code', () => {
@@ -133,7 +181,7 @@ describe('OpenAPI documents the full quality-issue surface with real schemas and
   it('accept-refund documents every realistic HTTP response code', async () => {
     const spec = await (await getOpenApiSpec()).json()
     const responses = spec.paths['/api/v1/tasks/{id}/issues/{issueId}/accept-refund'].post.responses
-    for (const code of ['200', '401', '403', '404', '409', '502', '503']) {
+    for (const code of ['200', '401', '403', '404', '409', '500', '502', '503']) {
       expect(responses[code], code).toBeTruthy()
     }
   })
@@ -150,6 +198,7 @@ describe('discovery JSON discloses the marketplace role and quality-issue policy
     expect(json.quality_issue_policy.mercatai_judges_quality).toBe(false)
     expect(json.quality_issue_policy.moves_money_on_open).toBe(false)
     expect(json.quality_issue_policy.review_window_extension_hours).toBe(72)
+    expect(json.quality_issue_policy.agent_notification).toMatch(/signed agent webhook/i)
     expect(json.stripe_dispute_policy).toBeTruthy()
     expect(json.stripe_dispute_policy.mercatai_automatically_refunds_or_captures_on_dispute).toBe(false)
     expect(json.invoice_responsibility).toBeTruthy()

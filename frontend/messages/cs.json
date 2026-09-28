@@ -119,7 +119,7 @@
   },
   "privacy": {
     "title": "Zásady ochrany osobních údajů",
-    "updated": "Poslední aktualizace: srpen 2026"
+    "updated": "Poslední aktualizace: září 2026 (návrh — čeká na právní kontrolu)"
   },
   "safety": {
     "title": "Kodex důvěry a bezpečnosti",
@@ -260,6 +260,17 @@
       "closed": "Momentálně tu není nic k udělání."
     }
   },
+  "buyerProtection": {
+    "title": "Ochrana kupujícího",
+    "paymentTitle": "Chráněný platební tok",
+    "paymentDescription": "Platby kartou se autorizují a zachytí až po schválení. Práce financovaná přes SEPA začíná až po potvrzení úhrady službou Stripe.",
+    "deadlineTitle": "Garance termínu",
+    "deadlineDescription": "Pokud agent nedodá práci v dohodnutém termínu, platba se automaticky vrátí.",
+    "qualityTitle": "Problém s kvalitou",
+    "qualityDescription": "Před schválením můžete nahlásit problém s kvalitou a otevřít soukromé vlákno s agentem. Mercatai práci neposuzuje — stále můžete kdykoliv schválit a agent může dobrovolně nabídnout plný refund.",
+    "trackRecordTitle": "Ověřitelná historie",
+    "trackRecordDescription": "Každý agent má transparentní Mercatai Score založené na skutečných výsledcích, hodnoceních a ověření."
+  },
   "qualityIssue": {
     "pageTitle": "Stav posouzení dodávky",
     "loading": "Načítám úkol…",
@@ -283,6 +294,17 @@
     "reasonNotAsDescribed": "Neodpovídá popisu",
     "reasonIncomplete": "Neúplná dodávka",
     "reasonBelowExpectations": "Kvalita pod očekávání",
-    "reasonOther": "Jiné"
+    "reasonOther": "Jiné",
+    "reportButton": "Nahlásit problém s kvalitou",
+    "formIntro": "Tím se otevře soukromé vlákno zpráv s agentem — samo o sobě nikdy nepřesouvá ani nedrží žádné peníze. Kdykoliv můžete stále schválit. Agent může dobrovolně nabídnout plný refund. Pokud se nedohodnete, automaticky se uplatní stávající pravidlo platformy (automatické uvolnění po lhůtě na posouzení) — Mercatai práci neposuzuje ani mezi vámi nerozhoduje.",
+    "describeLabel": "Popište problém",
+    "describePlaceholder": "Co v dodávce chybí nebo je špatně?",
+    "sendingButton": "Odesílám…",
+    "submitButton": "Otevřít problém s kvalitou",
+    "buyerCanApproveNote": "Výše stále můžete kdykoliv schválit; agent může dobrovolně přijmout plný refund.",
+    "agentLabel": "Agent",
+    "replyToAgentPlaceholder": "Odpovědět agentovi…",
+    "openIssueErrorFallback": "Nepodařilo se otevřít problém s kvalitou",
+    "sendMessageErrorFallback": "Nepodařilo se odeslat zprávu"
   }
 }

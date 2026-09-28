@@ -5,6 +5,18 @@ import { POST as openIssue, GET as listIssues } from '@/app/api/v1/tasks/[id]/is
 import { POST as postMessage } from '@/app/api/v1/tasks/[id]/issues/[issueId]/messages/route'
 import { POST as acceptRefund } from '@/app/api/v1/tasks/[id]/issues/[issueId]/accept-refund/route'
 
+const { sendQualityIssueOpenedMock, sendQualityIssueMessageMock, notifyAgentWebhookMock } = vi.hoisted(() => ({
+  sendQualityIssueOpenedMock: vi.fn(async () => undefined),
+  sendQualityIssueMessageMock: vi.fn(async () => undefined),
+  notifyAgentWebhookMock: vi.fn(async () => undefined),
+}))
+
+vi.mock('@/lib/server/email', () => ({
+  sendQualityIssueOpened: sendQualityIssueOpenedMock,
+  sendQualityIssueMessage: sendQualityIssueMessageMock,
+}))
+vi.mock('@/lib/server/agentNotifications', () => ({ notifyAgentWebhook: notifyAgentWebhookMock }))
+
 process.env.JWT_SECRET_KEY = 'test-secret-for-quality-issues-32-chars'
 process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'
 
@@ -27,6 +39,9 @@ let issuesListRows: Record<string, unknown>[] = []
 let txRow: Record<string, unknown> | null = null
 let insertedMessage: Record<string, unknown> | null = null
 let insertMessageShouldFail = false
+const REFUND_CLAIM_TOKEN = '88888888-8888-8888-8888-888888888888'
+let messageRateLimited = false
+let agentRow: Record<string, unknown> | null = null
 
 const rpcMock = vi.fn()
 
@@ -37,6 +52,7 @@ vi.mock('@/lib/server/supabase', () => ({
         select: () => builder,
         eq: () => builder,
         order: () => builder,
+        limit: () => builder,
         insert: (obj: Record<string, unknown>) => {
           if (table === 'quality_issue_messages') {
             insertedMessage = insertMessageShouldFail ? null : { id: 'msg-new', author_role: obj.author_role, message: obj.message, created_at: new Date().toISOString() }
@@ -53,11 +69,11 @@ vi.mock('@/lib/server/supabase', () => ({
           if (table === 'tasks') return { data: taskRow, error: null }
           if (table === 'quality_issues') return { data: issueRow, error: null }
           if (table === 'transactions') return { data: txRow, error: null }
+          if (table === 'agents') return { data: agentRow, error: null }
           return { data: null, error: null }
         },
         then: (resolve: (v: unknown) => unknown) => {
           if (table === 'quality_issues') return resolve({ data: issuesListRows, error: null })
-          if (table === 'audit_logs') return resolve({ count: 0, data: [], error: null })
           return resolve({ data: null, error: null })
         },
       }
@@ -103,7 +119,12 @@ beforeEach(() => {
   txRow = null
   insertedMessage = null
   insertMessageShouldFail = false
+  messageRateLimited = false
+  agentRow = null
   rpcMock.mockReset()
+  sendQualityIssueOpenedMock.mockClear()
+  sendQualityIssueMessageMock.mockClear()
+  notifyAgentWebhookMock.mockClear()
   stripeRetrieve.mockClear().mockImplementation(async () => ({ status: 'requires_capture' }))
   stripeCancel.mockClear()
   stripeRefundsCreate.mockClear()
@@ -129,6 +150,10 @@ describe('POST /api/v1/tasks/{id}/issues — opening never itself moves money', 
     // The one RPC call is the only interaction with anything money-adjacent —
     // no Stripe constructor was ever touched.
     expect(stripeConstructor).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(notifyAgentWebhookMock).toHaveBeenCalledWith(
+      expect.anything(), AGENT_ID, 'quality_issue.opened',
+      { task_id: TASK_ID, quality_issue_id: ISSUE_ID },
+    ))
   })
 
   it('rejects an anonymous request before ever calling the RPC', async () => {
@@ -254,12 +279,36 @@ describe('GET /api/v1/tasks/{id}/issues — private to buyer/assigned agent/admi
 })
 
 describe('POST /api/v1/tasks/{id}/issues/{issueId}/messages — private thread, buyer/agent only, open issues only', () => {
+  beforeEach(() => {
+    rpcMock.mockImplementation(async (name: string) => {
+      if (name !== 'post_quality_issue_message') return { data: null, error: null }
+      if (messageRateLimited) {
+        return { data: null, error: { code: 'P0003', message: 'quality issue message rate limit exceeded' } }
+      }
+      if (issueRow?.status !== 'open') {
+        return { data: null, error: { code: 'P0001', message: 'quality issue is not open' } }
+      }
+      return { data: [{ message_id: 'msg-new', created_at: '2026-09-27T02:00:00Z' }], error: null }
+    })
+  })
+
   it('lets the buyer post a message', async () => {
     const token = await buyerToken()
     const res = await postMessage(req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/messages`, token, { message: 'Can you clarify?' }), { params: { id: TASK_ID, issueId: ISSUE_ID } })
     const body = await res.json()
     expect(res.status).toBe(201)
     expect(body.author_role).toBe('buyer')
+    expect(rpcMock).toHaveBeenCalledWith('post_quality_issue_message', expect.objectContaining({
+      p_issue_id: ISSUE_ID,
+      p_author_role: 'buyer',
+      p_author_org_id: BUYER_ORG_ID,
+      p_author_agent_id: null,
+      p_actor_key: `org:${BUYER_ORG_ID}`,
+    }))
+    await vi.waitFor(() => expect(notifyAgentWebhookMock).toHaveBeenCalledWith(
+      expect.anything(), AGENT_ID, 'quality_issue.message',
+      { task_id: TASK_ID, quality_issue_id: ISSUE_ID },
+    ))
   })
 
   it('lets the assigned agent post a message', async () => {
@@ -268,6 +317,10 @@ describe('POST /api/v1/tasks/{id}/issues/{issueId}/messages — private thread, 
     const body = await res.json()
     expect(res.status).toBe(201)
     expect(body.author_role).toBe('agent')
+    expect(rpcMock).toHaveBeenCalledWith('post_quality_issue_message', expect.objectContaining({
+      p_author_role: 'agent',
+      p_author_agent_id: AGENT_ID,
+    }))
   })
 
   it('rejects a different agent — 403, not silently accepted', async () => {
@@ -301,6 +354,19 @@ describe('POST /api/v1/tasks/{id}/issues/{issueId}/messages — private thread, 
     const res = await postMessage(req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/messages`, token, { message: 'x' }), { params: { id: TASK_ID, issueId: ISSUE_ID } })
     expect(res.status).toBe(404)
   })
+
+  it('rate-limits by verified actor and issue, not X-Forwarded-For', async () => {
+    messageRateLimited = true
+    const token = await buyerToken()
+    const request = req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/messages`, token, { message: 'x' })
+    request.headers.set('x-forwarded-for', '127.0.0.1')
+    const res = await postMessage(request, { params: { id: TASK_ID, issueId: ISSUE_ID } })
+    expect(res.status).toBe(429)
+    expect(rpcMock).toHaveBeenCalledWith('post_quality_issue_message', expect.objectContaining({
+      p_actor_key: `org:${BUYER_ORG_ID}`,
+      p_ip_address: '127.0.0.1',
+    }))
+  })
 })
 
 describe('POST /api/v1/tasks/{id}/issues/{issueId}/accept-refund — the ONLY way a quality issue refunds, agent-only', () => {
@@ -311,8 +377,31 @@ describe('POST /api/v1/tasks/{id}/issues/{issueId}/accept-refund — the ONLY wa
     }
   })
 
+  function claimResult(overrides: Record<string, unknown> = {}) {
+    return {
+      transaction_id: TX_ID,
+      stripe_payment_intent_id: 'pi_test123',
+      stripe_charge_model: 'direct',
+      stripe_connected_account_id: 'acct_test',
+      gross_amount_eur: 50,
+      claim_token: REFUND_CLAIM_TOKEN,
+      claimed: true,
+      already_finalized: false,
+      ...overrides,
+    }
+  }
+
+  function mockSuccessfulRefund() {
+    rpcMock
+      .mockResolvedValueOnce({ data: [claimResult()], error: null })
+      .mockResolvedValueOnce({
+        data: [{ task_status: 'cancelled', transaction_status: 'refunded', gross_amount_eur: 50, newly_refunded: true }],
+        error: null,
+      })
+  }
+
   it('lets the assigned agent voluntarily accept a full refund', async () => {
-    rpcMock.mockResolvedValueOnce({ data: [{ task_status: 'cancelled', transaction_status: 'refunded', newly_refunded: true }], error: null })
+    mockSuccessfulRefund()
     const token = await agentToken()
     const res = await acceptRefund(req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/accept-refund`, token, {}), { params: { id: TASK_ID, issueId: ISSUE_ID } })
     const body = await res.json()
@@ -320,14 +409,17 @@ describe('POST /api/v1/tasks/{id}/issues/{issueId}/accept-refund — the ONLY wa
     expect(res.status).toBe(200)
     expect(body.escrow_status).toBe('refunded')
     expect(stripeCancel).toHaveBeenCalledTimes(1)
-    expect(rpcMock).toHaveBeenCalledWith('finalize_task_refund', expect.objectContaining({
-      p_task_id: TASK_ID, p_transaction_id: TX_ID, p_outcome: 'quality_issue_agent_refund',
+    expect(rpcMock).toHaveBeenCalledWith('claim_quality_issue_refund', expect.objectContaining({
+      p_issue_id: ISSUE_ID, p_expected_agent_id: AGENT_ID,
+    }))
+    expect(rpcMock).toHaveBeenCalledWith('finalize_quality_issue_refund', expect.objectContaining({
+      p_issue_id: ISSUE_ID, p_claim_token: REFUND_CLAIM_TOKEN,
     }))
   })
 
   it('refunds the full application fee when the payment already succeeded (settled SEPA)', async () => {
     stripeRetrieve.mockImplementation(async () => ({ status: 'succeeded' }))
-    rpcMock.mockResolvedValueOnce({ data: [{ task_status: 'cancelled', transaction_status: 'refunded', newly_refunded: true }], error: null })
+    mockSuccessfulRefund()
     const token = await agentToken()
     await acceptRefund(req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/accept-refund`, token, {}), { params: { id: TASK_ID, issueId: ISSUE_ID } })
 
@@ -354,6 +446,7 @@ describe('POST /api/v1/tasks/{id}/issues/{issueId}/accept-refund — the ONLY wa
   })
 
   it('rejects a different agent', async () => {
+    rpcMock.mockResolvedValueOnce({ data: null, error: { code: 'P0001', message: 'only the assigned agent can accept this refund' } })
     const token = await agentToken(OTHER_AGENT_ID)
     const res = await acceptRefund(req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/accept-refund`, token, {}), { params: { id: TASK_ID, issueId: ISSUE_ID } })
     expect(res.status).toBe(403)
@@ -361,6 +454,7 @@ describe('POST /api/v1/tasks/{id}/issues/{issueId}/accept-refund — the ONLY wa
 
   it('rejects an already-resolved issue', async () => {
     issueRow = { ...issueRow, status: 'expired' }
+    rpcMock.mockResolvedValueOnce({ data: null, error: { code: 'P0001', message: 'quality issue is not open' } })
     const token = await agentToken()
     const res = await acceptRefund(req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/accept-refund`, token, {}), { params: { id: TASK_ID, issueId: ISSUE_ID } })
     expect(res.status).toBe(409)
@@ -369,17 +463,51 @@ describe('POST /api/v1/tasks/{id}/issues/{issueId}/accept-refund — the ONLY wa
 
   it('404s when there is no held transaction for this task', async () => {
     txRow = null
+    rpcMock.mockResolvedValueOnce({ data: null, error: { code: 'P0002', message: 'transaction not found' } })
     const token = await agentToken()
     const res = await acceptRefund(req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/accept-refund`, token, {}), { params: { id: TASK_ID, issueId: ISSUE_ID } })
     expect(res.status).toBe(404)
   })
 
   it('returns a safely-retryable 500 (not a false success) when Stripe succeeds but DB finalization fails', async () => {
-    rpcMock.mockResolvedValueOnce({ data: null, error: { message: 'connection reset' } })
+    rpcMock
+      .mockResolvedValueOnce({ data: [claimResult()], error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: 'connection reset' } })
     const token = await agentToken()
     const res = await acceptRefund(req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/accept-refund`, token, {}), { params: { id: TASK_ID, issueId: ISSUE_ID } })
     expect(res.status).toBe(500)
     const body = await res.json()
     expect(body.error).toMatch(/must be retried/i)
+  })
+
+  it('does not call Stripe when another fresh refund lease already owns the issue', async () => {
+    rpcMock.mockResolvedValueOnce({ data: [claimResult({ claim_token: null, claimed: false })], error: null })
+    const token = await agentToken()
+    const res = await acceptRefund(req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/accept-refund`, token, {}), { params: { id: TASK_ID, issueId: ISSUE_ID } })
+    expect(res.status).toBe(409)
+    expect(stripeConstructor).not.toHaveBeenCalled()
+  })
+
+  it('is idempotent after the refund was already finalized', async () => {
+    rpcMock.mockResolvedValueOnce({ data: [claimResult({ claim_token: null, claimed: false, already_finalized: true })], error: null })
+    const token = await agentToken()
+    const res = await acceptRefund(req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/accept-refund`, token, {}), { params: { id: TASK_ID, issueId: ISSUE_ID } })
+    expect(res.status).toBe(200)
+    expect(stripeConstructor).not.toHaveBeenCalled()
+  })
+
+  it('records a retryable lease error and never finalizes when Stripe fails', async () => {
+    rpcMock
+      .mockResolvedValueOnce({ data: [claimResult()], error: null })
+      .mockResolvedValueOnce({ data: true, error: null })
+    stripeCancel.mockRejectedValueOnce(new Error('temporary Stripe outage'))
+    const token = await agentToken()
+    const res = await acceptRefund(req(`/api/v1/tasks/${TASK_ID}/issues/${ISSUE_ID}/accept-refund`, token, {}), { params: { id: TASK_ID, issueId: ISSUE_ID } })
+    expect(res.status).toBe(502)
+    expect(rpcMock).toHaveBeenCalledWith('record_quality_issue_refund_error', expect.objectContaining({
+      p_issue_id: ISSUE_ID,
+      p_claim_token: REFUND_CLAIM_TOKEN,
+    }))
+    expect(rpcMock).not.toHaveBeenCalledWith('finalize_quality_issue_refund', expect.anything())
   })
 })

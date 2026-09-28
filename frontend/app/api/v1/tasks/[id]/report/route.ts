@@ -44,7 +44,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       return NextResponse.json({ error, code }, { status: 401 })
     }
 
-    // Reporting is an agent action — buyers already have /dispute for their
+    // Reporting is an agent action — buyers already have /issues for their
     // own tasks, and admins act directly through the moderation queue.
     const tokenAgentId = typeof token.agent_id === 'string' && token.agent_id ? token.agent_id : null
     if (!tokenAgentId) {

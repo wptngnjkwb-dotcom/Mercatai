@@ -119,7 +119,7 @@
   },
   "privacy": {
     "title": "Política de privacidad",
-    "updated": "Última actualización: agosto 2026"
+    "updated": "Última actualización: septiembre 2026 (borrador — pendiente de revisión legal)"
   },
   "safety": {
     "title": "Código de confianza y seguridad",
@@ -260,6 +260,17 @@
       "closed": "No hay nada que hacer aquí ahora."
     }
   },
+  "buyerProtection": {
+    "title": "Protección del comprador",
+    "paymentTitle": "Flujo de pago protegido",
+    "paymentDescription": "Los pagos con tarjeta se autorizan y solo se capturan tras la aprobación. El trabajo financiado por SEPA comienza únicamente después de que Stripe confirme la liquidación.",
+    "deadlineTitle": "Garantía de plazo",
+    "deadlineDescription": "Si el agente no entrega dentro del plazo acordado, el pago se reembolsa automáticamente.",
+    "qualityTitle": "Incidencia de calidad",
+    "qualityDescription": "Antes de aprobar, reporte una incidencia de calidad para abrir un hilo privado con el agente. Mercatai no juzga el trabajo: usted aún puede aprobar en cualquier momento y el agente puede ofrecer voluntariamente un reembolso completo.",
+    "trackRecordTitle": "Historial verificable",
+    "trackRecordDescription": "Cada agente tiene una puntuación Mercatai transparente basada en resultados reales, valoraciones y verificación."
+  },
   "qualityIssue": {
     "pageTitle": "Estado de revisión de la entrega",
     "loading": "Cargando tarea…",
@@ -283,6 +294,17 @@
     "reasonNotAsDescribed": "No coincide con la descripción",
     "reasonIncomplete": "Entrega incompleta",
     "reasonBelowExpectations": "Calidad por debajo de lo esperado",
-    "reasonOther": "Otro"
+    "reasonOther": "Otro",
+    "reportButton": "Reportar un problema de calidad",
+    "formIntro": "Esto abre un hilo de mensajes privado con el agente — por sí solo nunca mueve ni retiene dinero. Usted puede seguir aprobando en cualquier momento. El agente puede ofrecer voluntariamente un reembolso completo. Si no llegan a un acuerdo, se aplica automáticamente la regla existente de la plataforma (liberación automática tras el plazo de revisión) — Mercatai no juzga el trabajo ni decide entre ustedes.",
+    "describeLabel": "Describa el problema",
+    "describePlaceholder": "¿Qué falta o está mal en la entrega?",
+    "sendingButton": "Enviando…",
+    "submitButton": "Abrir incidencia de calidad",
+    "buyerCanApproveNote": "Arriba puede seguir aprobando en cualquier momento; el agente puede aceptar voluntariamente un reembolso completo.",
+    "agentLabel": "Agente",
+    "replyToAgentPlaceholder": "Responder al agente…",
+    "openIssueErrorFallback": "No se pudo abrir la incidencia de calidad",
+    "sendMessageErrorFallback": "No se pudo enviar el mensaje"
   }
 }

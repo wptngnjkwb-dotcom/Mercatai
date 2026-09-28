@@ -9,6 +9,19 @@
 const FROM = 'Mercatai <noreply@mercatai.eu>'
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? 'https://mercatai.eu'
 
+function escapeEmailHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
+function emailSubjectText(value: string): string {
+  return value.replace(/[\r\n]+/g, ' ').trim()
+}
+
 function getResend() {
   const key = process.env.RESEND_API_KEY
   if (!key) return null
@@ -390,6 +403,66 @@ export async function sendTaskCompleted(params: {
       <a href="${BASE_URL}/buyer/dashboard"
          style="display:inline-block;background:#16a34a;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
         Back to dashboard
+      </a>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>
+    `
+  )
+}
+
+/**
+ * Sent to the assigned agent when a buyer reports a quality issue — see
+ * frontend/sql/22_quality_issue_facilitation.sql. Without this, an agent
+ * would only ever find out by polling GET /api/v1/tasks/{id}/issues.
+ * Never includes the buyer's identity or the issue's message text —
+ * those stay inside the private thread, reachable only with the agent's
+ * own token.
+ */
+export async function sendQualityIssueOpened(params: { to: string; taskTitle: string; taskId: string }) {
+  const taskTitle = escapeEmailHtml(params.taskTitle)
+  await send(
+    params.to,
+    `A buyer reported a quality issue — "${emailSubjectText(params.taskTitle)}"`,
+    `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#b45309">Quality issue reported</h2>
+      <p>The buyer of <strong>${taskTitle}</strong> reported a quality issue with your delivery and opened a private message thread.</p>
+      <p>This does not move or hold any money by itself. You can respond in the thread, and you may voluntarily accept a full refund if you agree with the buyer — Mercatai never decides this for either of you. If nothing is agreed before the review deadline, the platform's usual auto-release rule applies.</p>
+      <a href="${BASE_URL}/agent/tasks/${params.taskId}/review"
+         style="display:inline-block;background:#b45309;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
+        View and respond
+      </a>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>
+    `
+  )
+}
+
+/**
+ * Sent to whichever side did NOT author a new quality-issue message, so
+ * neither party is stuck polling the thread. Never includes the message
+ * text or the other side's identity.
+ */
+export async function sendQualityIssueMessage(params: {
+  to: string
+  taskTitle: string
+  taskId: string
+  recipientRole: 'buyer' | 'agent'
+}) {
+  const taskTitle = escapeEmailHtml(params.taskTitle)
+  const link = params.recipientRole === 'agent'
+    ? `${BASE_URL}/agent/tasks/${params.taskId}/review`
+    : `${BASE_URL}/buyer/tasks/${params.taskId}/bids`
+  await send(
+    params.to,
+    `New message on the quality issue — "${emailSubjectText(params.taskTitle)}"`,
+    `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#4f46e5">New message</h2>
+      <p>There's a new reply on the quality-issue thread for <strong>${taskTitle}</strong>.</p>
+      <a href="${link}"
+         style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
+        View thread
       </a>
       <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
     </div>
