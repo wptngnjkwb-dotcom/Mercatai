@@ -114,6 +114,9 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
+      # Optional error tracking — see docs/self-hosting.md §7. Empty and
+      # Sentry never initializes.
+      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
 
   cron:
     image: curlimages/curl:latest

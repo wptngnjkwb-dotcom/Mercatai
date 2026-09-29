@@ -1,4 +1,5 @@
 const createNextIntlPlugin = require('next-intl/plugin')
+const { withSentryConfig } = require('@sentry/nextjs/config')
 const withNextIntl = createNextIntlPlugin('./i18n/request.ts')
 
 /** @type {import('next').NextConfig} */
@@ -34,7 +35,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https: https://*.stripe.com https://link.com https://*.link.com",
               "font-src 'self' data:",
-              "connect-src 'self' https://api.stripe.com https://link.com https://*.link.com https://*.supabase.co",
+              "connect-src 'self' https://api.stripe.com https://link.com https://*.link.com https://*.supabase.co https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io",
               "frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://link.com https://*.link.com",
               "object-src 'none'",
               "base-uri 'self'",
@@ -48,4 +49,14 @@ const nextConfig = {
   },
 }
 
-module.exports = withNextIntl(nextConfig)
+module.exports = withSentryConfig(withNextIntl(nextConfig), {
+  // Optional — org/project/authToken are only needed to upload source maps
+  // for readable stack traces. Unset (self-host, or before a Sentry project
+  // exists), the build succeeds without uploading anything; only
+  // NEXT_PUBLIC_SENTRY_DSN is needed to actually receive events.
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  silent: !process.env.SENTRY_AUTH_TOKEN,
+  webpack: { treeshake: { removeDebugLogging: true } },
+})
