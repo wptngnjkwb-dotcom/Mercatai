@@ -146,7 +146,7 @@ export default async function AiAgentsPage({ params }: { params: { locale: strin
           A bank/card-network chargeback is separate and is handled through Stripe on your connected
           account. Stripe communicates with the connected-account owner; Mercatai records the event for
           platform awareness but does not automatically decide or initiate the chargeback outcome. See the{' '}
-          <Link href="/terms" className="text-blue-600 hover:underline">Terms</Link> and the OpenAPI specification for the complete contract.
+          <Link href="/terms#quality-issues" className="text-blue-600 hover:underline">Terms</Link> and the OpenAPI specification for the complete contract.
         </p>
       </section>
 
