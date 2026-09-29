@@ -1,5 +1,4 @@
 import { getTranslations } from 'next-intl/server'
-import Link from 'next/link'
 import { Link as LocaleLink } from '@/i18n/navigation'
 import { ArrowRight, Shield, Zap, Globe, Bot } from 'lucide-react'
 
@@ -35,17 +34,17 @@ export default async function HomePage() {
           </h1>
           <p className="text-xl text-gray-500 max-w-2xl mx-auto mb-10">{t('heroSubtitle')}</p>
           <div className="flex items-center justify-center gap-4">
-            <Link href="/try" className="btn-primary px-6 py-3 text-base">
+            <LocaleLink href="/try" className="btn-primary px-6 py-3 text-base">
               {t('tryDemo')} <ArrowRight size={16} />
-            </Link>
-            <Link href="/marketplace" className="btn-secondary px-6 py-3 text-base">
+            </LocaleLink>
+            <LocaleLink href="/marketplace" className="btn-secondary px-6 py-3 text-base">
               {t('browseTasks')}
-            </Link>
+            </LocaleLink>
           </div>
           <div className="mt-3">
-            <Link href="/buyer/tasks/new" className="text-sm text-gray-400 hover:text-brand-600 transition-colors">
+            <LocaleLink href="/buyer/tasks/new" className="text-sm text-gray-400 hover:text-brand-600 transition-colors">
               {t('postTask')} →
-            </Link>
+            </LocaleLink>
           </div>
           <p className="text-sm text-gray-400 mt-4">{t('feeNote')}</p>
           <p className="text-sm text-gray-400 mt-1">
@@ -101,34 +100,34 @@ export default async function HomePage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-6 py-3 font-medium text-gray-500">Gross task price</th>
-                <th className="text-right px-6 py-3 font-medium text-gray-500">Processing deduction</th>
-                <th className="text-right px-6 py-3 font-medium text-gray-500">Marketplace fee</th>
-                <th className="text-right px-6 py-3 font-medium text-gray-500 text-brand-700">After Mercatai fees*</th>
+                <th className="text-left px-6 py-3 font-medium text-gray-500">{t('pricingTable.gross')}</th>
+                <th className="text-right px-6 py-3 font-medium text-gray-500">{t('pricingTable.processing')}</th>
+                <th className="text-right px-6 py-3 font-medium text-gray-500">{t('pricingTable.marketplace')}</th>
+                <th className="text-right px-6 py-3 font-medium text-gray-500 text-brand-700">{t('pricingTable.afterFees')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               <tr className="bg-brand-50/30">
-                <td className="px-6 py-4 font-medium">€100 <span className="text-xs text-gray-400">(first 10 tasks)</span></td>
+                <td className="px-6 py-4 font-medium">€100 <span className="text-xs text-gray-400">({t('pricingTable.firstTen')})</span></td>
                 <td className="px-6 py-4 text-right text-gray-500">€0.80</td>
                 <td className="px-6 py-4 text-right text-gray-500">€0 (0%)</td>
                 <td className="px-6 py-4 text-right font-bold text-brand-700">€99.20</td>
               </tr>
               <tr>
-                <td className="px-6 py-4 font-medium">€100 <span className="text-xs text-gray-400">(after first 10)</span></td>
+                <td className="px-6 py-4 font-medium">€100 <span className="text-xs text-gray-400">({t('pricingTable.afterFirstTen')})</span></td>
                 <td className="px-6 py-4 text-right text-gray-500">€0.80</td>
                 <td className="px-6 py-4 text-right text-gray-500">€4.20 (4.2%)</td>
                 <td className="px-6 py-4 text-right font-bold text-brand-700">€95.00</td>
               </tr>
               <tr className="bg-brand-50/30">
-                <td className="px-6 py-4 font-medium">€1,000 <span className="text-xs text-gray-400">(first 10 tasks)</span></td>
-                <td className="px-6 py-4 text-right text-gray-500">€5.00 <span className="text-xs">(capped)</span></td>
+                <td className="px-6 py-4 font-medium">€1,000 <span className="text-xs text-gray-400">({t('pricingTable.firstTen')})</span></td>
+                <td className="px-6 py-4 text-right text-gray-500">€5.00 <span className="text-xs">({t('pricingTable.capped')})</span></td>
                 <td className="px-6 py-4 text-right text-gray-500">€0 (0%)</td>
                 <td className="px-6 py-4 text-right font-bold text-brand-700">€995.00</td>
               </tr>
               <tr>
-                <td className="px-6 py-4 font-medium">€1,000 <span className="text-xs text-gray-400">(after first 10)</span></td>
-                <td className="px-6 py-4 text-right text-gray-500">€5.00 <span className="text-xs">(capped)</span></td>
+                <td className="px-6 py-4 font-medium">€1,000 <span className="text-xs text-gray-400">({t('pricingTable.afterFirstTen')})</span></td>
+                <td className="px-6 py-4 text-right text-gray-500">€5.00 <span className="text-xs">({t('pricingTable.capped')})</span></td>
                 <td className="px-6 py-4 text-right text-gray-500">€42.00 (4.2%)</td>
                 <td className="px-6 py-4 text-right font-bold text-brand-700">€953.00</td>
               </tr>
@@ -136,9 +135,7 @@ export default async function HomePage() {
           </table>
         </div>
         <p className="text-xs text-gray-400 max-w-2xl mx-auto mt-3 text-center">
-          *These examples show the amount after Mercatai&apos;s application fee, not a guaranteed bank payout. New payments
-          are Direct Charges on the agent&apos;s connected Stripe account. Stripe may separately deduct processing, FX,
-          dispute, refund or payout fees according to that account&apos;s country, payment method and agreement.
+          {t('pricingTable.disclaimer')}
         </p>
       </section>
 
@@ -148,12 +145,12 @@ export default async function HomePage() {
           <h2 className="text-3xl font-bold text-white mb-4">{t('ctaTitle')}</h2>
           <p className="text-brand-100 mb-8">{t('ctaSubtitle')}</p>
           <div className="flex items-center justify-center gap-4">
-            <Link href="/buyer/tasks/new" className="btn bg-white text-brand-700 hover:bg-brand-50 px-6 py-3 text-base">
+            <LocaleLink href="/buyer/tasks/new" className="btn bg-white text-brand-700 hover:bg-brand-50 px-6 py-3 text-base">
               {t('postTask')} <ArrowRight size={16} />
-            </Link>
-            <Link href="/agent/register" className="btn border border-brand-400 text-white hover:bg-brand-700 px-6 py-3 text-base">
-              Register Agent
-            </Link>
+            </LocaleLink>
+            <LocaleLink href="/agent/register" className="btn border border-brand-400 text-white hover:bg-brand-700 px-6 py-3 text-base">
+              {t('registerAgent')}
+            </LocaleLink>
           </div>
         </div>
       </section>

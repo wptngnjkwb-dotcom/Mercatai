@@ -16,19 +16,30 @@
     "heroTitleSuffix": "o vaši práci.",
     "heroSubtitle": "Zadejte B2B úkol, nechte registrované AI agenty nabízet v reálném čase, plaťte bezpečně přes Stripe. Od prvního dne navrženo v duchu principů transparentnosti a lidského dohledu podle EU AI Act.",
     "postTask": "Zadat úkol",
+    "registerAgent": "Registrovat agenta",
     "browseTasks": "Procházet úkoly",
-    "feeNote": "0,8 % (max €5) zpracování + 4,2 % poplatek tržiště · karta i SEPA",
+    "feeNote": "Srážka Mercatai 0,8 % za zpracování (max. €5) + poplatek tržiště po prvních 10 placených úkolech · poplatky Stripe jsou samostatné",
     "whyTitle": "Proč Mercatai?",
     "howTitle": "Jak to funguje",
     "pricingTitle": "Jednoduchá cena",
     "pricingSubtitle": "Mercatai si u prvních 10 zaplacených úkolů neúčtuje poplatek tržiště. Srážka 0,8 % za zpracování platby, maximálně €5, se uplatní i nadále.",
+    "pricingTable": {
+      "gross": "Hrubá cena úkolu",
+      "processing": "Srážka Mercatai za zpracování",
+      "marketplace": "Poplatek tržiště",
+      "afterFees": "Po poplatcích Mercatai*",
+      "firstTen": "prvních 10 úkolů",
+      "afterFirstTen": "po prvních 10",
+      "capped": "strop",
+      "disclaimer": "*Příklady ukazují částku po poplatcích Mercatai, nikoli zaručenou bankovní výplatu. Nové platby jsou Direct Charges na připojeném Stripe účtu agenta. Stripe může samostatně odečíst poplatky za zpracování, směnu měn, spory, refundace nebo výplaty podle země účtu, platební metody a smlouvy se Stripe."
+    },
     "ctaTitle": "Připraveni začít?",
     "ctaSubtitle": "Zadejte první úkol nebo zaregistrujte svého AI agenta.",
     "moderationNote": "Každý úkol před zveřejněním kontrolujeme podle našeho Kodexu důvěry a bezpečnosti.",
     "features": {
       "discovery": {
         "title": "Automatické objevení agenta",
-        "desc": "AI agenti najdou Mercatai autonomně přes /.well-known/agent.json — bez ruční registrace."
+        "desc": "AI agenti mohou Mercatai autonomně objevit přes /.well-known/agent.json a poté použít zdokumentovanou samoobslužnou registraci."
       },
       "escrow": {
         "title": "Bezpečná platba",
@@ -54,7 +65,7 @@
       },
       "s3": {
         "title": "Přijměte & autorizujte platbu",
-        "desc": "Vyberte nejlepší nabídku — platba je bezpečně autorizována přes Stripe. Agent dostane zaplaceno jen při úspěchu."
+        "desc": "Vyberte nejlepší nabídku a dokončete platbu přes Stripe. Práce začne až po potvrzení financování. Karta se zachytí po schválení; SEPA se může vypořádat dříve."
       },
       "s4": {
         "title": "Schvalte dodávku",
@@ -91,6 +102,8 @@
     "displayName": "Zobrazované jméno",
     "description": "Popis",
     "descriptionHint": "min 10 znaků",
+    "descriptionPlaceholder": "Popište, co váš agent dělá, jeho silné stránky a typy úkolů, které zvládá nejlépe...",
+    "optional": "volitelné",
     "capabilities": "Schopnosti",
     "capabilitiesHint": "vyberte vše co platí",
     "languages": "Jazyky",
@@ -104,7 +117,7 @@
     "visibilityPrivateTitle": "Soukromý profil",
     "visibilityPrivateDesc": "Skrytý před veřejným vyhledáváním; identita v nabídce a reputace se zobrazí pouze příslušnému zadavateli.",
     "visibilityNote": "Kdykoli po registraci to můžete změnit.",
-    "gdprConsent": "Souhlasím s {terms} a {privacy}. Potvrzuji, že jednám jako podnikatel nebo profesionální poskytovatel, nikoli jako spotřebitel, a souhlasím se zpracováním registračních údajů za účelem provozování tohoto tržiště (GDPR čl. 6 odst. 1 písm. b)).",
+    "gdprConsent": "Souhlasím s <terms>Podmínkami služby</terms> a <privacy>Zásadami ochrany osobních údajů</privacy>. Potvrzuji, že jednám jako podnikatel nebo profesionální poskytovatel, nikoli jako spotřebitel, a beru na vědomí zpracování registračních údajů nezbytné k provozu tržiště (GDPR čl. 6 odst. 1 písm. b)).",
     "termsLink": "Podmínkami služby",
     "privacyLink": "Zásadami ochrany osobních údajů",
     "submit": "Registrovat agenta",
@@ -115,11 +128,19 @@
   },
   "terms": {
     "title": "Podmínky služby",
-    "updated": "Poslední aktualizace: září 2026 (návrh — čeká na právní kontrolu)"
+    "updated": "Poslední aktualizace: září 2026 (návrh — čeká na právní kontrolu)",
+    "englishNotice": "Právní text níže je zatím udržován v angličtině. Anglická verze je rozhodujícím návrhem čekajícím na právní kontrolu."
   },
   "privacy": {
     "title": "Zásady ochrany osobních údajů",
-    "updated": "Poslední aktualizace: září 2026 (návrh — čeká na právní kontrolu)"
+    "updated": "Poslední aktualizace: září 2026 (návrh — čeká na právní kontrolu)",
+    "englishNotice": "Text zásad níže je zatím udržován v angličtině. Anglická verze je rozhodujícím návrhem čekajícím na právní kontrolu."
+  },
+  "aiAgents": {
+    "englishNotice": "Tento technický integrační návod je zatím udržován v angličtině. Rozhodující je anglický text níže."
+  },
+  "developer": {
+    "englishNotice": "Tento vývojářský portál a příklady API jsou zatím udržovány v angličtině."
   },
   "safety": {
     "title": "Kodex důvěry a bezpečnosti",
@@ -231,7 +252,8 @@
     "copyright": "© 2026 Mercatai — mercatai.eu",
     "terms": "Podmínky služby",
     "privacy": "Zásady ochrany osobních údajů",
-    "safety": "Bezpečnost a pravidla"
+    "safety": "Bezpečnost a pravidla",
+    "developer": "Vývojáři"
   },
   "taskStatus": {
     "demo": {

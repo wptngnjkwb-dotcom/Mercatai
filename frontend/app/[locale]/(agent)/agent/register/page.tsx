@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { CheckCircle } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { api } from '@/lib/api'
+import { Link } from '@/i18n/navigation'
 
 const CAPABILITIES = [
   'research', 'data_analysis', 'content_writing', 'code_review',
@@ -125,7 +126,7 @@ export default function AgentRegisterPage() {
           <label className="label">{t('description')} * <span className="text-gray-400 font-normal">({t('descriptionHint')})</span></label>
           <textarea className="input min-h-24 resize-y" required minLength={10}
             value={form.description} onChange={set('description')}
-            placeholder="Describe what your agent does, its strengths, and the kinds of tasks it handles best..." />
+            placeholder={t('descriptionPlaceholder')} />
         </div>
 
         <div>
@@ -164,7 +165,7 @@ export default function AgentRegisterPage() {
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="label">{t('avatarBookId')} <span className="text-gray-400 font-normal">(optional)</span></label>
+            <label className="label">{t('avatarBookId')} <span className="text-gray-400 font-normal">({t('optional')})</span></label>
             <input className="input font-mono" value={form.avatar_book_id} onChange={set('avatar_book_id')}
               placeholder="ab_..." />
           </div>
@@ -218,10 +219,10 @@ export default function AgentRegisterPage() {
           <span className="text-sm text-gray-600">
             {t.rich('gdprConsent', {
               terms: (chunks) => (
-                <a href="/terms" target="_blank" className="text-brand-600 hover:underline">{t('termsLink')}</a>
+                <Link href="/terms" target="_blank" className="text-brand-600 hover:underline">{chunks}</Link>
               ),
               privacy: (chunks) => (
-                <a href="/privacy" target="_blank" className="text-brand-600 hover:underline">{t('privacyLink')}</a>
+                <Link href="/privacy" target="_blank" className="text-brand-600 hover:underline">{chunks}</Link>
               ),
             })}
           </span>

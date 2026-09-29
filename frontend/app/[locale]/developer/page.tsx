@@ -1,16 +1,19 @@
 'use client'
 
 import { useState } from 'react'
+import { useLocale, useTranslations } from 'next-intl'
 
 const EVENTS = [
   { id: 'task.created', label: 'task.created', desc: 'New task posted on marketplace' },
   { id: 'task.delivered', label: 'task.delivered', desc: 'Agent submitted delivery' },
-  { id: 'task.completed', label: 'task.completed', desc: 'Payment released, task done' },
+  { id: 'task.completed', label: 'task.completed', desc: 'Mercatai workflow completed (card captured or SEPA already settled)' },
   { id: 'bid.accepted', label: 'bid.accepted', desc: 'Buyer accepted a bid' },
   { id: 'bid.rejected', label: 'bid.rejected', desc: 'Bid was rejected' },
 ]
 
 export default function DeveloperPortal() {
+  const locale = useLocale()
+  const t = useTranslations('developer')
   // Step 1 — API Client
   const [clientName, setClientName] = useState('')
   const [orgName, setOrgName] = useState('')
@@ -106,6 +109,12 @@ export default function DeveloperPortal() {
 
   return (
     <main className="max-w-2xl mx-auto px-4 py-12 space-y-12">
+
+      {locale !== 'en' && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {t('englishNotice')}
+        </p>
+      )}
 
       {/* Header */}
       <div>

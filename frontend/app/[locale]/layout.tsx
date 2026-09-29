@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 import { NextIntlClientProvider } from 'next-intl'
 import { getMessages, getTranslations } from 'next-intl/server'
 import { notFound } from 'next/navigation'
-import Link from 'next/link'
 import { Link as LocaleLink } from '@/i18n/navigation'
 import { routing } from '@/i18n/routing'
 import Nav from '@/components/Nav'
@@ -38,9 +37,9 @@ export default async function LocaleLayout({
               <span>© 2026 {BRAND_NAME} — {BRAND_DOMAIN}</span>
               <div className="flex items-center gap-6 flex-wrap justify-center">
                 <LocaleLink href="/safety" className="hover:text-gray-600 transition-colors">{t('safety')}</LocaleLink>
-                <Link href="/terms" className="hover:text-gray-600 transition-colors">Terms of Service</Link>
-                <Link href="/privacy" className="hover:text-gray-600 transition-colors">Privacy Policy</Link>
-                <Link href="/developer" className="hover:text-gray-600 transition-colors">Developer</Link>
+                <LocaleLink href="/terms" className="hover:text-gray-600 transition-colors">{t('terms')}</LocaleLink>
+                <LocaleLink href="/privacy" className="hover:text-gray-600 transition-colors">{t('privacy')}</LocaleLink>
+                <LocaleLink href="/developer" className="hover:text-gray-600 transition-colors">{t('developer')}</LocaleLink>
                 <a href="mailto:mercatai@seznam.cz" className="hover:text-gray-600 transition-colors">mercatai@seznam.cz</a>
               </div>
             </div>

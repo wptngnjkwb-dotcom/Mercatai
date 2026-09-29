@@ -1,18 +1,24 @@
 import { getTranslations } from 'next-intl/server'
 
-// LEGAL REVIEW REQUIRED before this version is deployed. Sections 5, 6, and
+// LEGAL REVIEW REQUIRED before this draft is treated as final. Sections 5, 6, and
 // 9 were rewritten to describe the Quality Issue facilitation model (see
 // frontend/sql/22_quality_issue_facilitation.sql) instead of the retired
 // buyer-dispute/admin-resolve mechanism. A lawyer has not reviewed this
 // wording. The existing §11 "Changes" 30-day advance notice commitment
-// applies to this update once it is actually published.
-export default async function TermsPage() {
+// must be reconciled with the existing §11 notice commitment before the
+// draft label is removed.
+export default async function TermsPage({ params }: { params: { locale: string } }) {
   const t = await getTranslations('terms')
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-16">
       <h1 className="text-3xl font-bold text-gray-900 mb-2">{t('title')}</h1>
-      <p className="text-sm text-gray-400 mb-10">{t('updated')}</p>
+      <p className="text-sm text-gray-400 mb-4">{t('updated')}</p>
+      {params.locale !== 'en' && (
+        <p className="mb-10 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {t('englishNotice')}
+        </p>
+      )}
 
       <div className="space-y-8 text-gray-700 leading-relaxed">
 
@@ -85,7 +91,7 @@ export default async function TermsPage() {
             <li>A Buyer may report a quality issue within the 48-hour review window, opening a private message thread with the Agent. Opening it never itself moves or holds any money.</li>
             <li>Reporting a quality issue extends the review window once, by 72 hours, so the Buyer and Agent have time to reach their own agreement.</li>
             <li>The Buyer may approve the delivery at any time, including while a quality issue is open.</li>
-            <li>The Agent may voluntarily accept a full refund (of the task price and Mercatai&apos;s application fee) at any time. Mercatai never requires this and never decides it on the Agent&apos;s behalf.</li>
+            <li>While an eligible Quality Issue remains open, the assigned Agent may voluntarily accept a full refund (of the task price and Mercatai&apos;s application fee). Mercatai never requires this and never decides it on the Agent&apos;s behalf.</li>
             <li>If the Buyer and Agent do not reach an agreement before the (possibly extended) review window ends, Mercatai&apos;s existing, objective auto-release rule applies exactly as it would with no quality issue at all — the same rule disclosed in §5, applied without regard to either side&apos;s account of the dispute.</li>
             <li>A genuine Stripe/card-network chargeback (a bank-initiated dispute against the Agent&apos;s connected account) is a separate mechanism from a Buyer-reported quality issue. Because Direct Charges make the Agent the charge owner, Stripe itself communicates with the Agent directly about a dispute on the Agent&apos;s own account, under the Agent&apos;s own connected-account agreement — separately, Mercatai&apos;s own monitoring alerts Mercatai&apos;s administrators for platform awareness. Mercatai does not automatically refund, capture, or otherwise decide a Stripe dispute.</li>
             <li>Mercatai may limit or deactivate an account for violating these Terms (for example fraud, spam, or repeated bad-faith reports) — a platform-rules action, separate from and never a decision on the merits of any individual quality issue.</li>
@@ -129,12 +135,12 @@ export default async function TermsPage() {
             <li>Business decisions made based on an Agent&apos;s output</li>
             <li>Losses exceeding the transaction value at issue</li>
           </ul>
-          <p className="mt-2">Total liability is capped at the platform fee received for the relevant transaction. Nothing in this section limits liability that cannot lawfully be limited or excluded, including under mandatory EU consumer-protection law where it applies.</p>
+          <p className="mt-2">Total liability is capped at the platform fee received for the relevant transaction. Nothing in this section limits liability that cannot lawfully be limited or excluded. Mercatai is intended for B2B use only; if mandatory law nevertheless treats a user as a consumer, applicable mandatory protections remain unaffected.</p>
         </section>
 
         <section>
           <h2 className="text-xl font-semibold text-gray-900 mb-3">10. Governing Law</h2>
-          <p>These Terms are governed by <strong>Czech law</strong>. Disputes shall be resolved in the courts of the Czech Republic. For EU consumers, mandatory consumer protection laws of your country of residence apply.</p>
+          <p>These Terms are governed by <strong>Czech law</strong>. Disputes shall be resolved in the courts of the Czech Republic, subject to any jurisdiction or protection that mandatory applicable law does not permit the parties to exclude.</p>
         </section>
 
         <section>
