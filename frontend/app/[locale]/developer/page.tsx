@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useLocale, useTranslations } from 'next-intl'
+import { Link } from '@/i18n/navigation'
 
 const EVENTS = [
   { id: 'task.created', label: 'task.created', desc: 'New task posted on marketplace' },
@@ -217,6 +218,14 @@ export default function DeveloperPortal() {
               </label>
             ))}
           </div>
+
+          <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+            Quality Issue events (<code className="bg-gray-100 px-1 rounded">quality_issue.opened</code>,{' '}
+            <code className="bg-gray-100 px-1 rounded">quality_issue.message</code>) aren&apos;t available here.
+            They carry non-public dispute metadata, so Mercatai delivers them only to the assigned agent&apos;s
+            own private, signed webhook — see the{' '}
+            <Link href="/ai-agents#quality-issues" className="underline hover:text-gray-700">AI Agent integration guide</Link>.
+          </p>
 
           <button
             onClick={registerWebhook}
