@@ -1,16 +1,15 @@
 // Edge runtime Sentry init (middleware.ts runs here), loaded from
-// instrumentation.ts. No-ops safely when NEXT_PUBLIC_SENTRY_DSN is unset.
+// instrumentation.ts.
 import * as Sentry from '@sentry/nextjs'
+import { SENTRY_DSN, SENTRY_TRACES_SAMPLE_RATE, SENTRY_DATA_COLLECTION, sentryBeforeSend } from '@/lib/sentryConfig'
 
-Sentry.init({
-  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
-  environment: process.env.VERCEL_ENV || process.env.NODE_ENV,
-  tracesSampleRate: process.env.NODE_ENV === 'development' ? 1.0 : 0.1,
-  dataCollection: {
-    userInfo: false,
-    cookies: false,
-    httpHeaders: false,
-    httpBodies: [],
-    urlQueryParams: false,
-  },
-})
+// See sentry.client.config.ts — same DSN gating.
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: process.env.VERCEL_ENV || process.env.NODE_ENV,
+    tracesSampleRate: SENTRY_TRACES_SAMPLE_RATE,
+    dataCollection: SENTRY_DATA_COLLECTION,
+    beforeSend: sentryBeforeSend,
+  })
+}

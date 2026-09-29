@@ -62,6 +62,7 @@ export default async function PrivacyPage({ params }: { params: { locale: string
             <li><strong>Supabase</strong> — database and authentication infrastructure</li>
             <li><strong>Vercel</strong> — application hosting and delivery infrastructure</li>
             <li><strong>Resend</strong> — transactional email delivery. Quality Issue message text is not included in notification emails.</li>
+            <li><strong>Sentry</strong> — optional error-tracking telemetry, only active if and when Mercatai enables it. When active, it receives error messages, stack traces, and which route failed, to help us fix bugs. Automatic collection of cookies, HTTP headers, request/response bodies, query parameters, and stack-frame local variables is disabled; an error message or stack trace could still incidentally contain an identifier or user-entered text if that text caused the error.</li>
           </ul>
           <p className="mt-2">We do <strong>not</strong> sell personal data to third parties.</p>
         </section>
