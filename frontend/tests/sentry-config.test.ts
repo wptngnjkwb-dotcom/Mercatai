@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 describe('Sentry stays fully inert without a DSN', () => {
   it('never calls Sentry.init() when NEXT_PUBLIC_SENTRY_DSN is unset, so no instrumentation installs and no request can go out', async () => {
@@ -35,7 +35,8 @@ describe('sentryBeforeSend strips headers, cookies, bodies, and stack-frame loca
         headers: { authorization: 'Bearer eyJ.some.jwt' },
         cookies: { session: 'abc123' },
         data: { message: 'buyer wrote something sensitive' },
-        url: 'https://mercatai.eu/api/v1/tasks',
+        query_string: 'buyer_token=eyJ.some.buyer.token',
+        url: 'https://mercatai.eu/api/v1/tasks?buyer_token=eyJ.some.buyer.token',
       },
       user: { id: 'agent-123', email: 'someone@example.com' },
     }
@@ -45,6 +46,7 @@ describe('sentryBeforeSend strips headers, cookies, bodies, and stack-frame loca
     expect(result.request?.headers).toBeUndefined()
     expect(result.request?.cookies).toBeUndefined()
     expect(result.request?.data).toBeUndefined()
+    expect(result.request?.query_string).toBeUndefined()
     expect(result.user).toBeUndefined()
     expect(result.exception?.values?.[0]?.stacktrace?.frames?.[0]?.vars).toBeUndefined()
 
@@ -59,5 +61,43 @@ describe('sentryBeforeSend strips headers, cookies, bodies, and stack-frame loca
     const event: any = { exception: { values: [{ type: 'Error', value: 'boom' }] } }
     const result = sentryBeforeSend(event, {} as any)
     expect(result.exception?.values?.[0]?.value).toBe('boom')
+  })
+})
+
+describe('SENTRY_TRACES_SAMPLE_RATE parses safely', () => {
+  const ORIGINAL = process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
+
+  async function rateWith(value: string | undefined) {
+    vi.resetModules()
+    if (value === undefined) delete process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
+    else process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE = value
+    const mod = await import('../lib/sentryConfig')
+    return mod.SENTRY_TRACES_SAMPLE_RATE
+  }
+
+  it('defaults to 0 when unset', async () => {
+    expect(await rateWith(undefined)).toBe(0)
+  })
+
+  it('accepts a valid value within 0-1', async () => {
+    expect(await rateWith('0.25')).toBe(0.25)
+    expect(await rateWith('0')).toBe(0)
+    expect(await rateWith('1')).toBe(1)
+  })
+
+  it('falls back to 0 for a non-numeric value', async () => {
+    expect(await rateWith('not-a-number')).toBe(0)
+  })
+
+  it('falls back to 0 for a value outside 0-1', async () => {
+    expect(await rateWith('5')).toBe(0)
+    expect(await rateWith('-1')).toBe(0)
+    expect(await rateWith('NaN')).toBe(0)
+  })
+
+  it('restores the real env var afterwards', async () => {
+    if (ORIGINAL === undefined) delete process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
+    else process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE = ORIGINAL
+    vi.resetModules()
   })
 })

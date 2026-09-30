@@ -275,19 +275,28 @@ is only logged to the app's own console output.
 - **Error tracking (optional).** Set `NEXT_PUBLIC_SENTRY_DSN` (`.env.example`)
   to a project DSN from [sentry.io](https://sentry.io) (or your own
   self-hosted Sentry) to report unhandled server, client, and edge
-  exceptions. Unset, the app runs identically with no Sentry code path
-  active. Collection of cookies, HTTP headers, request/response bodies,
-  and IP addresses is disabled by default in `sentry.*.config.ts` — task
+  exceptions. The `@sentry/nextjs` package and its build-time route/
+  middleware instrumentation always load — what's gated on the DSN is
+  narrower but is what actually matters: unset, no Sentry client is ever
+  created and no telemetry is ever sent. Collection of cookies, HTTP
+  headers, request/response bodies, query strings, IP addresses, and
+  stack-frame local variables is disabled by default in
+  `frontend/lib/sentryConfig.ts`, breadcrumbs are off entirely
+  (`maxBreadcrumbs: 0`), and performance tracing defaults to off — task
   content and auth tokens should not leave the platform via error
-  telemetry undisclosed. `SENTRY_ORG` / `SENTRY_PROJECT` /
-  `SENTRY_AUTH_TOKEN` are separate and only needed for readable
-  (un-minified) stack traces via source map upload at build time.
+  telemetry undisclosed. Set `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE`
+  (0–1) to opt into tracing; invalid or out-of-range values fall back to
+  0. `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` are separate
+  and only needed for readable (un-minified) stack traces via source map
+  upload at build time.
 - **Uptime monitoring (optional).** `GET /api/health` does a real
-  round-trip query against the database and returns `{"status":"ok"}` or
-  `{"status":"error", ...}` — point an external monitor (UptimeRobot,
+  round-trip query against the database and returns exactly
+  `{"status":"ok"}` with HTTP 200, or `{"status":"error"}` with HTTP 503
+  — no database details, URLs, or secret-presence flags, since it's
+  public and unauthenticated. Point an external monitor (UptimeRobot,
   Better Uptime, Pingdom, a cron `curl` + alert, etc.) at
   `https://your-domain/api/health` on a short interval (1–5 min) and alert
-  on a non-`ok` status or a timeout. Mercatai does not include such a
+  on a non-200 status or a timeout. Mercatai does not include such a
   monitor itself — the endpoint is the integration point.
 
 ## Architecture

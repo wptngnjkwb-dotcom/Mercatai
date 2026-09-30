@@ -114,9 +114,11 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
-      # Optional error tracking — see docs/self-hosting.md §7. Empty and
-      # Sentry never initializes.
+      # Optional error tracking — see docs/self-hosting.md §7. Empty and no
+      # Sentry client is ever created, so no telemetry is ever sent.
       NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+      # 0-1, defaults to 0 (no performance tracing) if unset/invalid.
+      NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: ${NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE:-}
 
   cron:
     image: curlimages/curl:latest
