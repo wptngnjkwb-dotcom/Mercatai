@@ -17,14 +17,20 @@ vi.mock('@/lib/server/supabase', () => ({
   }),
 }))
 
-import { GET } from '@/app/api/health/route'
+import { dynamic, GET, revalidate } from '@/app/api/health/route'
 
 describe('GET /api/health', () => {
+  it('is always dynamic and disables caching at the route level', () => {
+    expect(dynamic).toBe('force-dynamic')
+    expect(revalidate).toBe(0)
+  })
+
   it('returns exactly {"status":"ok"} with HTTP 200 when the database responds', async () => {
     queryResult = { error: null }
     const response = await GET()
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ status: 'ok' })
+    expect(response.headers.get('cache-control')).toBe('no-store, max-age=0')
   })
 
   it('returns exactly {"status":"error"} with HTTP 503 when the database errors', async () => {
@@ -32,6 +38,7 @@ describe('GET /api/health', () => {
     const response = await GET()
     expect(response.status).toBe(503)
     expect(await response.json()).toEqual({ status: 'error' })
+    expect(response.headers.get('cache-control')).toBe('no-store, max-age=0')
   })
 
   it('never leaks a Supabase URL, secret presence, or the raw database error into the body', async () => {
