@@ -63,9 +63,11 @@ describe('frontend/sql/manual_archive_demo_tasks.sql — manual production-only 
     expect(MANUAL_ARCHIVE_SCRIPT).toMatch(/AND t\.archived_at IS NULL/)
   })
 
-  it('scopes archival to BOTH is_platform_seed and moderated_by = system:seed — never the org flag alone', () => {
+  it('scopes archival to BOTH is_platform_seed and the two trusted SQL-only moderation markers', () => {
     expect(MANUAL_ARCHIVE_SCRIPT).toMatch(/o\.is_platform_seed = true/)
-    expect(MANUAL_ARCHIVE_SCRIPT).toMatch(/t\.moderated_by = 'system:seed'/)
+    expect(MANUAL_ARCHIVE_SCRIPT).toMatch(
+      /t\.moderated_by IN \('system:seed', 'system:demo_backfill'\)/,
+    )
   })
 
   it('never touches bids, audit_logs (beyond appending), or organizations rows destructively', () => {
