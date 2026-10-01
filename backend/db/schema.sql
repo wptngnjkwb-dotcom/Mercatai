@@ -722,7 +722,7 @@ CREATE TABLE IF NOT EXISTS opportunity_alert_deliveries (
 CREATE OR REPLACE FUNCTION claim_opportunity_alert_delivery(
     p_delivery_id UUID,
     p_lease_seconds INTEGER DEFAULT 300
-) RETURNS TABLE (delivery_id UUID, subscription_id UUID, task_id UUID, payload_snapshot JSONB, claim_token UUID) AS $$
+) RETURNS TABLE (delivery_id UUID, subscription_id UUID, task_id UUID, payload_snapshot JSONB, claim_token UUID, attempt_count INTEGER) AS $$
 BEGIN
     RETURN QUERY
     UPDATE opportunity_alert_deliveries d
@@ -730,7 +730,7 @@ BEGIN
            attempt_count=d.attempt_count+1, last_error=NULL
      WHERE d.id=p_delivery_id AND d.payload_snapshot IS NOT NULL
        AND (d.status IN ('pending','failed') OR (d.status='sending' AND d.claimed_at < NOW() - make_interval(secs => GREATEST(30, LEAST(p_lease_seconds, 3600)))))
-    RETURNING d.id, d.subscription_id, d.task_id, d.payload_snapshot, d.claim_token;
+    RETURNING d.id, d.subscription_id, d.task_id, d.payload_snapshot, d.claim_token, d.attempt_count;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public;
 

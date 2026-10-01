@@ -8,7 +8,9 @@
 -- Delivery is durable and at-least-once. The exact provider payload is frozen
 -- before the first send; a deterministic Resend idempotency key makes retries
 -- safe within the provider's idempotency window. The snapshot (which contains
--- the agent operator's email address) is cleared after a confirmed send.
+-- the agent operator's email address) is cleared after a confirmed send, an
+-- opt-out cancellation, or the final exhausted retry attempt — never left
+-- behind once a delivery stops being retryable.
 
 CREATE TABLE IF NOT EXISTS opportunity_alert_subscriptions (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -62,7 +64,8 @@ CREATE OR REPLACE FUNCTION claim_opportunity_alert_delivery(
     subscription_id UUID,
     task_id UUID,
     payload_snapshot JSONB,
-    claim_token UUID
+    claim_token UUID,
+    attempt_count INTEGER
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -81,7 +84,7 @@ BEGIN
                AND d.claimed_at < NOW() - make_interval(secs => GREATEST(30, LEAST(p_lease_seconds, 3600)))
            )
        )
-    RETURNING d.id, d.subscription_id, d.task_id, d.payload_snapshot, d.claim_token;
+    RETURNING d.id, d.subscription_id, d.task_id, d.payload_snapshot, d.claim_token, d.attempt_count;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 

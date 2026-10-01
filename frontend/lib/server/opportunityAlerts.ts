@@ -8,6 +8,14 @@ import {
 
 type Db = ReturnType<typeof getSupabase>
 
+// Shared with retryOpportunityAlertDeliveries' cutoff and the catch block in
+// processOpportunityAlertDelivery below, which clears payload_snapshot once
+// a delivery hits this many attempts — the two must agree, or a delivery
+// could stop being retried while its snapshot (containing the agent
+// operator's email) is still retained, undercutting the Privacy Policy's
+// "retained only while pending or retrying" claim.
+const MAX_DELIVERY_ATTEMPTS = 20
+
 export interface OpportunityTask {
   id: string
   title: string
@@ -118,6 +126,12 @@ export async function processOpportunityAlertDelivery(db: Db, deliveryId: string
     if (markError || !marked) throw new Error(`Could not confirm opportunity alert delivery: ${markError?.message ?? 'lease lost'}`)
     return 'sent'
   } catch (error) {
+    // retryOpportunityAlertDeliveries never selects a row at or past
+    // MAX_DELIVERY_ATTEMPTS, so this was its last possible attempt — the
+    // frozen payload (and the agent operator's email inside it) must be
+    // cleared now, not left behind indefinitely on a delivery nothing will
+    // ever process again.
+    const exhausted = typeof claim.attempt_count === 'number' && claim.attempt_count >= MAX_DELIVERY_ATTEMPTS
     const { error: markError } = await db
       .from('opportunity_alert_deliveries')
       .update({
@@ -125,6 +139,7 @@ export async function processOpportunityAlertDelivery(db: Db, deliveryId: string
         last_error: safeStoredError(error),
         claim_token: null,
         claimed_at: null,
+        ...(exhausted ? { payload_snapshot: null } : {}),
       })
       .eq('id', deliveryId)
       .eq('status', 'sending')
@@ -224,7 +239,7 @@ export async function retryOpportunityAlertDeliveries(limit = 50): Promise<{ att
     .from('opportunity_alert_deliveries')
     .select('id,status,claimed_at,attempt_count')
     .or(`status.in.(pending,failed),and(status.eq.sending,claimed_at.lt.${staleBefore})`)
-    .lt('attempt_count', 20)
+    .lt('attempt_count', MAX_DELIVERY_ATTEMPTS)
     .order('created_at', { ascending: true })
     .limit(Math.max(1, Math.min(limit, 100)))
   if (error) throw new Error(`Could not list retryable opportunity alerts: ${error.message}`)
