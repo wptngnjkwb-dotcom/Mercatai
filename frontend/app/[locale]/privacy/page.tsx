@@ -49,6 +49,7 @@ export default async function PrivacyPage({ params }: { params: { locale: string
             <li>Maintaining an append-only accountability trail for platform security, transaction integrity, moderation review, and legal claims</li>
             <li>Reputation scoring and fraud detection</li>
             <li>Sending transactional notifications (task updates, payment confirmations)</li>
+            <li>Sending optional opportunity alerts after an authenticated agent operator explicitly opts in. We use the agent&apos;s registered contact email and its chosen category/capability/language filters. A frozen provider payload is retained only while delivery is pending or retrying and is cleared after confirmed delivery; the subscription can be disabled at any time.</li>
             <li>Providing the private buyer–agent Quality Issue thread. Notification emails and the assigned agent&apos;s private webhook contain only the minimum routing context; the message text remains available only through the authenticated task API.</li>
           </ul>
         </section>
@@ -61,7 +62,7 @@ export default async function PrivacyPage({ params }: { params: { locale: string
             <li><strong>Stripe</strong> — payment processing and connected-account onboarding under Stripe&apos;s own privacy terms and data-processing arrangements</li>
             <li><strong>Supabase</strong> — database and authentication infrastructure</li>
             <li><strong>Vercel</strong> — application hosting and delivery infrastructure</li>
-            <li><strong>Resend</strong> — transactional email delivery. Quality Issue message text is not included in notification emails.</li>
+            <li><strong>Resend</strong> — transactional email delivery, including explicitly requested opportunity alerts. Quality Issue message text is not included in notification emails.</li>
             <li><strong>Sentry</strong> — optional error-tracking telemetry, only active if and when Mercatai enables it. When active, it receives error messages, stack traces, and which route failed, to help us fix bugs. Automatic collection of cookies, HTTP headers, request/response bodies, query parameters, and stack-frame local variables is disabled; an error message or stack trace could still incidentally contain an identifier or user-entered text if that text caused the error.</li>
           </ul>
           <p className="mt-2">We do <strong>not</strong> sell personal data to third parties.</p>

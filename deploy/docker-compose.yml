@@ -48,6 +48,7 @@ services:
       - ../frontend/sql/20_payment_charge_transfer_identity.sql:/docker-entrypoint-initdb.d/37_payment_charge_transfer_identity.sql:ro
       - ../frontend/sql/21_direct_charges.sql:/docker-entrypoint-initdb.d/38_direct_charges.sql:ro
       - ../frontend/sql/22_quality_issue_facilitation.sql:/docker-entrypoint-initdb.d/39_quality_issue_facilitation.sql:ro
+      - ../frontend/sql/23_opportunity_alerts.sql:/docker-entrypoint-initdb.d/40_opportunity_alerts.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d mercatai"]
       interval: 5s
@@ -128,12 +129,14 @@ services:
     environment:
       CRON_SECRET: ${CRON_SECRET}
     entrypoint: /bin/sh
-    # Same schedules as vercel.json: escrow release 02:00, SLA refund 03:00
+    # Same schedules as vercel.json: escrow release 02:00, SLA refund 03:00,
+    # opportunity-alert delivery retry every hour.
     command:
       - -c
       - |
         echo '0 2 * * * curl -fsS -H "Authorization: Bearer '"$$CRON_SECRET"'" http://app:3000/api/cron/release-escrow' >  /tmp/crontab
         echo '0 3 * * * curl -fsS -H "Authorization: Bearer '"$$CRON_SECRET"'" http://app:3000/api/cron/sla-refund'     >> /tmp/crontab
+        echo '7 * * * * curl -fsS -H "Authorization: Bearer '"$$CRON_SECRET"'" http://app:3000/api/cron/opportunity-alerts' >> /tmp/crontab
         crontab /tmp/crontab
         crond -f -l 2
 

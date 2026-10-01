@@ -690,6 +690,54 @@ CREATE TABLE IF NOT EXISTS stripe_connect_account_status (
 );
 
 -- ============================================================
+-- Opt-in opportunity alerts
+-- ============================================================
+CREATE TABLE IF NOT EXISTS opportunity_alert_subscriptions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_id UUID NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
+    categories TEXT[] NOT NULL DEFAULT '{}',
+    capabilities TEXT[] NOT NULL DEFAULT '{}',
+    locale TEXT NOT NULL DEFAULT 'en' CHECK (locale IN ('en', 'cs', 'de', 'es')),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS opportunity_alert_deliveries (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    subscription_id UUID NOT NULL REFERENCES opportunity_alert_subscriptions(id) ON DELETE CASCADE,
+    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sending', 'sent', 'failed', 'cancelled')),
+    payload_snapshot JSONB,
+    claim_token UUID,
+    claimed_at TIMESTAMPTZ,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    provider_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    sent_at TIMESTAMPTZ,
+    UNIQUE (subscription_id, task_id)
+);
+
+CREATE OR REPLACE FUNCTION claim_opportunity_alert_delivery(
+    p_delivery_id UUID,
+    p_lease_seconds INTEGER DEFAULT 300
+) RETURNS TABLE (delivery_id UUID, subscription_id UUID, task_id UUID, payload_snapshot JSONB, claim_token UUID) AS $$
+BEGIN
+    RETURN QUERY
+    UPDATE opportunity_alert_deliveries d
+       SET status='sending', claim_token=gen_random_uuid(), claimed_at=NOW(),
+           attempt_count=d.attempt_count+1, last_error=NULL
+     WHERE d.id=p_delivery_id AND d.payload_snapshot IS NOT NULL
+       AND (d.status IN ('pending','failed') OR (d.status='sending' AND d.claimed_at < NOW() - make_interval(secs => GREATEST(30, LEAST(p_lease_seconds, 3600)))))
+    RETURNING d.id, d.subscription_id, d.task_id, d.payload_snapshot, d.claim_token;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public;
+
+REVOKE ALL ON FUNCTION claim_opportunity_alert_delivery(UUID, INTEGER) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION claim_opportunity_alert_delivery(UUID, INTEGER) TO service_role;
+
+-- ============================================================
 -- Indexes
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_agents_embedding
@@ -733,6 +781,8 @@ CREATE INDEX IF NOT EXISTS idx_stripe_connect_account_status_agent  ON stripe_co
 CREATE INDEX IF NOT EXISTS idx_transactions_stripe_charge_id ON transactions(stripe_charge_id) WHERE stripe_charge_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_payment_disputes_transaction ON payment_disputes(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_payment_disputes_status ON payment_disputes(status);
+CREATE INDEX IF NOT EXISTS idx_opportunity_subscriptions_active ON opportunity_alert_subscriptions(is_active);
+CREATE INDEX IF NOT EXISTS idx_opportunity_deliveries_retry ON opportunity_alert_deliveries(status, claimed_at) WHERE status IN ('pending','sending','failed');
 
 -- ============================================================
 -- Row Level Security (RLS) — základní politiky
@@ -751,6 +801,8 @@ ALTER TABLE stripe_connect_events         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stripe_connect_payouts        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stripe_connect_account_status ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_disputes              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE opportunity_alert_subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE opportunity_alert_deliveries ENABLE ROW LEVEL SECURITY;
 
 -- Service role má plný přístup (backend vždy používá service_role_key)
 CREATE POLICY "service_role_all" ON organizations   TO service_role USING (true) WITH CHECK (true);
@@ -767,3 +819,5 @@ CREATE POLICY "service_role_all" ON stripe_connect_events         TO service_rol
 CREATE POLICY "service_role_all" ON stripe_connect_payouts        TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_all" ON stripe_connect_account_status TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_all" ON payment_disputes               TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_all" ON opportunity_alert_subscriptions TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_all" ON opportunity_alert_deliveries TO service_role USING (true) WITH CHECK (true);

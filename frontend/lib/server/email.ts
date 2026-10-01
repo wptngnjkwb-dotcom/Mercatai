@@ -43,6 +43,132 @@ async function send(to: string, subject: string, html: string) {
   }
 }
 
+export async function sendExecutionAuthorized(params: {
+  to: string
+  taskId: string
+  deliveryDeadlineAt: string
+}) {
+  const taskUrl = `${BASE_URL}/agent/deliver/${encodeURIComponent(params.taskId)}`
+  await send(
+    params.to,
+    'Mercatai: payment confirmed — work is now authorized',
+    `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#15803d">You may begin work</h2>
+      <p>Stripe has confirmed the payment and Mercatai has marked the task as funded.</p>
+      <p>The authenticated API now reports <code>funding_status: funded</code> and <code>execution_authorized: true</code> for your assigned agent.</p>
+      <p><strong>Delivery deadline:</strong> ${escapeEmailHtml(params.deliveryDeadlineAt)}</p>
+      <a href="${taskUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">Open assigned task</a>
+      <p style="font-size:12px;color:#6b7280">This message follows payment confirmation. A prior task-posted or bid-selection notification never authorizes work by itself.</p>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>
+    `,
+  )
+}
+
+export const OPPORTUNITY_ALERT_PAYLOAD_VERSION = 1
+
+export interface FrozenOpportunityAlertPayload {
+  from: string
+  to: string
+  subject: string
+  html: string
+  payloadVersion: number
+}
+
+const OPPORTUNITY_COPY = {
+  en: {
+    subject: 'New Mercatai task open for bids',
+    heading: 'New genuine buyer task',
+    intro: 'A non-demo buyer task matching your saved alert is now open for bids.',
+    warning: 'This task is not funded yet. Do not begin substantive work unless your bid is selected and the authenticated API reports funding_status: funded and execution_authorized: true.',
+    button: 'Inspect task and bid',
+    manage: 'Manage or disable opportunity alerts',
+  },
+  cs: {
+    subject: 'Nový úkol Mercatai je otevřený pro nabídky',
+    heading: 'Nový skutečný úkol zadavatele',
+    intro: 'Nový nedemonstrační úkol odpovídající vašemu uloženému filtru je otevřený pro nabídky.',
+    warning: 'Úkol zatím není financovaný. Nezačínejte pracovat, dokud nebude vaše nabídka vybrána a autentizované API nebude vracet funding_status: funded a execution_authorized: true.',
+    button: 'Prohlédnout úkol a podat nabídku',
+    manage: 'Spravovat nebo vypnout upozornění',
+  },
+  de: {
+    subject: 'Neue Mercatai-Aufgabe offen für Angebote',
+    heading: 'Neue echte Käuferaufgabe',
+    intro: 'Eine neue, nicht als Demo gekennzeichnete Käuferaufgabe passt zu Ihrem gespeicherten Filter und ist offen für Angebote.',
+    warning: 'Diese Aufgabe ist noch nicht finanziert. Beginnen Sie erst mit der Arbeit, wenn Ihr Angebot ausgewählt wurde und die authentifizierte API funding_status: funded sowie execution_authorized: true meldet.',
+    button: 'Aufgabe prüfen und Angebot abgeben',
+    manage: 'Benachrichtigungen verwalten oder deaktivieren',
+  },
+  es: {
+    subject: 'Nueva tarea de Mercatai abierta a ofertas',
+    heading: 'Nueva tarea real de un comprador',
+    intro: 'Una nueva tarea no demostrativa coincide con su filtro guardado y está abierta a ofertas.',
+    warning: 'La tarea aún no está financiada. No empiece el trabajo hasta que se seleccione su oferta y la API autenticada indique funding_status: funded y execution_authorized: true.',
+    button: 'Revisar la tarea y ofertar',
+    manage: 'Gestionar o desactivar alertas',
+  },
+} as const
+
+export function buildOpportunityAlertProviderPayload(params: {
+  to: string
+  locale: keyof typeof OPPORTUNITY_COPY
+  taskId: string
+  title: string
+  category: string
+  budgetMaxEur: number
+  deadlineHours: number
+  capabilities: string[]
+}): FrozenOpportunityAlertPayload {
+  const copy = OPPORTUNITY_COPY[params.locale] ?? OPPORTUNITY_COPY.en
+  const taskUrl = `${BASE_URL}/marketplace/${encodeURIComponent(params.taskId)}`
+  const settingsUrl = `${BASE_URL}/agent/autobid#opportunity-alerts`
+  const safeTitle = escapeEmailHtml(params.title)
+  const safeCategory = escapeEmailHtml(params.category)
+  const safeCapabilities = params.capabilities.map(escapeEmailHtml).join(', ') || '—'
+  return {
+    from: FROM,
+    to: params.to,
+    subject: emailSubjectText(`${copy.subject}: ${params.title}`),
+    html: `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#4f46e5">${copy.heading}</h2>
+      <p>${copy.intro}</p>
+      <table style="width:100%;border-collapse:collapse;margin:12px 0">
+        <tr><td style="padding:6px;color:#6b7280">Task</td><td style="padding:6px;font-weight:600">${safeTitle}</td></tr>
+        <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Category</td><td style="padding:6px">${safeCategory}</td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Budget ceiling</td><td style="padding:6px">€${Number(params.budgetMaxEur).toFixed(2)}</td></tr>
+        <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Task deadline</td><td style="padding:6px">${params.deadlineHours}h</td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Capabilities</td><td style="padding:6px">${safeCapabilities}</td></tr>
+      </table>
+      <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:12px;margin:16px 0"><strong>Important:</strong> ${copy.warning}</div>
+      <a href="${taskUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">${copy.button}</a>
+      <p style="font-size:12px;color:#6b7280"><a href="${settingsUrl}" style="color:#4f46e5">${copy.manage}</a></p>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>
+    `,
+    payloadVersion: OPPORTUNITY_ALERT_PAYLOAD_VERSION,
+  }
+}
+
+export async function sendOpportunityAlertOrThrow(
+  payload: FrozenOpportunityAlertPayload,
+  idempotencyKey: string,
+): Promise<string> {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) throw new Error('RESEND_API_KEY is not configured — opportunity alert cannot be delivered')
+  const { Resend } = await import('resend')
+  const resend = new Resend(apiKey)
+  const { data, error } = await resend.emails.send(
+    { from: payload.from, to: payload.to, subject: payload.subject, html: payload.html },
+    { idempotencyKey },
+  )
+  if (error) throw new Error(`Resend rejected the opportunity alert: ${error.message}`)
+  if (!data?.id) throw new Error('Resend accepted the opportunity alert but returned no email id')
+  return data.id
+}
+
 // ─── Templates ────────────────────────────────────────────────────────────────
 
 export async function sendTaskCreated(params: {

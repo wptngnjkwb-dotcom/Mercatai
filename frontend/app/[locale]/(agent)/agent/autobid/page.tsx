@@ -2,12 +2,17 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Plus, Trash2, Zap, Webhook, Copy, Check, Power } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Zap, Webhook, Copy, Check, Power, Mail } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { AutoBidRule } from '@/lib/types'
 
 const CATEGORIES = ['research', 'content', 'code_review', 'procurement', 'data_analysis', 'translation', 'finance']
-const CAPABILITIES = ['research', 'data_analysis', 'content_writing', 'code_review', 'supplier_search', 'translation', 'legal_analysis', 'financial_analysis']
+const CAPABILITIES = [
+  'research', 'market_research', 'competitor_analysis', 'data_analysis',
+  'document_processing', 'content_writing', 'code_review', 'api_integration',
+  'mcp', 'agent_operations', 'qa', 'web_scraping', 'supplier_search',
+  'translation', 'legal_analysis', 'financial_analysis',
+]
 const STRATEGIES: { value: 'min' | 'mid' | 'max'; label: string }[] = [
   { value: 'min', label: 'Aggressive (lowest price)' },
   { value: 'mid', label: 'Balanced (mid price)' },
@@ -28,6 +33,13 @@ export default function AutoBidPage() {
   const [newSecret, setNewSecret] = useState('')
   const [copied, setCopied] = useState(false)
 
+  const [alertEnabled, setAlertEnabled] = useState(false)
+  const [alertCategories, setAlertCategories] = useState<string[]>([])
+  const [alertCapabilities, setAlertCapabilities] = useState<string[]>([])
+  const [alertLocale, setAlertLocale] = useState<'en' | 'cs' | 'de' | 'es'>('en')
+  const [alertEmail, setAlertEmail] = useState<string | null>(null)
+  const [savingAlerts, setSavingAlerts] = useState(false)
+
   // Form state
   const [form, setForm] = useState({
     label: '', category: '', max_price_eur: '', min_budget_eur: '0',
@@ -40,8 +52,16 @@ export default function AutoBidPage() {
     const id = localStorage.getItem('agent_id')
     setAgentId(id)
     if (!id) { setLoading(false); return }
-    Promise.all([api.getAutoBidRules(id), api.getAgentWebhook(id)])
-      .then(([r, w]) => { setRules(r.rules); setWebhookUrl(w.webhook_url) })
+    Promise.all([api.getAutoBidRules(id), api.getAgentWebhook(id), api.getOpportunityAlerts(id)])
+      .then(([r, w, a]) => {
+        setRules(r.rules)
+        setWebhookUrl(w.webhook_url)
+        setAlertEnabled(a.enabled)
+        setAlertCategories(a.categories)
+        setAlertCapabilities(a.capabilities)
+        setAlertLocale(a.locale)
+        setAlertEmail(a.notification_email)
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
@@ -105,6 +125,31 @@ export default function AutoBidPage() {
   }
 
   const copySecret = () => { navigator.clipboard.writeText(newSecret); setCopied(true); setTimeout(() => setCopied(false), 2000) }
+
+  const toggleAlertValue = (value: string, current: string[], setCurrent: (values: string[]) => void) => {
+    setCurrent(current.includes(value) ? current.filter((item) => item !== value) : [...current, value])
+  }
+
+  const saveOpportunityAlerts = async () => {
+    if (!agentId) return
+    setSavingAlerts(true); setError('')
+    try {
+      const settings = await api.setOpportunityAlerts(agentId, {
+        categories: alertCategories,
+        capabilities: alertCapabilities,
+        locale: alertLocale,
+      })
+      setAlertEnabled(settings.enabled)
+      setAlertEmail(settings.notification_email)
+    } catch (e: any) { setError(e.message) } finally { setSavingAlerts(false) }
+  }
+
+  const disableOpportunityAlerts = async () => {
+    if (!agentId) return
+    setSavingAlerts(true); setError('')
+    try { await api.deleteOpportunityAlerts(agentId); setAlertEnabled(false) }
+    catch (e: any) { setError(e.message) } finally { setSavingAlerts(false) }
+  }
 
   if (loading) return <div className="max-w-3xl mx-auto px-4 py-10 text-gray-500">Loading…</div>
   if (!agentId) return (
@@ -241,11 +286,61 @@ export default function AutoBidPage() {
         </div>
       )}
 
+      {/* Opportunity email alerts — separate from automatic bidding. */}
+      <div id="opportunity-alerts" className="card p-5 mt-8 scroll-mt-6">
+        <h2 className="font-bold text-gray-900 flex items-center gap-2 mb-1"><Mail size={18} className="text-brand-600" /> Opportunity email alerts</h2>
+        <p className="text-sm text-gray-500 mb-3">
+          Opt in to email when a genuine, non-demo buyer task matches your filters. This only announces that bidding is open; it does not place a bid or authorize work.
+        </p>
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-900 mb-4">
+          Never begin substantive work from an alert alone. Start only after your bid is selected and the authenticated API reports <code>funding_status: funded</code> and <code>execution_authorized: true</code>.
+        </div>
+
+        <label className="block text-xs font-medium text-gray-600 mb-1">Categories</label>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {CATEGORIES.map((category) => (
+            <button type="button" key={category} onClick={() => toggleAlertValue(category, alertCategories, setAlertCategories)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${alertCategories.includes(category) ? 'bg-brand-50 border-brand-300 text-brand-700' : 'bg-white border-gray-200 text-gray-500'}`}>
+              {category}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-gray-400 -mt-2 mb-3">Leave empty for every category.</p>
+
+        <label className="block text-xs font-medium text-gray-600 mb-1">Capabilities</label>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {CAPABILITIES.map((capability) => (
+            <button type="button" key={capability} onClick={() => toggleAlertValue(capability, alertCapabilities, setAlertCapabilities)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${alertCapabilities.includes(capability) ? 'bg-brand-50 border-brand-300 text-brand-700' : 'bg-white border-gray-200 text-gray-500'}`}>
+              {capability}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-gray-400 -mt-2 mb-4">Leave empty for every capability. Otherwise at least one must overlap.</p>
+
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Email language</label>
+            <select className="input min-w-32" value={alertLocale} onChange={(event) => setAlertLocale(event.target.value as any)}>
+              <option value="en">English</option>
+              <option value="cs">Čeština</option>
+              <option value="de">Deutsch</option>
+              <option value="es">Español</option>
+            </select>
+          </div>
+          <button onClick={saveOpportunityAlerts} disabled={savingAlerts} className="btn-primary">
+            {savingAlerts ? 'Saving…' : alertEnabled ? 'Update alerts' : 'Enable alerts'}
+          </button>
+          {alertEnabled && <button onClick={disableOpportunityAlerts} disabled={savingAlerts} className="btn-secondary">Disable</button>}
+        </div>
+        {alertEnabled && <p className="text-xs text-green-700 mt-3">Enabled · sent to {alertEmail ?? 'your registered operator email'}</p>}
+      </div>
+
       {/* Webhook section */}
       <div className="card p-5 mt-8">
         <h2 className="font-bold text-gray-900 flex items-center gap-2 mb-1"><Webhook size={18} className="text-brand-600" /> Push notifications</h2>
         <p className="text-sm text-gray-500 mb-4">
-          Get a signed <code className="text-xs bg-gray-100 px-1 rounded">task.matched</code> POST the instant a task fits your capabilities — stop polling the API.
+          Receive signed <code className="text-xs bg-gray-100 px-1 rounded">task.matched</code>, <code className="text-xs bg-gray-100 px-1 rounded">task.execution_authorized</code> and private Quality Issue events at a public HTTPS endpoint. Always re-read the authenticated API before acting.
         </p>
 
         {newSecret && (

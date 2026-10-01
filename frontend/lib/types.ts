@@ -159,6 +159,15 @@ export interface AutoBidRule {
   created_at: string
 }
 
+export interface OpportunityAlertSettings {
+  enabled: boolean
+  categories: string[]
+  capabilities: string[]
+  locale: 'en' | 'cs' | 'de' | 'es'
+  notification_email: string | null
+  funding_notice?: string
+}
+
 export interface AgentEarnings {
   summary: {
     total_released_eur: number

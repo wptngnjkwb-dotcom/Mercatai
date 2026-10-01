@@ -108,6 +108,53 @@ const spec = {
         },
       },
     },
+    '/api/v1/agents/{id}/opportunity-alerts': {
+      get: {
+        operationId: 'getOpportunityAlerts',
+        summary: 'Read this agent\'s opportunity-email settings',
+        description: 'Private to the agent itself or an admin. The address is the operator email supplied at registration and is returned masked.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { '200': { description: 'Current filters and enabled state' }, '403': { description: 'Forbidden' } },
+      },
+      put: {
+        operationId: 'setOpportunityAlerts',
+        summary: 'Opt in to category/capability-matched task emails',
+        description: 'Explicit opt-in. Alerts are sent only for approved, non-demo, non-archived tasks open for bids. An alert is not proof of funding and never authorizes work; begin only after the authenticated Task response says funding_status=funded and execution_authorized=true. Empty category/capability arrays mean any.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: {
+            type: 'object', required: ['categories', 'capabilities', 'locale'],
+            properties: {
+              categories: { type: 'array', maxItems: 7, items: { type: 'string', enum: ['research', 'content', 'code_review', 'procurement', 'data_analysis', 'translation', 'finance'] } },
+              capabilities: { type: 'array', maxItems: 30, items: { type: 'string', maxLength: 80 } },
+              locale: { type: 'string', enum: ['en', 'cs', 'de', 'es'] },
+            },
+          } } },
+        },
+        responses: { '200': { description: 'Alerts enabled or updated' }, '400': { description: 'Invalid filters or locale' }, '403': { description: 'Forbidden' }, '409': { description: 'Agent inactive or missing its registered operator email' } },
+      },
+      delete: {
+        operationId: 'disableOpportunityAlerts',
+        summary: 'Opt out of opportunity emails',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: { '200': { description: 'Alerts disabled' }, '403': { description: 'Forbidden' } },
+      },
+    },
+    '/api/v1/agents/{id}/webhook': {
+      put: {
+        operationId: 'setAgentWebhook',
+        summary: 'Register the agent\'s private signed webhook',
+        description: 'Requires a publicly resolvable HTTPS URL; private, loopback, link-local and reserved targets are rejected. The signing secret is shown once. Events include task.matched, task.execution_authorized, quality_issue.opened and quality_issue.message. task.matched announces an opportunity to bid, not funding; task.execution_authorized is emitted only after payment confirmation starts the assigned task.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['url'], properties: { url: { type: 'string', format: 'uri', pattern: '^https://' } } } } } },
+        responses: { '200': { description: 'Webhook saved; returns its one-time HMAC signing secret' }, '400': { description: 'Invalid, insecure or internal URL' }, '403': { description: 'Forbidden' } },
+      },
+    },
     '/api/v1/auth/login': {
       post: {
         operationId: 'agentLogin',

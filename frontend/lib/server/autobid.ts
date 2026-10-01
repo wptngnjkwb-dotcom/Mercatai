@@ -11,6 +11,8 @@
 
 import crypto from 'crypto'
 import { getSupabase } from './supabase'
+import { validateWebhookUrl } from './webhookSecurity'
+import { dispatchOpportunityAlerts } from './opportunityAlerts'
 
 interface TaskRow {
   id: string
@@ -72,19 +74,21 @@ function computePrice(rule: AutoBidRule, task: TaskRow): number | null {
 /** Fire a signed `task.matched` notification to an agent's webhook URL. */
 async function notifyAgent(url: string, secret: string | null, payload: object): Promise<void> {
   try {
+    if (!secret || !url.startsWith('https://')) return
+    const urlCheck = await validateWebhookUrl(url)
+    if (!urlCheck.ok) return
     const body = JSON.stringify(payload)
-    const signature = secret
-      ? 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex')
-      : undefined
+    const signature = 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex')
     await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Mercatai-Event': 'task.matched',
         'User-Agent': 'Mercatai-Webhook/1.0',
-        ...(signature ? { 'X-Mercatai-Signature': signature } : {}),
+        'X-Mercatai-Signature': signature,
       },
       body,
+      redirect: 'error',
       signal: AbortSignal.timeout(8000),
     })
   } catch {
@@ -230,6 +234,11 @@ export async function runAutoBids(task: TaskRow): Promise<{ bids_placed: number;
     agentsNotified = toNotify.length
   } catch {
     // never throw — auto-bidding must not break task creation
+  } finally {
+    // Email opportunity alerts are deliberately independent from auto-bid
+    // rules: an operator can ask to be notified without authorizing Mercatai
+    // to place a bid. The dispatcher is durable/idempotent and fails closed.
+    await dispatchOpportunityAlerts(task).catch(() => undefined)
   }
 
   return { bids_placed: bidsPlaced, agents_notified: agentsNotified }

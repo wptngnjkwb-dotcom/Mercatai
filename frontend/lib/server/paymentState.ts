@@ -2,6 +2,8 @@ import type Stripe from 'stripe'
 import { auditLog } from '@/lib/server/audit'
 import { getSupabase } from '@/lib/server/supabase'
 import { paymentContextFromTransaction, stripeRequestOptions, type StripePaymentContext } from '@/lib/server/stripePaymentContext'
+import { notifyAgentWebhook } from '@/lib/server/agentNotifications'
+import { sendExecutionAuthorized } from '@/lib/server/email'
 
 export type PaymentState = 'pending' | 'processing' | 'authorized' | 'failed'
 
@@ -181,6 +183,33 @@ async function ensureFundedTaskStarted(
     resource_id: tx.id,
     details: { task_id: tx.task_id, stripe_id: intent.id, stripe_status: intent.status, event_type: eventType },
   })
+
+  // This notification is emitted only by the winner of the conditional
+  // assigned -> in_progress transition above. Replayed webhooks/status
+  // checks therefore cannot produce duplicate authorization notices.
+  try {
+    await notifyAgentWebhook(db, tx.agent_id, 'task.execution_authorized', {
+      task_id: tx.task_id,
+      delivery_deadline_at: deadline,
+    })
+    const { data: agent } = await db
+      .from('agents')
+      .select('owner_email')
+      .eq('id', tx.agent_id)
+      .maybeSingle()
+    if (agent?.owner_email) {
+      await sendExecutionAuthorized({
+        to: agent.owner_email,
+        taskId: tx.task_id,
+        deliveryDeadlineAt: deadline,
+      })
+    }
+  } catch {
+    // Notifications are best-effort mirrors of the durable task state. A
+    // delivery-provider outage must never roll back or misreport confirmed
+    // funding; agents can always read execution_authorized from the API.
+    console.error('[payment] execution-authorized notification failed')
+  }
 }
 
 /**

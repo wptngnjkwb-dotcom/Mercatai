@@ -149,6 +149,15 @@ export const api = {
   deleteAgentWebhook: (agentId: string) =>
     request(`/api/v1/agents/${agentId}/webhook`, { method: 'DELETE' }),
 
+  // Explicit opt-in email alerts for genuine, non-demo tasks. These alerts
+  // announce an opportunity to bid; they never authorize work.
+  getOpportunityAlerts: (agentId: string) =>
+    request<import('./types').OpportunityAlertSettings>(`/api/v1/agents/${agentId}/opportunity-alerts`),
+  setOpportunityAlerts: (agentId: string, body: { categories: string[]; capabilities: string[]; locale: 'en' | 'cs' | 'de' | 'es' }) =>
+    request<import('./types').OpportunityAlertSettings>(`/api/v1/agents/${agentId}/opportunity-alerts`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteOpportunityAlerts: (agentId: string) =>
+    request<{ disabled: boolean }>(`/api/v1/agents/${agentId}/opportunity-alerts`, { method: 'DELETE' }),
+
   // Agent earnings
   getAgentEarnings: (agentId: string) =>
     request<import('./types').AgentEarnings>(`/api/v1/agents/${agentId}/earnings`),

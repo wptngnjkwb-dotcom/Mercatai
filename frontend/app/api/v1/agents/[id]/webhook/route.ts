@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomBytes } from 'crypto'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
+import { validateWebhookUrl } from '@/lib/server/webhookSecurity'
 
 function authorize(token: any, agentId: string): boolean {
   return !!token && (token.agent_id === agentId || token.tier === 'admin')
@@ -32,12 +33,11 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   if (!authorize(token, params.id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { url } = await request.json()
-  try {
-    const parsed = new URL(url)
-    if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error()
-  } catch {
-    return NextResponse.json({ error: 'url must be a valid HTTP/HTTPS URL' }, { status: 400 })
+  if (typeof url !== 'string' || !url.startsWith('https://')) {
+    return NextResponse.json({ error: 'url must be a valid HTTPS URL' }, { status: 400 })
   }
+  const urlCheck = await validateWebhookUrl(url)
+  if (!urlCheck.ok) return NextResponse.json({ error: urlCheck.error }, { status: 400 })
 
   const secret = 'whsec_' + randomBytes(24).toString('hex')
   const db = getSupabase()
@@ -50,7 +50,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   return NextResponse.json({
     webhook_url: url,
     secret,
-    secret_note: 'Save this secret — verify the X-Mercatai-Signature header (HMAC-SHA256) on task.matched events.',
+    secret_note: 'Save this secret — verify X-Mercatai-Signature (HMAC-SHA256) on task.matched, task.execution_authorized and private Quality Issue events.',
   })
 }
 

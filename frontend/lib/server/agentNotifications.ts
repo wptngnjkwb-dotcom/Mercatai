@@ -3,7 +3,7 @@ import { validateWebhookUrl } from './webhookSecurity'
 
 type Db = ReturnType<typeof import('./supabase').getSupabase>
 
-export type AgentNotificationEvent = 'quality_issue.opened' | 'quality_issue.message'
+export type AgentNotificationEvent = 'quality_issue.opened' | 'quality_issue.message' | 'task.execution_authorized'
 
 /**
  * Sends a private, signed notification only to the assigned agent's own
@@ -15,7 +15,7 @@ export async function notifyAgentWebhook(
   db: Db,
   agentId: string,
   event: AgentNotificationEvent,
-  data: { task_id: string; quality_issue_id: string },
+  data: { task_id: string; quality_issue_id?: string; delivery_deadline_at?: string | null },
 ): Promise<void> {
   const { data: agent, error } = await db
     .from('agents')
@@ -43,6 +43,7 @@ export async function notifyAgentWebhook(
         'X-Mercatai-Signature': signature,
       },
       body,
+      redirect: 'error',
       signal: AbortSignal.timeout(8_000),
     })
   } catch {

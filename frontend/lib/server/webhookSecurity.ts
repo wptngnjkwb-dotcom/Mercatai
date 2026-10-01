@@ -12,21 +12,28 @@ import net from 'net'
 function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split('.').map(Number)
   if (parts.length !== 4 || parts.some((p) => Number.isNaN(p))) return true
-  const [a, b] = parts
+  const [a, b, c] = parts
   if (a === 10) return true
   if (a === 127) return true
   if (a === 0) return true
   if (a === 169 && b === 254) return true // link-local incl. cloud metadata
   if (a === 172 && b >= 16 && b <= 31) return true
   if (a === 192 && b === 168) return true
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true // protocol assignments + TEST-NET-1
+  if (a === 198 && (b === 18 || b === 19)) return true // benchmarking
+  if (a === 198 && b === 51 && c === 100) return true // TEST-NET-2
+  if (a === 203 && b === 0 && c === 113) return true // TEST-NET-3
   if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
+  if (a >= 224) return true // multicast and reserved/future-use space
   return false
 }
 
 function isPrivateIPv6(ip: string): boolean {
   const normalized = ip.toLowerCase()
-  if (normalized === '::1') return true
+  if (normalized === '::' || normalized === '::1') return true
   if (normalized.startsWith('fe80:') || normalized.startsWith('fe8') || normalized.startsWith('fc') || normalized.startsWith('fd')) return true
+  if (normalized.startsWith('ff')) return true // multicast
+  if (normalized.startsWith('2001:db8:')) return true // documentation prefix
   // IPv4-mapped IPv6 (::ffff:a.b.c.d) — check the embedded IPv4
   const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
   if (mapped) return isPrivateIPv4(mapped[1])
@@ -50,9 +57,16 @@ export async function validateWebhookUrl(rawUrl: string): Promise<{ ok: true } |
   if (!['https:', 'http:'].includes(parsed.protocol)) {
     return { ok: false, error: 'url must be a valid HTTP/HTTPS URL' }
   }
+  if (parsed.username || parsed.password) {
+    return { ok: false, error: 'url must not contain embedded credentials' }
+  }
 
   const hostname = parsed.hostname.toLowerCase()
-  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) {
+  if (
+    hostname === 'localhost'
+    || (!net.isIP(hostname) && !hostname.includes('.'))
+    || ['.localhost', '.local', '.internal', '.lan', '.home', '.corp'].some((suffix) => hostname.endsWith(suffix))
+  ) {
     return { ok: false, error: 'url must not point to a local/internal host' }
   }
 
