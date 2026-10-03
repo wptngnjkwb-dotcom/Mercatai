@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/cron/opportunity-alerts",
-      "schedule": "7 * * * *"
+      "schedule": "7 4 * * *"
     }
   ]
 }

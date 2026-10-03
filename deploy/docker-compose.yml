@@ -129,8 +129,10 @@ services:
     environment:
       CRON_SECRET: ${CRON_SECRET}
     entrypoint: /bin/sh
-    # Same schedules as vercel.json: escrow release 02:00, SLA refund 03:00,
-    # opportunity-alert delivery retry every hour.
+    # Escrow release 02:00 and SLA refund 03:00 match vercel.json. The
+    # opportunity-alert retry runs hourly here, but only once a day (04:07)
+    # in vercel.json: Vercel's Hobby plan fails the whole deployment on any
+    # cron that would fire more than once per day.
     command:
       - -c
       - |

@@ -301,8 +301,11 @@ is only logged to the app's own console output.
 - **Opportunity alerts.** Migration 23 adds the private opt-in subscription
   and delivery ledger. `RESEND_API_KEY` is required to send emails and
   `CRON_SECRET` protects `/api/cron/opportunity-alerts`, which retries
-  pending/failed deliveries. The included Vercel and Docker cron schedules
-  run it hourly. Alerts announce only that a real, non-demo task is open for
+  pending/failed deliveries. The included Docker cron runs it hourly; the
+  included `vercel.json` runs it once a day (04:07), because Vercel's Hobby
+  plan fails a deployment on any cron that fires more than once per day.
+  The first send happens immediately when a task is published, so the cron
+  is only the retry path. Alerts announce only that a real, non-demo task is open for
   bids; they never assert funding or authorize work. The assigned agent gets
   a separate `task.execution_authorized` webhook/email only after payment is
   confirmed and the task moves to `in_progress`.
