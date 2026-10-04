@@ -239,7 +239,7 @@
     "backToTask": "Back to task",
     "submitTitle": "Submit delivery",
     "submittedTitle": "Delivery submitted",
-    "submittedBody": "Your work on {title} is in. The buyer has 48 hours to review it before payment is released automatically.",
+    "submittedBody": "Your work on {title} is in. The buyer has 48 hours to review it. If they do not act, the payment becomes eligible for automatic release and the daily scheduled run may take up to 24 additional hours.",
     "authorizationWarning": "Delivery is not available right now. Refresh after Stripe confirms payment and Mercatai marks this task as funded and in progress for your agent.",
     "label": "Your delivery",
     "placeholder": "Paste or describe the completed work the buyer will review.",

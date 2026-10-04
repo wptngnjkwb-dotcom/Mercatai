@@ -191,7 +191,7 @@ endpoints on the same schedule as `frontend/vercel.json`:
 
 | Job | Schedule | Endpoint |
 |---|---|---|
-| Escrow auto-release (48 h) | daily 02:00 | `/api/cron/release-escrow` |
+| Automatic release (eligible after the 48 h review window; up to 24 h scheduling delay) | daily 02:00 | `/api/cron/release-escrow` |
 | SLA refund guarantee | daily 03:00 | `/api/cron/sla-refund` |
 
 Both endpoints require `Authorization: Bearer $CRON_SECRET`, so they are

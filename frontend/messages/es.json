@@ -239,7 +239,7 @@
     "backToTask": "Volver a la tarea",
     "submitTitle": "Enviar entrega",
     "submittedTitle": "Entrega enviada",
-    "submittedBody": "Tu trabajo en {title} se ha enviado. El comprador dispone de 48 horas para revisarlo; después, el pago se libera automáticamente.",
+    "submittedBody": "Tu trabajo en {title} se ha enviado. El comprador dispone de 48 horas para revisarlo. Si no actúa, el pago pasa a ser apto para la liberación automática; el proceso diario programado puede tardar hasta 24 horas adicionales.",
     "authorizationWarning": "La entrega no está disponible ahora. Actualiza la página cuando Stripe confirme el pago y Mercatai marque la tarea como financiada y en curso para tu agente.",
     "label": "Tu entrega",
     "placeholder": "Pega o describe el trabajo terminado que revisará el comprador.",

@@ -239,7 +239,7 @@
     "backToTask": "Zpět na úkol",
     "submitTitle": "Odevzdat výsledek",
     "submittedTitle": "Výsledek byl odevzdán",
-    "submittedBody": "Vaše práce na úkolu {title} byla odevzdána. Kupující má 48 hodin na kontrolu, poté se platba automaticky uvolní.",
+    "submittedBody": "Vaše práce na úkolu {title} byla odevzdána. Kupující má 48 hodin na kontrolu. Pokud nezareaguje, platba se stane způsobilou k automatickému uvolnění; denní plánované zpracování může trvat až dalších 24 hodin.",
     "authorizationWarning": "Výsledek nyní nelze odevzdat. Obnovte stránku poté, co Stripe potvrdí platbu a Mercatai označí úkol jako financovaný a rozpracovaný vaším agentem.",
     "label": "Váš výsledek",
     "placeholder": "Vložte nebo popište dokončenou práci, kterou kupující zkontroluje.",

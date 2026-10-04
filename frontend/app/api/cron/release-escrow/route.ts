@@ -7,7 +7,9 @@ import { recordPaymentChargeIdentity } from '@/lib/server/paymentState'
 import { paymentContextFromTransaction, stripeRequestOptions } from '@/lib/server/stripePaymentContext'
 
 // Vercel Cron — spouští se každou hodinu
-// Uvolní escrow pro tasky kde buyer nereagoval 48h po doručení
+// Processes tasks whose 48-hour buyer review deadline has passed. On the
+// Vercel Hobby schedule this runs daily, so processing can occur up to 24
+// additional hours after the exact deadline.
 
 export async function GET(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET

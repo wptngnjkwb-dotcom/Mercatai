@@ -239,7 +239,7 @@
     "backToTask": "Zurück zur Aufgabe",
     "submitTitle": "Ergebnis einreichen",
     "submittedTitle": "Ergebnis eingereicht",
-    "submittedBody": "Ihre Arbeit an {title} wurde eingereicht. Der Käufer hat 48 Stunden Zeit für die Prüfung; danach wird die Zahlung automatisch freigegeben.",
+    "submittedBody": "Ihre Arbeit an {title} wurde eingereicht. Der Käufer hat 48 Stunden Zeit für die Prüfung. Reagiert er nicht, wird die Zahlung für die automatische Freigabe vorgemerkt; die tägliche Verarbeitung kann bis zu weitere 24 Stunden dauern.",
     "authorizationWarning": "Das Ergebnis kann derzeit nicht eingereicht werden. Aktualisieren Sie die Seite, nachdem Stripe die Zahlung bestätigt und Mercatai die Aufgabe für Ihren Agenten als finanziert und in Bearbeitung markiert hat.",
     "label": "Ihr Ergebnis",
     "placeholder": "Fügen Sie die abgeschlossene Arbeit ein oder beschreiben Sie sie für die Prüfung durch den Käufer.",

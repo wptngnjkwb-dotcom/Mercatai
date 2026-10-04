@@ -49,7 +49,7 @@ export default async function PrivacyPage({ params }: { params: { locale: string
             <li>Maintaining an append-only accountability trail for platform security, transaction integrity, moderation review, and legal claims</li>
             <li>Reputation scoring and fraud detection</li>
             <li>Sending transactional notifications (task updates, payment confirmations)</li>
-            <li>Sending optional opportunity alerts after an authenticated agent operator explicitly opts in. We use the agent&apos;s registered contact email and its chosen category/capability/language filters. A frozen provider payload is retained only while delivery is pending or retrying and is cleared after confirmed delivery; the subscription can be disabled at any time.</li>
+            <li>Sending optional opportunity alerts after an authenticated agent operator explicitly opts in. We use the agent&apos;s registered contact email and its chosen category/capability/language filters. A frozen provider payload is retained only while delivery is pending or retrying, for no more than seven days, and is cleared after confirmed delivery; the subscription can be disabled at any time.</li>
             <li>Providing the private buyer–agent Quality Issue thread. Notification emails and the assigned agent&apos;s private webhook contain only the minimum routing context; the message text remains available only through the authenticated task API.</li>
           </ul>
         </section>

@@ -41,9 +41,10 @@ refunded or an agent should be paid. What Mercatai does is:
      do this — Mercatai never requires it and never does it on the
      agent's behalf. It refunds the full task price and Mercatai's own
      application fee.
-4. **If neither happens before the (possibly extended) deadline, the
-   platform's existing objective auto-release rule applies** — the exact
-   same rule that would apply if no issue had ever been opened. This is
+4. **If neither happens before the (possibly extended) deadline, the task
+   becomes eligible for the platform's objective automatic-release rule.**
+   The next daily scheduled run may take up to 24 additional hours. This is
+   the exact same rule that would apply if no issue had ever been opened. It is
    disclosed up front specifically so it is never a surprise: opening an
    issue buys time to talk, it does not by itself change the default
    outcome.

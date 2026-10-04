@@ -15,6 +15,12 @@ type Db = ReturnType<typeof getSupabase>
 // operator's email) is still retained, undercutting the Privacy Policy's
 // "retained only while pending or retrying" claim.
 const MAX_DELIVERY_ATTEMPTS = 20
+// Vercel Hobby can run the retry job only once per day. Attempt-count-only
+// retention would therefore keep the frozen provider payload (including the
+// operator email address) for roughly 20 days. The privacy boundary is time
+// based instead: after seven days an unsent snapshot is irreversibly cleared,
+// regardless of how many retries the deployment managed to run.
+export const MAX_DELIVERY_AGE_DAYS = 7
 
 export interface OpportunityTask {
   id: string
@@ -235,11 +241,33 @@ export async function dispatchOpportunityAlerts(task: OpportunityTask): Promise<
 export async function retryOpportunityAlertDeliveries(limit = 50): Promise<{ attempted: number; sent: number; failed: number }> {
   const db = getSupabase()
   const staleBefore = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+  const expiresBefore = new Date(Date.now() - MAX_DELIVERY_AGE_DAYS * 24 * 60 * 60 * 1000).toISOString()
+
+  // Expire old snapshots before selecting retries. The status/lease filters
+  // make this concurrency-safe: a delivery freshly claimed by another worker
+  // no longer matches either branch and that worker remains responsible for
+  // completing or clearing it. A stale lease is safe to retire.
+  const { error: expiryError } = await db
+    .from('opportunity_alert_deliveries')
+    .update({
+      status: 'failed',
+      payload_snapshot: null,
+      claim_token: null,
+      claimed_at: null,
+      last_error: `Opportunity alert expired after ${MAX_DELIVERY_AGE_DAYS} days`,
+    })
+    .lt('created_at', expiresBefore)
+    .not('payload_snapshot', 'is', null)
+    .or(`status.in.(pending,failed),and(status.eq.sending,claimed_at.lt.${staleBefore})`)
+  if (expiryError) throw new Error(`Could not expire old opportunity alerts: ${expiryError.message}`)
+
   const { data, error } = await db
     .from('opportunity_alert_deliveries')
     .select('id,status,claimed_at,attempt_count')
     .or(`status.in.(pending,failed),and(status.eq.sending,claimed_at.lt.${staleBefore})`)
     .lt('attempt_count', MAX_DELIVERY_ATTEMPTS)
+    .gte('created_at', expiresBefore)
+    .not('payload_snapshot', 'is', null)
     .order('created_at', { ascending: true })
     .limit(Math.max(1, Math.min(limit, 100)))
   if (error) throw new Error(`Could not list retryable opportunity alerts: ${error.message}`)

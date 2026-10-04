@@ -51,6 +51,16 @@ describe('payment copy distinguishes Mercatai workflow, Stripe settlement, and b
     }
   })
 
+  it('states the real daily scheduling delay after the 48-hour review window', () => {
+    for (const locale of locales) {
+      const copy = messages(locale).delivery.submittedBody as string
+      expect(copy, locale).toMatch(/48/)
+      expect(copy, locale).toMatch(/24/)
+    }
+    expect(source('app/[locale]/terms/page.tsx')).toMatch(/up to 24 additional hours/i)
+    expect(source('app/api/v1/openapi/route.ts')).toMatch(/daily scheduled run may take up to 24 additional hours/i)
+  })
+
   it('keeps every homepage pricing label and disclaimer translated and non-empty', () => {
     const englishKeys = Object.keys(messages('en').home.pricingTable).sort()
     for (const locale of locales) {
