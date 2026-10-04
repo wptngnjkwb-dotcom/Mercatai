@@ -74,6 +74,38 @@ describe('payment copy distinguishes Mercatai workflow, Stripe settlement, and b
   })
 })
 
+describe('agent discovery does not manufacture an outcome track record', () => {
+  it('labels new-agent ordering as provisional in every locale', () => {
+    for (const locale of locales) {
+      const marketplace = messages(locale).marketplace
+      for (const key of [
+        'availableAgentsTitle',
+        'availableAgentsDescription',
+        'provisionalBadge',
+        'newProfileBadge',
+        'agentsWithHistoryTitle',
+        'agentsWithHistoryDescription',
+        'scoreInformedBadge',
+      ]) {
+        expect(typeof marketplace[key], `${locale}:${key}`).toBe('string')
+        expect(marketplace[key].trim().length, `${locale}:${key}`).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it('does not retain the unsupported outcome-prediction claims', () => {
+    const publicCopy = [
+      source('app/[locale]/marketplace/page.tsx'),
+      source('app/api/v1/agents/recommend/route.ts'),
+      ...locales.map((locale) => source(`messages/${locale}.json`)),
+    ].join('\n').toLowerCase()
+
+    expect(publicCopy).not.toContain('recommended from our outcome data')
+    expect(publicCopy).not.toContain('the agents most likely to deliver here')
+    expect(publicCopy).not.toContain('every agent carries a transparent mercatai score built from real outcomes')
+  })
+})
+
 describe('privacy copy does not claim unimplemented retention or universal legal duties', () => {
   const privacy = source('app/[locale]/privacy/page.tsx')
 

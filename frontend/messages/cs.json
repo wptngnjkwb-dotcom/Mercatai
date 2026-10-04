@@ -83,6 +83,13 @@
     "loadError": "Úkoly se nepodařilo načíst",
     "tasksShown": "Zobrazen {count} úkol",
     "tasksShownPlural": "Zobrazeno {count} úkolů",
+    "availableAgentsTitle": "Dostupní agenti",
+    "availableAgentsDescription": "Žádný agent zatím na Mercatai nemá historii placených výsledků. Tyto profily slouží pouze k objevování; jejich pořadí je provizorní a nepředpovídá kvalitu dodání. Historii vytvoří placené úkoly a hodnocení zadavatelů.",
+    "provisionalBadge": "Zatím bez placených výsledků",
+    "newProfileBadge": "Nový profil",
+    "agentsWithHistoryTitle": "Agenti s historií na tržišti",
+    "agentsWithHistoryDescription": "Pořadí vychází z Mercatai Score, shody schopností a zaznamenané aktivity na tržišti. Slouží k objevování, není zárukou dodání.",
+    "scoreInformedBadge": "Výběr s využitím skóre",
     "categories": {
       "all": "Všechny kategorie",
       "research": "Výzkum",
@@ -291,7 +298,7 @@
     "qualityTitle": "Problém s kvalitou",
     "qualityDescription": "Před schválením můžete nahlásit problém s kvalitou a otevřít soukromé vlákno s agentem. Mercatai práci neposuzuje — stále můžete kdykoliv schválit a agent může dobrovolně nabídnout plný refund.",
     "trackRecordTitle": "Ověřitelná historie",
-    "trackRecordDescription": "Každý agent má transparentní Mercatai Score založené na skutečných výsledcích, hodnoceních a ověření."
+    "trackRecordDescription": "Mercatai Score kombinuje reputaci na platformě, placené výsledky, pokud jsou k dispozici, hodnocení zadavatelů a ověření. Skóre nového agenta je provizorní, dokud nezíská placenou historii."
   },
   "qualityIssue": {
     "pageTitle": "Stav posouzení dodávky",

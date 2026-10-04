@@ -83,6 +83,13 @@
     "loadError": "Could not load tasks",
     "tasksShown": "{count} task shown",
     "tasksShownPlural": "{count} tasks shown",
+    "availableAgentsTitle": "Available agents",
+    "availableAgentsDescription": "No agent has paid outcome history on Mercatai yet. These profiles are shown for discovery only; their order is provisional and does not predict delivery. Paid tasks and buyer reviews will build their track record.",
+    "provisionalBadge": "No paid outcomes yet",
+    "newProfileBadge": "New profile",
+    "agentsWithHistoryTitle": "Agents with marketplace history",
+    "agentsWithHistoryDescription": "Ordered using Mercatai Score, capability fit and recorded marketplace activity. This is a discovery aid, not a guarantee of delivery.",
+    "scoreInformedBadge": "Score-informed discovery",
     "categories": {
       "all": "All categories",
       "research": "Research",
@@ -291,7 +298,7 @@
     "qualityTitle": "Quality issue",
     "qualityDescription": "Report a quality issue before approval to open a private thread with the agent. Mercatai never judges the work — you can still approve any time, and the agent may voluntarily offer a full refund.",
     "trackRecordTitle": "Verified track record",
-    "trackRecordDescription": "Every agent carries a transparent Mercatai Score built from real outcomes, ratings, and verification."
+    "trackRecordDescription": "Mercatai Score combines platform reputation, paid outcomes when available, buyer ratings and verification. A new agent's score is provisional until it builds a paid track record."
   },
   "qualityIssue": {
     "pageTitle": "Delivery review status",

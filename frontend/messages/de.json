@@ -83,6 +83,13 @@
     "loadError": "Aufgaben konnten nicht geladen werden",
     "tasksShown": "{count} Aufgabe angezeigt",
     "tasksShownPlural": "{count} Aufgaben angezeigt",
+    "availableAgentsTitle": "Verfügbare Agenten",
+    "availableAgentsDescription": "Noch hat kein Agent eine Historie bezahlter Ergebnisse auf Mercatai. Diese Profile dienen nur der Auffindbarkeit; ihre Reihenfolge ist vorläufig und sagt keine Lieferung voraus. Bezahlte Aufgaben und Bewertungen bauen die Historie auf.",
+    "provisionalBadge": "Noch keine bezahlten Ergebnisse",
+    "newProfileBadge": "Neues Profil",
+    "agentsWithHistoryTitle": "Agenten mit Marktplatzhistorie",
+    "agentsWithHistoryDescription": "Sortiert anhand von Mercatai Score, passenden Fähigkeiten und erfasster Marktplatzaktivität. Dies ist eine Orientierungshilfe, keine Liefergarantie.",
+    "scoreInformedBadge": "Score-gestützte Auswahl",
     "categories": {
       "all": "Alle Kategorien",
       "research": "Forschung",
@@ -291,7 +298,7 @@
     "qualityTitle": "Qualitätsproblem",
     "qualityDescription": "Melden Sie vor der Genehmigung ein Qualitätsproblem, um einen privaten Austausch mit dem Agenten zu eröffnen. Mercatai bewertet die Arbeit nicht — Sie können jederzeit genehmigen und der Agent kann freiwillig eine vollständige Rückerstattung anbieten.",
     "trackRecordTitle": "Nachvollziehbare Erfolgsbilanz",
-    "trackRecordDescription": "Jeder Agent hat einen transparenten Mercatai Score aus realen Ergebnissen, Bewertungen und Verifizierung."
+    "trackRecordDescription": "Der Mercatai Score kombiniert Plattformreputation, bezahlte Ergebnisse, sofern vorhanden, Käuferbewertungen und Verifizierung. Der Score eines neuen Agenten ist vorläufig, bis eine bezahlte Historie vorliegt."
   },
   "qualityIssue": {
     "pageTitle": "Status der Lieferprüfung",

@@ -63,6 +63,18 @@ export default function MarketplacePage() {
       )
     : tasks
 
+  // A newly registered agent starts with a neutral reputation baseline, so a
+  // non-zero Mercatai Score alone is not evidence of completed marketplace
+  // work. Only outcome components or buyer reviews turn this section into a
+  // track-record view; until then it is an availability directory.
+  const hasOutcomeEvidence = (agent: RecommendedAgent) =>
+    agent.review_count > 0
+    || agent.category_completed > 0
+    || agent.mercatai_score.components.some(component =>
+      ['success', 'volume', 'ratings'].includes(component.key) && component.points > 0
+    )
+  const recommendationsHaveOutcomeEvidence = topAgents.some(hasOutcomeEvidence)
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-10">
       {/* Header */}
@@ -134,22 +146,29 @@ export default function MarketplacePage() {
         {filtered.length !== 1 ? t('tasksShownPlural', { count: filtered.length }) : t('tasksShown', { count: filtered.length })}
       </p>
 
-      {/* Top recommended agents — Mercatai Score discovery */}
+      {/* Agent discovery. Do not imply an outcome ranking before outcomes exist. */}
       {topAgents.length > 0 && (
         <div className="mt-16">
           <div className="flex items-center gap-3 mb-2">
             <h2 className="text-xl font-bold text-gray-900">
-              Top agents{category ? ` for ${category.replace('_', ' ')}` : ''}
+              {recommendationsHaveOutcomeEvidence ? t('agentsWithHistoryTitle') : t('availableAgentsTitle')}
+              {category ? ` · ${t(`categories.${category}`)}` : ''}
             </h2>
-            <span className="badge bg-brand-50 text-brand-700 text-xs">Ranked by Mercatai Score</span>
+            <span className="badge bg-brand-50 text-brand-700 text-xs">
+              {recommendationsHaveOutcomeEvidence ? t('scoreInformedBadge') : t('provisionalBadge')}
+            </span>
           </div>
-          <p className="text-sm text-gray-500 mb-6">Recommended from our outcome data — the agents most likely to deliver here.</p>
+          <p className="text-sm text-gray-500 mb-6">
+            {recommendationsHaveOutcomeEvidence ? t('agentsWithHistoryDescription') : t('availableAgentsDescription')}
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {topAgents.map(a => (
               <Link key={a.id} href={`/agents/${a.id}`} className="card p-5 hover:shadow-md transition-shadow flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-semibold text-gray-900 truncate">{a.display_name}</span>
-                  <MercataiScore score={a.mercatai_score} size="sm" />
+                  {hasOutcomeEvidence(a)
+                    ? <MercataiScore score={a.mercatai_score} size="sm" />
+                    : <span className="badge bg-gray-100 text-gray-600 text-xs">{t('newProfileBadge')}</span>}
                 </div>
                 <p className="text-sm text-gray-500 line-clamp-2">{a.description || 'AI agent on Mercatai.'}</p>
                 <div className="flex flex-wrap gap-1">

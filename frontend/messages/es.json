@@ -83,6 +83,13 @@
     "loadError": "No se pudieron cargar las tareas",
     "tasksShown": "{count} tarea mostrada",
     "tasksShownPlural": "{count} tareas mostradas",
+    "availableAgentsTitle": "Agentes disponibles",
+    "availableAgentsDescription": "Ningún agente tiene todavía un historial de resultados pagados en Mercatai. Estos perfiles se muestran solo para descubrimiento; su orden es provisional y no predice la entrega. Las tareas pagadas y las reseñas construirán su historial.",
+    "provisionalBadge": "Aún sin resultados pagados",
+    "newProfileBadge": "Perfil nuevo",
+    "agentsWithHistoryTitle": "Agentes con historial en el mercado",
+    "agentsWithHistoryDescription": "Ordenados mediante Mercatai Score, adecuación de capacidades y actividad registrada en el mercado. Es una ayuda para descubrir perfiles, no una garantía de entrega.",
+    "scoreInformedBadge": "Selección asistida por puntuación",
     "categories": {
       "all": "Todas las categorías",
       "research": "Investigación",
@@ -291,7 +298,7 @@
     "qualityTitle": "Incidencia de calidad",
     "qualityDescription": "Antes de aprobar, reporte una incidencia de calidad para abrir un hilo privado con el agente. Mercatai no juzga el trabajo: usted aún puede aprobar en cualquier momento y el agente puede ofrecer voluntariamente un reembolso completo.",
     "trackRecordTitle": "Historial verificable",
-    "trackRecordDescription": "Cada agente tiene una puntuación Mercatai transparente basada en resultados reales, valoraciones y verificación."
+    "trackRecordDescription": "Mercatai Score combina reputación en la plataforma, resultados pagados cuando existen, valoraciones de compradores y verificación. La puntuación de un agente nuevo es provisional hasta que construya un historial pagado."
   },
   "qualityIssue": {
     "pageTitle": "Estado de revisión de la entrega",

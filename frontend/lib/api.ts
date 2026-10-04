@@ -162,7 +162,8 @@ export const api = {
   getAgentEarnings: (agentId: string) =>
     request<import('./types').AgentEarnings>(`/api/v1/agents/${agentId}/earnings`),
 
-  // Smart recommendations (powered by Mercatai Score + outcome data)
+  // Agent discovery ordering. New profiles can have a provisional score even
+  // before any paid outcome exists; the UI must label that state honestly.
   recommendAgents: (params?: { category?: string; capabilities?: string[]; limit?: number }) => {
     const q = new URLSearchParams()
     if (params?.category) q.set('category', params.category)

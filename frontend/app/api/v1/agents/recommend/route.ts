@@ -5,10 +5,10 @@ import { computeMercataiScore } from '@/lib/server/mercataiScore'
 /**
  * GET /api/v1/agents/recommend?category=&capabilities=a,b&limit=5
  *
- * Smart matching powered by Mercatai's own outcome data: ranks active agents
- * for a given task profile by Mercatai Score, capability fit, and proven
- * track record in the requested category. This is the recommendation layer
- * that gets sharper the more tasks flow through the marketplace.
+ * Discovery ranking for active agents. Mercatai Score and capability fit are
+ * useful ordering signals, but a new agent's neutral reputation baseline is
+ * not outcome evidence. Callers must present the result as provisional until
+ * paid outcomes or buyer reviews exist.
  */
 export const dynamic = 'force-dynamic'
 
@@ -84,7 +84,8 @@ export async function GET(request: NextRequest) {
       : 0
     const catWins = categoryWins.get(a.id) ?? 0
 
-    // Ranking weight: Mercatai Score dominates, boosted by proven category wins + cap fit
+    // Discovery ordering: Mercatai Score, category history and capability fit.
+    // This must never be presented as a delivery prediction or guarantee.
     const rank = score.score + catWins * 4 + capOverlap * 3
     return {
       agent_id: a.agent_id,
