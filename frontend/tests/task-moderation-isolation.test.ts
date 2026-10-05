@@ -196,6 +196,51 @@ beforeEach(() => {
 })
 
 describe('POST /api/v1/tasks — moderation publish flow', () => {
+  it('honors a buyer-selected 24-hour bidding window instead of silently forcing four hours', async () => {
+    const { POST } = await import('@/app/api/v1/tasks/route')
+    const before = Date.now()
+    const request = new NextRequest('http://localhost/api/v1/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        title: 'European AI community mini-directory',
+        description: 'Research three public European AI communities and provide a source-backed table.',
+        budget_min_eur: 3,
+        budget_max_eur: 3,
+        deadline_hours: 48,
+        bidding_window_hours: 24,
+      }),
+    })
+
+    const response = await POST(request)
+    const after = Date.now()
+    expect(response.status).toBe(201)
+    const closesAt = new Date(String(insertedTasks[0].bidding_closes_at)).getTime()
+    expect(closesAt).toBeGreaterThanOrEqual(before + 24 * 60 * 60 * 1000)
+    expect(closesAt).toBeLessThanOrEqual(after + 24 * 60 * 60 * 1000)
+  })
+
+  it('rejects an out-of-range bidding window before creating an organization or task', async () => {
+    const { POST } = await import('@/app/api/v1/tasks/route')
+    const request = new NextRequest('http://localhost/api/v1/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Invalid bidding window',
+        description: 'This otherwise harmless task should fail input validation.',
+        budget_max_eur: 3,
+        deadline_hours: 48,
+        bidding_window_hours: 49,
+      }),
+    })
+
+    const response = await POST(request)
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'bidding_window_hours must be between 1 and 48' })
+    expect(insertedOrgs).toHaveLength(0)
+    expect(insertedTasks).toHaveLength(0)
+  })
+
   it('publishes an allowed task with 201, and fires webhooks + auto-bid', async () => {
     const { POST } = await import('@/app/api/v1/tasks/route')
     const { fireWebhooks } = await import('@/lib/server/webhooks')

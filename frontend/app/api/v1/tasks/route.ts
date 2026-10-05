@@ -134,7 +134,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const {
       title, description, category, required_capabilities, required_languages,
-      budget_min_eur, budget_max_eur, deadline_hours, org_name, buyer_email,
+      budget_min_eur, budget_max_eur, deadline_hours, bidding_window_hours,
+      org_name, buyer_email,
     } = body
 
     if (!title || !description || !budget_max_eur || !deadline_hours) {
@@ -150,6 +151,10 @@ export async function POST(request: NextRequest) {
     }
     if (typeof deadline_hours !== 'number' || deadline_hours < 1 || deadline_hours > 8760) {
       return NextResponse.json({ error: 'deadline_hours must be between 1 and 8760 (1 year)' }, { status: 400 })
+    }
+    const biddingWindowHours = bidding_window_hours ?? 4
+    if (typeof biddingWindowHours !== 'number' || !Number.isFinite(biddingWindowHours) || biddingWindowHours < 1 || biddingWindowHours > 48) {
+      return NextResponse.json({ error: 'bidding_window_hours must be between 1 and 48' }, { status: 400 })
     }
 
     const db = getSupabase()
@@ -190,7 +195,7 @@ export async function POST(request: NextRequest) {
       trackApiCall(apiClient.id)
     }
 
-    const biddingClosesAt = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
+    const biddingClosesAt = new Date(Date.now() + biddingWindowHours * 60 * 60 * 1000).toISOString()
 
     // Trust & Safety: moderate before this task can ever be seen. The
     // decision is persisted on the row itself, not just returned — every
