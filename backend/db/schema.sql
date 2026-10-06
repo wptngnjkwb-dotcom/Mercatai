@@ -67,10 +67,16 @@ CREATE TABLE IF NOT EXISTS agents (
     -- Never a lookup/identity key (see the join-token comment above on
     -- organizations); stored normalized (trimmed, lowercased) by the route.
     owner_email                 TEXT,
-    -- One Stripe Connect account per agent — never shared, or one agent's
-    -- payouts could be misdirected to another's Stripe account.
+    -- Legacy Express account. Retained only for the three explicitly
+    -- designated October 2026 pilot tasks; every other task uses the
+    -- Standard/full-dashboard account below.
     stripe_account_id           TEXT UNIQUE,
     stripe_onboarding_completed BOOLEAN NOT NULL DEFAULT false,
+    -- Default account for all new marketplace payments. A Standard/full
+    -- Dashboard account makes Stripe the fee and loss collector; it must
+    -- never be silently substituted with the legacy Express account.
+    stripe_standard_account_id  TEXT UNIQUE,
+    stripe_standard_onboarding_completed BOOLEAN NOT NULL DEFAULT false,
     -- 'private' hides this agent from public discovery (directories, search,
     -- recommendations, Store) and profile/reputation/reviews/portfolio/work
     -- history, without affecting login, bidding, delivery, or payouts — see
@@ -137,7 +143,24 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- /tasks/[id]/bids, GET /activity) without deleting it, its bids, or
     -- its audit trail. See frontend/sql/15_task_archival.sql.
     archived_at              TIMESTAMPTZ,
-    archived_reason          TEXT
+    archived_reason          TEXT,
+    -- Public, immutable-by-clients disclosure of which Stripe controller
+    -- model an eventual payment requires. New tasks always default to the
+    -- Standard/agent-liability model; only three production pilot UUIDs are
+    -- migrated to the legacy Express/platform-liability model.
+    stripe_account_requirement TEXT NOT NULL DEFAULT 'standard_agent_liability'
+      CONSTRAINT tasks_stripe_account_requirement_check CHECK (stripe_account_requirement IN (
+        'standard_agent_liability',
+        'legacy_express_platform_liability'
+      ))
+      CONSTRAINT tasks_legacy_express_pilot_only_check CHECK (
+        stripe_account_requirement <> 'legacy_express_platform_liability'
+        OR id IN (
+          'e427ab6c-62fa-473f-8e84-93003b13a47f'::uuid,
+          '49a315bc-70ea-409d-b46d-d60ac369e23a'::uuid,
+          '2ee876c6-ebc7-489e-b138-306ecdb32eaf'::uuid
+        )
+      )
 );
 
 -- ============================================================
@@ -179,6 +202,12 @@ CREATE TABLE IF NOT EXISTS transactions (
     -- pre-migration PaymentIntents remain destination charges.
     stripe_charge_model      TEXT CHECK (stripe_charge_model IS NULL OR stripe_charge_model IN ('destination', 'direct')),
     stripe_connected_account_id TEXT,
+    stripe_account_requirement TEXT CHECK (
+      stripe_account_requirement IS NULL OR stripe_account_requirement IN (
+        'standard_agent_liability',
+        'legacy_express_platform_liability'
+      )
+    ),
     CONSTRAINT transactions_stripe_charge_context_check CHECK (
       stripe_charge_model IS NULL
       OR (stripe_charge_model = 'destination' AND stripe_connected_account_id IS NULL)

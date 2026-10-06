@@ -1,9 +1,14 @@
-import { getOnboardingCountry, onboardingCountryGroups, SUPPORTED_ONBOARDING_COUNTRIES, type OnboardingCountry } from '@/lib/onboardingCountries'
+import {
+  getOnboardingCountry,
+  isStripeAccountTypeAvailable,
+  onboardingCountryGroups,
+  SUPPORTED_ONBOARDING_COUNTRIES,
+  type OnboardingCountry,
+} from '@/lib/onboardingCountries'
 
 /**
  * Countries Mercatai actually offers today — distinct from the full
- * catalog in lib/onboardingCountries.ts, which only tracks what Stripe
- * *documents* as Express-supported. Being in that catalog does not mean
+ * combined catalog in lib/onboardingCountries.ts. Being in that catalog does not mean
  * this specific Stripe platform account has it turned on: Stripe Connect
  * onboarding options (Dashboard → Settings → Connect → Onboarding options →
  * Countries) are configured per platform account and can lag or
@@ -25,53 +30,65 @@ import { getOnboardingCountry, onboardingCountryGroups, SUPPORTED_ONBOARDING_COU
 // Hosted onboarding and live capability/payout checks still fail closed for
 // each individual account before any buyer payment can be created.
 const DEFAULT_ENABLED_COUNTRY_CODES = SUPPORTED_ONBOARDING_COUNTRIES
-  .filter(country => country.region === 'eu' || country.region === 'eea' || country.code === 'GB')
+  .filter(country => (
+    country.region === 'eu' || country.region === 'eea' || country.code === 'GB'
+  ) && isStripeAccountTypeAvailable(country.code, 'standard'))
   .map(country => country.code)
 
-function parseEnabledCountryCodes(): string[] {
+function parseEnabledCountryCodes(accountType: 'standard' | 'express' = 'standard'): string[] {
   const raw = process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
 
-  if (!raw || !raw.trim()) return [...DEFAULT_ENABLED_COUNTRY_CODES]
+  if (!raw || !raw.trim()) {
+    return accountType === 'standard'
+      ? [...DEFAULT_ENABLED_COUNTRY_CODES]
+      : SUPPORTED_ONBOARDING_COUNTRIES
+          .filter((country) => isStripeAccountTypeAvailable(country.code, 'express'))
+          .map((country) => country.code)
+  }
 
   const candidates = raw.split(',').map((c) => c.trim().toUpperCase()).filter(Boolean)
   const valid: string[] = []
   const invalid: string[] = []
   for (const code of candidates) {
-    if (getOnboardingCountry(code)) valid.push(code)
+    if (getOnboardingCountry(code) && isStripeAccountTypeAvailable(code, accountType)) valid.push(code)
     else invalid.push(code)
   }
   // ISO codes only — never log the raw env value itself, in case a
   // misconfigured deploy ever concatenates it with something sensitive.
   if (invalid.length > 0) {
-    console.error(`STRIPE_CONNECT_ENABLED_COUNTRIES has unknown country code(s), ignored: ${invalid.join(', ')}`)
+    console.error(`STRIPE_CONNECT_ENABLED_COUNTRIES has country code(s) unavailable for ${accountType}, ignored: ${invalid.join(', ')}`)
   }
 
   const unique = Array.from(new Set(valid))
   if (unique.length === 0) {
-    console.error('STRIPE_CONNECT_ENABLED_COUNTRIES resolved to zero valid countries — falling back to the EU/EEA + UK Direct Charges rollout set')
-    return [...DEFAULT_ENABLED_COUNTRY_CODES]
+    console.error(`STRIPE_CONNECT_ENABLED_COUNTRIES resolved to zero valid ${accountType} countries — using the safe built-in account-model catalog`)
+    return accountType === 'standard'
+      ? [...DEFAULT_ENABLED_COUNTRY_CODES]
+      : SUPPORTED_ONBOARDING_COUNTRIES
+          .filter((country) => isStripeAccountTypeAvailable(country.code, 'express'))
+          .map((country) => country.code)
   }
   return unique
 }
 
 /** ISO codes Mercatai currently permits *starting* onboarding for. Does not imply payouts have been end-to-end verified for any of them — see isMethodReady/computeStripeAccountReadiness for the live, per-account check that actually gates a payment. */
 export function getEnabledOnboardingCountryCodes(): string[] {
-  return parseEnabledCountryCodes()
+  return parseEnabledCountryCodes('standard')
 }
 
 export function getEnabledOnboardingCountries(): OnboardingCountry[] {
-  return parseEnabledCountryCodes()
+  return parseEnabledCountryCodes('standard')
     .map((code) => getOnboardingCountry(code))
     .filter((c): c is OnboardingCountry => !!c)
 }
 
-export function isOnboardingCountryEnabled(code: string): boolean {
-  return parseEnabledCountryCodes().includes(code.toUpperCase())
+export function isOnboardingCountryEnabled(code: string, accountType: 'standard' | 'express' = 'standard'): boolean {
+  return parseEnabledCountryCodes(accountType).includes(code.toUpperCase())
 }
 
 /** Same grouping shape as onboardingCountryGroups(), filtered to enabled countries and with any now-empty group dropped. */
 export function getEnabledOnboardingCountryGroups(): Array<{ label: string; countries: OnboardingCountry[] }> {
-  const enabled = new Set(parseEnabledCountryCodes())
+  const enabled = new Set(parseEnabledCountryCodes('standard'))
   return onboardingCountryGroups()
     .map((group) => ({ label: group.label, countries: group.countries.filter((c) => enabled.has(c.code)) }))
     .filter((group) => group.countries.length > 0)
@@ -139,9 +156,9 @@ export function isDirectChargeCountryEnabled(code: string): boolean {
  * this is the single-code equivalent, meant for a hot-path check that
  * doesn't need the full list materialized.
  */
-export function isPaymentCountryEnabled(code: string): boolean {
+export function isPaymentCountryEnabled(code: string, accountType: 'standard' | 'express' = 'standard'): boolean {
   const upper = code.toUpperCase()
-  return isOnboardingCountryEnabled(upper) && isDirectChargeCountryEnabled(upper)
+  return isOnboardingCountryEnabled(upper, accountType) && isDirectChargeCountryEnabled(upper)
 }
 
 /**
@@ -151,6 +168,6 @@ export function isPaymentCountryEnabled(code: string): boolean {
  * payment support. See docs/stripe-connect-country-support.md.
  */
 export function getPaymentEnabledCountryCodes(): string[] {
-  const onboardingEnabled = new Set(parseEnabledCountryCodes())
+  const onboardingEnabled = new Set(parseEnabledCountryCodes('standard'))
   return parseDirectChargeCountryCodes().filter((code) => onboardingEnabled.has(code))
 }

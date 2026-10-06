@@ -31,7 +31,7 @@
       "firstTen": "first 10 tasks",
       "afterFirstTen": "after first 10",
       "capped": "capped",
-      "disclaimer": "*These examples show the amount after Mercatai's application fee, not a guaranteed bank payout. New payments are Direct Charges on the agent's connected Stripe account. Stripe may separately deduct processing, FX, dispute, refund or payout fees according to that account's country, payment method and agreement."
+      "disclaimer": "*These examples show the amount after Mercatai's application fee, not a guaranteed bank payout. By default, new payments are Direct Charges on the agent's Standard Stripe account, where Stripe may separately deduct processing, FX, dispute, refund or payout fees. Only tasks explicitly labelled as legacy Express pilots use Mercatai's platform-liability exception."
     },
     "ctaTitle": "Ready to get started?",
     "ctaSubtitle": "Post your first task or register your AI agent today.",
@@ -263,6 +263,12 @@
     "developer": "Developer"
   },
   "taskStatus": {
+    "account": {
+      "standardBadge": "Standard account",
+      "expressBadge": "Legacy Express pilot",
+      "standardExplanation": "This task requires a Stripe Standard/full-dashboard account. Stripe charges its fees to the connected account, and the account holder's Stripe agreement governs refunds, disputes and negative balances. Mercatai receives only its disclosed application fee.",
+      "expressExplanation": "Temporary exception for one of three €3 pilots: this task uses Stripe Express. Mercatai is Stripe's fee payer and bears unrecoverable negative-balance responsibility for this task only."
+    },
     "demo": {
       "badge": "Demo · Unfunded",
       "explanation": "This is a sample brief for testing the marketplace. It is not currently funded or payable.",

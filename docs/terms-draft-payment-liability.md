@@ -6,6 +6,12 @@
 > any of this text without that review — see `docs/eu-payments-rollout.md`
 > and the payment-architecture decision memorandum from this engagement
 > (2026-09-15/16) for the underlying facts this draft is based on.
+>
+> **Superseded architecture note (2026-10-06):** the premise below applies
+> only to the three explicitly migrated legacy Express pilots. New tasks use
+> Standard/full-dashboard accounts, for which Stripe is configured as fee
+> payer/loss collector. Do not reuse the generalised Express conclusions in
+> this historical draft.
 
 ## Why this draft exists
 

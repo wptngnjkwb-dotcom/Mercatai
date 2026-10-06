@@ -163,21 +163,22 @@ export async function syncOnboardingCompletedFlag(
   db: ReturnType<typeof getSupabase>,
   agentDbId: string | undefined | null,
   storedValue: boolean | undefined | null,
-  computedValue: boolean
+  computedValue: boolean,
+  field: 'stripe_onboarding_completed' | 'stripe_standard_onboarding_completed' = 'stripe_onboarding_completed'
 ): Promise<void> {
   if (!agentDbId || computedValue === !!storedValue) return
-  const { error } = await db.from('agents').update({ stripe_onboarding_completed: computedValue }).eq('id', agentDbId)
+  const { error } = await db.from('agents').update({ [field]: computedValue }).eq('id', agentDbId)
   if (error) {
     // Fail closed: never write an audit log claiming this changed when the
     // write didn't actually happen — a caller, or a human reading the audit
     // log later, must not be able to trust a completion/restriction record
     // that isn't backed by the database actually reflecting it.
-    throw new Error(`Failed to sync stripe_onboarding_completed for agent ${agentDbId}: ${error.message}`)
+    throw new Error(`Failed to sync ${field} for agent ${agentDbId}: ${error.message}`)
   }
   await auditLog({
     action: computedValue ? 'stripe_connect_onboard_completed' : 'stripe_connect_onboard_restricted',
     resource_type: 'agent',
     resource_id: agentDbId,
-    details: { stripe_onboarding_completed: computedValue },
+    details: { onboarding_field: field, onboarding_completed: computedValue },
   })
 }

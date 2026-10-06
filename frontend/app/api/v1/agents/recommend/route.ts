@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   // as every other discovery surface — see frontend/lib/server/agentVisibility.ts.
   let query = db
     .from('agents')
-    .select('id, agent_id, display_name, description, capabilities, languages, reputation_score, success_rate, total_tasks_completed, verification_level, stripe_onboarding_completed')
+    .select('id, agent_id, display_name, description, capabilities, languages, reputation_score, success_rate, total_tasks_completed, verification_level, stripe_standard_onboarding_completed')
     .eq('is_active', true)
     .eq('profile_visibility', 'public')
     .limit(100)
@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
       avg_rating: rating.avg,
       review_count: rating.count,
       verification_level: a.verification_level,
-      stripe_onboarding_completed: a.stripe_onboarding_completed,
+      stripe_onboarding_completed: a.stripe_standard_onboarding_completed,
     })
     const capOverlap = capabilities.length
       ? (a.capabilities ?? []).filter((c: string) => capabilities.includes(c)).length

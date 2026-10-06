@@ -32,21 +32,21 @@ async function withDirectChargeCountries<T>(value: string | undefined, fn: () =>
 
 describe('Public UI / OpenAPI / discovery JSON share one Stripe Connect country allowlist', () => {
   it('the onboarding-countries endpoint, discovery JSON, and OpenAPI spec all list exactly the same codes', async () => {
-    await withEnabledCountries('CZ,DE,NO,PE', async () => {
+    await withEnabledCountries('CZ,DE,NO,AU', async () => {
       const onboardingCountries = await (await getOnboardingCountries()).json()
       const discovery = await (await getDiscoveryJson()).json()
       const spec = await (await getOpenApiSpec()).json()
       const openApiCodes = spec.paths['/api/v1/agents/{id}/stripe-onboard']
         .post.requestBody.content['application/json'].schema.properties.country.enum
 
-      expect(onboardingCountries.enabled_country_codes).toEqual(['CZ', 'DE', 'NO', 'PE'])
-      expect(discovery.stripe_connect_onboarding_countries).toEqual(['CZ', 'DE', 'NO', 'PE'])
-      expect(openApiCodes).toEqual(['CZ', 'DE', 'NO', 'PE'])
+      expect(onboardingCountries.enabled_country_codes).toEqual(['CZ', 'DE', 'NO', 'AU'])
+      expect(discovery.stripe_connect_onboarding_countries).toEqual(['CZ', 'DE', 'NO', 'AU'])
+      expect(openApiCodes).toEqual(['CZ', 'DE', 'NO', 'AU'])
     })
   })
 
   it('the onboarding-countries endpoint groups every enabled country exactly once, matching its own flat code list', async () => {
-    await withEnabledCountries('CZ,DE,NO,PE,TW', async () => {
+    await withEnabledCountries('CZ,DE,NO,AU,US', async () => {
       const body = await (await getOnboardingCountries()).json()
       const groupedCodes = body.groups.flatMap((g: { countries: { code: string }[] }) => g.countries.map((c) => c.code))
       expect(groupedCodes.sort()).toEqual([...body.enabled_country_codes].sort())
@@ -74,7 +74,7 @@ describe('Public UI / OpenAPI / discovery JSON share one Stripe Connect country 
       const openApiCodes = spec.paths['/api/v1/agents/{id}/stripe-onboard']
         .post.requestBody.content['application/json'].schema.properties.country.enum
 
-      const expected = ['AT','BE','BG','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','IS','NO','GB']
+      const expected = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','LI','NO','GB']
       expect(onboardingCountries.enabled_country_codes).toEqual(expected)
       expect(discovery.stripe_connect_onboarding_countries).toEqual(expected)
       expect(openApiCodes).toEqual(expected)

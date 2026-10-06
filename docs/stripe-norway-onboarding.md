@@ -1,8 +1,8 @@
 # Stripe Connect onboarding — Norway
 
-Updated 2026-09-22 after the Direct Charge decision.
+Updated 2026-10-06 after the Standard-account decision.
 
-Norway is in Mercatai's EU/EEA + UK rollout. Hosted Express onboarding does
+Norway is in Mercatai's EU/EEA + UK rollout. Hosted Standard onboarding does
 not preselect a legal form; the account holder confirms the appropriate
 `business_type` and completes Stripe verification.
 
@@ -13,8 +13,9 @@ only its application fee. Payment creation still requires live
 chosen method.
 
 Stripe lists Norway as a SEPA Direct Debit business location, so Mercatai
-requests both `card_payments` and `sepa_debit_payments`. The legacy
-`transfers` capability is not a Direct Charge prerequisite.
+requests both `card_payments` and `sepa_debit_payments`, but not `transfers`.
+Express onboarding is not an account-type option; it is retained only as a
+server-controlled exception for the three named October 2026 pilot tasks.
 
 Earlier DE/NO tests verified hosted onboarding, card and SEPA test payments,
 refund behavior and Stripe test-mode payout simulation under the former

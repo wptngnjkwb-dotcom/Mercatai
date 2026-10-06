@@ -20,6 +20,7 @@ export default function StripeOnboardPage() {
   const success = searchParams.get('success')
   const refresh = searchParams.get('refresh')
   const agentDbId = searchParams.get('agent_db_id')
+  const taskId = searchParams.get('task_id')
 
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [onboardingUrl, setOnboardingUrl] = useState('')
@@ -37,6 +38,7 @@ export default function StripeOnboardPage() {
   // GET /api/v1/onboarding-countries's own payment_enabled_country_codes.
   const [paymentEnabledCountryCodes, setPaymentEnabledCountryCodes] = useState<string[]>([])
   const [countriesLoaded, setCountriesLoaded] = useState(false)
+  const [accountRequirement, setAccountRequirement] = useState<'standard_agent_liability' | 'legacy_express_platform_liability'>('standard_agent_liability')
   // React Strict Mode double-invokes effects in development — without this
   // guard, landing on ?refresh=1 there would fire the link-refresh request
   // twice. Only one has any real effect (both would mint a valid link for
@@ -60,6 +62,23 @@ export default function StripeOnboardPage() {
   }, [])
 
   useEffect(() => {
+    if (!taskId) {
+      setAccountRequirement('standard_agent_liability')
+      return
+    }
+    fetch(`/api/v1/tasks/${encodeURIComponent(taskId)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.stripe_account_requirement === 'legacy_express_platform_liability') {
+          setAccountRequirement('legacy_express_platform_liability')
+        } else {
+          setAccountRequirement('standard_agent_liability')
+        }
+      })
+      .catch(() => setAccountRequirement('standard_agent_liability'))
+  }, [taskId])
+
+  useEffect(() => {
     if (success && agentDbId) {
       checkStatus()
     }
@@ -76,7 +95,8 @@ export default function StripeOnboardPage() {
     setStatus('loading')
     try {
       const token = localStorage.getItem('mercatai_token')
-      const res = await fetch(`/api/v1/agents/${agentDbId}/stripe-onboard`, {
+      const taskQuery = taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''
+      const res = await fetch(`/api/v1/agents/${agentDbId}/stripe-onboard${taskQuery}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       const data = await res.json()
@@ -103,7 +123,8 @@ export default function StripeOnboardPage() {
     try {
       const res = await fetch(`/api/v1/agents/${agentDbId}/stripe-onboard/refresh`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(taskId ? { task_id: taskId } : {}),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Could not refresh the onboarding link.')
@@ -130,7 +151,7 @@ export default function StripeOnboardPage() {
       const res = await fetch(`/api/v1/agents/${agentId}/stripe-onboard`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ country }),
+        body: JSON.stringify({ country, ...(taskId ? { task_id: taskId } : {}) }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
@@ -216,6 +237,16 @@ export default function StripeOnboardPage() {
         after approval; SEPA Direct Debit payments settle automatically. Mercatai is not a bank and does
         not itself hold your funds outside of Stripe&apos;s processing.
       </p>
+
+      {accountRequirement === 'legacy_express_platform_liability' ? (
+        <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <strong>Temporary legacy pilot:</strong> this specific €3 pilot uses a Stripe Express account. Mercatai is the Stripe fee payer and bears Stripe&apos;s unrecoverable negative-balance responsibility for this task only. This exception does not apply to any other task.
+        </div>
+      ) : (
+        <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <strong>Default for marketplace work:</strong> Stripe creates a Standard/full-dashboard connected account. Stripe charges its fees to that connected account, and the account holder&apos;s agreement with Stripe governs refunds, disputes and negative balances. Mercatai receives only its disclosed application fee.
+        </div>
+      )}
 
       <div className="card p-6 space-y-5">
         <div>

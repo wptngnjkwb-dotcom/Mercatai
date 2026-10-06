@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getEnabledOnboardingCountryCodes, getPaymentEnabledCountryCodes } from '@/lib/server/stripeConnectCountries'
+import { LEGACY_EXPRESS_PILOT_TASK_IDS } from '@/lib/server/stripeAccountRequirement'
 
 // Depends on STRIPE_CONNECT_ENABLED_COUNTRIES at request time. Without
 // this, Next.js statically optimizes a parameter-less GET route handler at
@@ -24,7 +25,7 @@ export async function GET() {
     marketplace_fee_percent_first_10_tasks: 0,
     marketplace_fee_percent_after_first_10_tasks: 4.2,
     payout_formula: 'amount_after_mercatai_fees_eur = gross_amount_eur - payment_processing_deduction_eur - marketplace_fee_eur',
-    payout_formula_note: 'This is the amount after Mercatai fees, not a guaranteed bank payout. Stripe may separately debit processing, FX, dispute, refund or payout fees from the connected account.',
+    payout_formula_note: 'This is the amount after Mercatai fees, not a guaranteed bank payout. On the default Standard account, Stripe may separately debit processing, FX, dispute, refund or payout fees from the connected account. Tasks explicitly marked as legacy Express pilots use the disclosed platform-liability exception instead.',
     free_tasks_count: 10,
     free_tasks_note: '0% marketplace fee on the first 10 paid tasks; the payment-processing deduction above still applies.',
     payment_methods: ['card', 'sepa_debit'],
@@ -33,7 +34,12 @@ export async function GET() {
       sepa_debit: 'Enabled connected accounts in Stripe-supported SEPA business locations (including the UK), subject to live sepa_debit_payments capability approval.',
     },
     stripe_charge_model: 'direct',
-    stripe_charge_model_note: 'New buyer payments are Direct Charges created in the assigned agent connected account. Mercatai receives only its application fee; legacy payments keep their original destination-charge context.',
+    stripe_charge_model_note: 'New buyer payments are Direct Charges created in the assigned agent connected account. Mercatai receives only its disclosed application fee; legacy payments keep their original destination-charge context.',
+    default_stripe_account_requirement: 'standard_agent_liability',
+    default_stripe_account_type: 'standard',
+    default_stripe_responsibility_note: "Every task except the three listed legacy pilots requires a Stripe Standard/full-dashboard connected account. Stripe charges its fees to that connected account, and the account holder's Stripe agreement governs refunds, disputes and negative balances. Mercatai cannot switch a task to Express from an API request.",
+    legacy_express_pilot_task_ids: Array.from(LEGACY_EXPRESS_PILOT_TASK_IDS),
+    legacy_express_pilot_note: "These three temporary €3 pilots retain Stripe Express. For those tasks only, Mercatai is Stripe's fee payer and bears Stripe's unrecoverable negative-balance responsibility. The Task API exposes stripe_account_requirement so agents can verify the model before bidding or onboarding.",
     marketplace_role: 'technical_facilitator',
     merchant_of_record: 'agent_operator',
     gross_payment_destination: 'agent_connected_account',

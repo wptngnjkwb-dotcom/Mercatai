@@ -31,7 +31,7 @@
       "firstTen": "erste 10 Aufgaben",
       "afterFirstTen": "nach den ersten 10",
       "capped": "gedeckelt",
-      "disclaimer": "*Diese Beispiele zeigen den Betrag nach Mercatai-Gebühren, nicht eine garantierte Bankauszahlung. Neue Zahlungen sind Direct Charges auf dem verbundenen Stripe-Konto des Agenten. Stripe kann abhängig von Land, Zahlungsmethode und Vertrag separat Gebühren für Verarbeitung, Währungsumrechnung, Streitfälle, Rückerstattungen oder Auszahlungen abziehen."
+      "disclaimer": "*Diese Beispiele zeigen den Betrag nach Mercatai-Gebühren, nicht eine garantierte Bankauszahlung. Neue Zahlungen sind standardmäßig Direct Charges auf dem Stripe-Standardkonto des Agenten; Stripe kann dort Gebühren für Verarbeitung, Währungsumrechnung, Streitfälle, Rückerstattungen oder Auszahlungen separat abziehen. Nur ausdrücklich gekennzeichnete Legacy-Express-Piloten nutzen die Ausnahme mit Mercatai-Haftung."
     },
     "ctaTitle": "Bereit loszulegen?",
     "ctaSubtitle": "Stellen Sie Ihre erste Aufgabe oder registrieren Sie Ihren KI-Agenten.",
@@ -263,6 +263,12 @@
     "developer": "Entwickler"
   },
   "taskStatus": {
+    "account": {
+      "standardBadge": "Standard-Konto",
+      "expressBadge": "Legacy-Express-Pilot",
+      "standardExplanation": "Diese Aufgabe erfordert ein Stripe-Standardkonto mit vollständigem Dashboard. Stripe belastet das verbundene Konto mit seinen Gebühren; Erstattungen, Streitfälle und negative Salden richten sich nach der Stripe-Vereinbarung des Kontoinhabers. Mercatai erhält nur die offengelegte Anwendungsgebühr.",
+      "expressExplanation": "Vorübergehende Ausnahme für einen von drei 3-€-Piloten: Diese Aufgabe verwendet Stripe Express. Nur für diese Aufgabe ist Mercatai Gebührenzahler bei Stripe und trägt gegenüber Stripe die Verantwortung für nicht einbringliche negative Salden."
+    },
     "demo": {
       "badge": "Demo · Nicht finanziert",
       "explanation": "Dies ist ein Beispielauftrag zum Testen des Marktplatzes. Er ist derzeit nicht finanziert und nicht auszahlbar.",

@@ -15,6 +15,7 @@ import { MAX_TRANSACTION_EUR } from '@/lib/server/settings'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
+import { STANDARD_AGENT_LIABILITY } from '@/lib/server/stripeAccountRequirement'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
     const wantsArchived = searchParams.get('archived') === 'true' && token?.tier === 'admin'
 
     // Exclude embedding (vector field) from public response
-    let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at,archived_at,archived_reason')
+    let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at,archived_at,archived_reason,stripe_account_requirement')
 
     if (wantsArchived) {
       // Admin-only lookup of archived tasks (demo cleanup and any future
@@ -227,6 +228,7 @@ export async function POST(request: NextRequest) {
         budget_max_eur,
         deadline_hours,
         status: 'open',
+        stripe_account_requirement: STANDARD_AGENT_LIABILITY,
         bidding_closes_at: biddingClosesAt,
         ...(apiClient ? { referred_by_client_id: apiClient.id } : {}),
         ...(buyer_email ? { buyer_email } : {}),
@@ -330,6 +332,7 @@ export async function POST(request: NextRequest) {
       status: task.status,
       bidding_closes_at: task.bidding_closes_at,
       created_at: task.created_at,
+      stripe_account_requirement: task.stripe_account_requirement,
       buyer_token: buyerToken,
       buyer_token_note: 'Save this token — required to approve or dispute this task',
       ...(moderation.decision === 'allow_with_warning' ? { moderation_warning: moderation.publicExplanation } : {}),

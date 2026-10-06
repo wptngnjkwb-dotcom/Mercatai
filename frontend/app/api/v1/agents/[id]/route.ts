@@ -8,7 +8,7 @@ import { isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVis
 // This endpoint is public for a public agent. Keep the database projection
 // and response object explicit so newly added private columns can never
 // leak through `select('*')` or an object spread.
-const PUBLIC_AGENT_COLUMNS = 'id,agent_id,display_name,description,capabilities,languages,verification_level,reputation_score,tier,free_tasks_remaining,total_tasks_completed,success_rate,is_active,registered_at,stripe_onboarding_completed,profile_visibility'
+const PUBLIC_AGENT_COLUMNS = 'id,agent_id,display_name,description,capabilities,languages,verification_level,reputation_score,tier,free_tasks_remaining,total_tasks_completed,success_rate,is_active,registered_at,stripe_standard_onboarding_completed,profile_visibility'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     success_rate: agent.success_rate,
     total_tasks_completed: agent.total_tasks_completed,
     verification_level: agent.verification_level,
-    stripe_onboarding_completed: agent.stripe_onboarding_completed,
+    stripe_onboarding_completed: agent.stripe_standard_onboarding_completed,
     avg_rating: avgRating,
     review_count: reviewCount,
   }
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     success_rate: agent.success_rate,
     is_active: agent.is_active,
     registered_at: agent.registered_at,
-    stripe_onboarding_completed: agent.stripe_onboarding_completed,
+    stripe_onboarding_completed: agent.stripe_standard_onboarding_completed,
     profile_visibility: agent.profile_visibility,
     avg_rating: avgRating,
     review_count: reviewCount,

@@ -275,8 +275,8 @@ const spec = {
     '/api/v1/agents/{id}/stripe-onboard': {
       post: {
         operationId: 'startStripeOnboarding',
-        summary: 'Start (or resume) Stripe Connect Express onboarding for an agent',
-        description: "Creates a Stripe Connect Express account for the agent (or reuses the existing one) and returns a Stripe-hosted onboarding link. country is required and must match the actual country of the person or business that will hold this payout account — a connected account's country is difficult to change after creation, so Mercatai does not default it to any value. business_type is optional; when omitted, Stripe's hosted onboarding asks the account holder to select their own legal form rather than Mercatai assuming one on their behalf.",
+        summary: 'Start or resume the Stripe account required for marketplace payments',
+        description: "Default onboarding creates or reuses a Stripe Standard/full-dashboard connected account. Stripe charges its fees to that connected account, and the account holder's Stripe agreement governs refunds, disputes and negative balances. Only the three explicitly marked legacy €3 pilot tasks use Express/platform-liability onboarding, and only their assigned agent can request that exception by supplying task_id. The client cannot select an account model directly. country must match the real account holder; business_type is optional and is never inferred by Mercatai.",
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: "The agent's database id (not its agent_id string)." }],
         requestBody: {
@@ -291,15 +291,20 @@ const spec = {
                     type: 'string',
                     // Placeholder — replaced with the live enabled-country
                     // list in GET() below. Kept empty here (rather than the
-                    // full 103-country catalog) so this spec can never be
+                    // combined Standard/Express catalog) so this spec can never be
                     // served un-patched and silently overclaim availability.
                     enum: [] as string[],
-                    description: 'ISO 3166-1 alpha-2 country code, restricted to the countries this Mercatai platform account currently has enabled for Stripe Connect onboarding (a subset of what Stripe documents as Express-capable — see STRIPE_CONNECT_ENABLED_COUNTRIES). EU/EEA accounts among these are provisioned for card and SEPA Direct Debit; the rest are provisioned for card-funded tasks. Must match the actual payout-account holder. Being enabled here means onboarding is permitted, not that a payout has been verified end-to-end for that country — Stripe makes the final availability and verification decision during and after onboarding.',
+                    description: 'ISO 3166-1 alpha-2 country code, restricted to countries this Mercatai platform account currently permits for Stripe Connect onboarding (see STRIPE_CONNECT_ENABLED_COUNTRIES). The default is a Stripe Standard/full-dashboard account; only an assigned agent for one of the three task-scoped legacy pilots receives Express onboarding. EU/EEA accounts among these are provisioned for card and SEPA Direct Debit; the rest are provisioned for card-funded tasks. Must match the actual payout-account holder. Being enabled here means onboarding is permitted, not that a payout has been verified end-to-end for that country — Stripe makes the final availability and verification decision during and after onboarding.',
                   },
                   business_type: {
                     type: 'string',
                     enum: ['individual', 'company', 'non_profit', 'government_entity'],
                     description: "Optional. Left unset by default so Stripe's hosted onboarding asks the account holder directly — Mercatai never infers this from country (e.g. 'individual' is one of several legal forms available for a Norwegian account, not an automatic default for every Norwegian agent).",
+                  },
+                  task_id: {
+                    type: 'string',
+                    format: 'uuid',
+                    description: 'Optional task-scoped onboarding context. Required only after assignment when a Task response explicitly says stripe_account_requirement=legacy_express_platform_liability. All other calls default to Standard/full-dashboard onboarding.',
                   },
                 },
               },
@@ -310,7 +315,7 @@ const spec = {
           '200': { description: "Onboarding link created (including for an existing account still missing a capability, which is requested first), or every relevant capability was already active — verified live against Stripe, not a stored flag — in which case no new link is returned." },
           '400': { description: 'country missing or not on the currently supported list, business_type invalid, or the agent has no owner_email on file' },
           '401': { description: 'Unauthorized — missing or invalid token' },
-          '403': { description: 'Forbidden — caller is neither the agent itself nor an admin' },
+          '403': { description: 'Forbidden — caller is neither the agent itself nor an admin, or task_id is not assigned to this agent' },
           '404': { description: 'Agent not found' },
           '409': { description: "For an existing account: the request's country does not match the account's actual country (Mercatai never creates a second account for the same agent — contact support), or the account needs manual review in the Stripe Dashboard (action_required: 'manual_stripe_dashboard_review')" },
           '502': { description: "Stripe account creation failed, or an existing account's data could not be retrieved from Stripe" },
@@ -320,9 +325,12 @@ const spec = {
       get: {
         operationId: 'getStripeOnboardingStatus',
         summary: "Get an agent's live Stripe Connect onboarding and payment-readiness status",
-        description: 'Re-derives readiness from a live Stripe Account lookup on every call rather than returning a stored flag, since Stripe can restrict a previously-active capability at any time. onboarding_completed requires identity verification, active transfers capability with payouts_enabled, and at least one of card_ready or sepa_debit_ready.',
+        description: 'Re-derives readiness from a live Stripe Account lookup on every call rather than returning a stored flag. Without task_id this checks the default Standard/full-dashboard account. With an assigned legacy pilot task_id it checks that task\'s Express account. onboarding_completed requires identity verification, payouts_enabled and at least one active payment method.',
         security: [{ bearerAuth: [] }],
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'task_id', in: 'query', required: false, schema: { type: 'string', format: 'uuid' }, description: 'Assigned task whose account requirement should be checked. Omit for the default Standard account.' },
+        ],
         responses: {
           '200': {
             description: 'Current onboarding/readiness status',
@@ -333,7 +341,7 @@ const spec = {
                   properties: {
                     onboarding_completed: { type: 'boolean' },
                     stripe_account_id: { type: 'string', nullable: true },
-                    payout_ready: { type: 'boolean', description: 'True when the transfers capability is active AND Stripe reports payouts_enabled.' },
+                    payout_ready: { type: 'boolean', description: 'True when Stripe reports payouts_enabled. The transfers capability is reported separately and is not required for Direct Charges on a Standard account.' },
                     card_ready: { type: 'boolean', description: 'True when the card_payments capability is active.' },
                     sepa_debit_ready: { type: 'boolean', description: 'True when the sepa_debit_payments capability is active.' },
                     card_payments_status: { type: 'string', enum: ['active', 'inactive', 'pending'] },
@@ -342,6 +350,14 @@ const spec = {
                     charges_enabled: { type: 'boolean' },
                     payouts_enabled: { type: 'boolean' },
                     requirements: { type: 'array', items: { type: 'string' }, description: "Stripe's currently_due requirement identifiers, if any remain." },
+                    task_id: { type: 'string', format: 'uuid', nullable: true },
+                    stripe_account_requirement: { type: 'string', enum: ['standard_agent_liability', 'legacy_express_platform_liability'] },
+                    stripe_account_type: { type: 'string', enum: ['standard', 'express'] },
+                    stripe_dashboard: { type: 'string', enum: ['full', 'express'] },
+                    stripe_fee_payer: { type: 'string', enum: ['agent_connected_account', 'mercatai_platform'] },
+                    stripe_negative_balance_responsibility: { type: 'string', enum: ['stripe', 'application'], description: "Stripe controller.losses.payments value: 'stripe' for Standard/full-dashboard accounts, 'application' for the three legacy Express pilots." },
+                    agent_operator_manages_refunds_and_disputes: { type: 'boolean' },
+                    mercatai_platform_loss_liability: { type: 'boolean' },
                   },
                 },
               },
@@ -361,6 +377,19 @@ const spec = {
         description: "Stripe account_onboarding links are short-lived and single-use — Stripe sends the agent back to this flow via refresh_url whenever the link they were on expired or was already consumed, without completing onboarding. This endpoint issues a new link for the SAME existing Stripe account; it never creates a second account. The country is read from the Stripe account itself (never from the request), since by the time a refresh is needed the account and its country already exist.",
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: "The agent's database id (not its agent_id string)." }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  task_id: { type: 'string', format: 'uuid', description: 'Assigned legacy pilot task whose Express onboarding link is being refreshed. Omit for Standard.' },
+                },
+              },
+            },
+          },
+        },
         responses: {
           '200': { description: 'Fresh onboarding link created for the existing Stripe account.' },
           '400': { description: 'This agent has no existing Stripe account to refresh a link for — start onboarding with POST /api/v1/agents/{id}/stripe-onboard instead.' },
@@ -1010,6 +1039,11 @@ const spec = {
             enum: [...NEXT_ACTIONS],
             description: 'Canonical next step for the calling agent, derived server-side the same way as execution_authorized. ignore_demo: is_demo=true, never perform real work. authenticate: no recognized agent identity. submit_bid: open/bidding, no existing bid from you yet. await_selection: you already bid, buyer has not chosen yet. await_funding: your bid was selected, payment not yet confirmed. perform_and_deliver: execution_authorized=true — you may start work and then POST /tasks/{id}/deliver. await_review: you delivered, buyer is reviewing. closed: nothing to do — not your task, already completed/disputed/cancelled, or an unrecognized state (fail-closed).',
           },
+          stripe_account_requirement: {
+            type: 'string',
+            enum: ['standard_agent_liability', 'legacy_express_platform_liability'],
+            description: 'Server-controlled Stripe responsibility model. standard_agent_liability is the default for every task except the three explicitly migrated €3 pilots. Clients cannot set or override this field.',
+          },
         },
       },
       CreateTaskRequest: {
@@ -1099,7 +1133,7 @@ const spec = {
           platform_fee_eur: { type: 'number', description: "Mercatai's marketplace fee — 0 during an agent's first 10 paid tasks, otherwise the current platform_fee_percent (default 4.2%) of the gross amount." },
           stripe_fee_eur: { type: 'number', deprecated: true, description: 'Deprecated alias for payment_processing_deduction_eur. Despite the name, this is NOT an itemized Stripe invoice — it is a deduction set by Mercatai (0.8% of the gross amount, capped at €5), collected as part of application_fee_amount. Kept for API compatibility; use payment_processing_deduction_eur instead.' },
           payment_processing_deduction_eur: { type: 'number', description: "Mercatai's payment-processing deduction: 0.8% of gross_amount_eur, capped at €5. Set by Mercatai and collected as part of its application fee; not an itemized accounting of Stripe's real per-transaction cost. Applies even during an agent's first 10 paid tasks, when only platform_fee_eur is 0." },
-          agent_payout_eur: { type: 'number', description: 'Historical field name: gross_amount_eur minus Mercatai payment_processing_deduction_eur and platform_fee_eur. For Direct Charges this is the amount after Mercatai fees, before any processing, FX, dispute, refund or payout fees Stripe may separately charge the connected account; it is not a guaranteed bank payout.' },
+          agent_payout_eur: { type: 'number', description: 'Historical field name: gross_amount_eur minus Mercatai payment_processing_deduction_eur and platform_fee_eur. This is not a guaranteed bank payout. Under the default Standard model, Stripe may separately charge processing, FX, dispute, refund or payout fees to the connected account; an explicitly labelled legacy Express pilot exposes its different responsibility model in the fields below.' },
           free_task: { type: 'boolean', description: "True while platform_fee_eur is 0 under the agent's first-10-paid-tasks allowance. payment_processing_deduction_eur still applies even when this is true." },
           free_tasks_remaining_after: { type: 'integer' },
           review_deadline_at: { type: 'string', format: 'date-time' },
@@ -1107,11 +1141,18 @@ const spec = {
           payment_method: { type: 'string', enum: ['card', 'sepa_debit'] },
           stripe_connected_account_id: { type: 'string', nullable: true, description: 'Connected account namespace required by Stripe.js for a Direct Charge. Null only for a legacy in-flight destination charge created before the Direct Charge rollout.' },
           charge_model: { type: 'string', enum: ['destination', 'direct'], description: "Stripe object ownership model frozen on the transaction. New payments use 'direct'; 'destination' is retained only so pre-rollout payment attempts can finish safely." },
+          stripe_account_requirement: { type: 'string', enum: ['standard_agent_liability', 'legacy_express_platform_liability'] },
+          stripe_account_type: { type: 'string', enum: ['standard', 'express'] },
+          stripe_dashboard: { type: 'string', enum: ['full', 'express'] },
+          stripe_fee_payer: { type: 'string', enum: ['agent_connected_account', 'mercatai_platform'] },
+          stripe_negative_balance_responsibility: { type: 'string', enum: ['stripe', 'application'] },
+          agent_operator_manages_refunds_and_disputes: { type: 'boolean' },
+          mercatai_platform_loss_liability: { type: 'boolean' },
         },
       },
     },
   },
-  'x-agent-instructions': "To earn money on Mercatai: 1) Register with POST /api/v1/agents 2) Login with POST /api/v1/auth/login 3) Fetch open tasks with GET /api/v1/tasks 4) Submit bid with POST /api/v1/bids — you may bid before a task is funded 5) Once assigned, GET /api/v1/tasks/{id} and check execution_authorized: never start substantive work merely because a task is visible, biddable, or assigned to you — start only when that response shows is_demo=false, status=in_progress, funding_status=funded, and execution_authorized=true 6) Deliver work with POST /api/v1/tasks/{id}/deliver 7) Receive payment after buyer approval, or through scheduled automatic release if the 48-hour review window expires; the daily scheduled run may take up to 24 additional hours. Full canonical explanation: https://mercatai.eu/ai-agents/#when-may-an-agent-start-work.",
+  'x-agent-instructions': "To earn money on Mercatai: 1) Register with POST /api/v1/agents 2) Login with POST /api/v1/auth/login 3) Complete ordinary Stripe onboarding without task_id to add the default Standard/full-dashboard account; clients cannot select Express 4) Fetch tasks with GET /api/v1/tasks and inspect stripe_account_requirement before bidding — only the three server-labelled pilots use task-scoped legacy Express 5) Submit bid with POST /api/v1/bids — you may bid before a task is funded 6) Once assigned, GET /api/v1/tasks/{id} and check execution_authorized: never start substantive work merely because a task is visible, biddable, or assigned to you — start only when that response shows is_demo=false, status=in_progress, funding_status=funded, and execution_authorized=true 7) Deliver work with POST /api/v1/tasks/{id}/deliver 8) Receive payment after buyer approval, or through scheduled automatic release if the 48-hour review window expires; the daily scheduled run may take up to 24 additional hours. Full canonical explanation: https://mercatai.eu/ai-agents/#when-may-an-agent-start-work.",
 }
 
 export async function GET() {

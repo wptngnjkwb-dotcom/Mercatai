@@ -24,7 +24,7 @@ afterEach(() => {
 })
 
 describe('getEnabledOnboardingCountryCodes', () => {
-  const euEeaUk = ['AT','BE','BG','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','IS','NO','GB']
+  const euEeaUk = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','LI','NO','GB']
 
   it('falls back to the EU/EEA + UK Direct Charges rollout when the env var is unset', () => {
     delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
@@ -37,8 +37,8 @@ describe('getEnabledOnboardingCountryCodes', () => {
   })
 
   it('parses a real comma-separated list, trimming and upper-casing each code', () => {
-    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = ' cz, de ,no,pe'
-    expect(getEnabledOnboardingCountryCodes()).toEqual(['CZ', 'DE', 'NO', 'PE'])
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = ' cz, de ,no,au'
+    expect(getEnabledOnboardingCountryCodes()).toEqual(['CZ', 'DE', 'NO', 'AU'])
   })
 
   it('drops an invalid/unknown code (not in the internal catalog) rather than throwing, and keeps the valid ones', () => {
@@ -56,8 +56,8 @@ describe('getEnabledOnboardingCountryCodes', () => {
     expect(getEnabledOnboardingCountryCodes()).toEqual(['CZ', 'DE'])
   })
 
-  it('rejects a country that is a real ISO code but outside Mercatai\'s Stripe Express catalog (e.g. Croatia — see onboardingCountries.ts)', () => {
-    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ,HR'
+  it('rejects a catalog country without Standard/full-dashboard availability (Iceland)', () => {
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ,IS'
     expect(getEnabledOnboardingCountryCodes()).toEqual(['CZ'])
   })
 
@@ -79,18 +79,19 @@ describe('getEnabledOnboardingCountryCodes', () => {
 
 describe('getEnabledOnboardingCountries / isOnboardingCountryEnabled', () => {
   it('resolves full country objects only for the enabled codes', () => {
-    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'DE,PE'
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'DE,AU'
     const countries = getEnabledOnboardingCountries()
-    expect(countries.map((c) => c.code)).toEqual(['DE', 'PE'])
+    expect(countries.map((c) => c.code)).toEqual(['DE', 'AU'])
     expect(countries.find((c) => c.code === 'DE')?.supportsSepaDebit).toBe(true)
-    expect(countries.find((c) => c.code === 'PE')?.supportsSepaDebit).toBe(false)
+    expect(countries.find((c) => c.code === 'AU')?.supportsSepaDebit).toBe(false)
   })
 
-  it('marks the UK as SEPA-capable while keeping Iceland card-only', () => {
-    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'GB,IS'
+  it('marks the UK and Liechtenstein as SEPA-capable and filters Iceland from Standard onboarding', () => {
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'GB,LI,IS'
     const countries = getEnabledOnboardingCountries()
     expect(countries.find((c) => c.code === 'GB')?.supportsSepaDebit).toBe(true)
-    expect(countries.find((c) => c.code === 'IS')?.supportsSepaDebit).toBe(false)
+    expect(countries.find((c) => c.code === 'LI')?.supportsSepaDebit).toBe(true)
+    expect(countries.find((c) => c.code === 'IS')).toBeUndefined()
   })
 
   it('isOnboardingCountryEnabled reflects the same allowlist, case-insensitively', () => {
@@ -103,18 +104,18 @@ describe('getEnabledOnboardingCountries / isOnboardingCountryEnabled', () => {
 
 describe('getEnabledOnboardingCountryGroups', () => {
   it('filters the standard EU/EEA/other grouping down to only enabled countries, dropping empty groups', () => {
-    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'DE,PE'
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'DE,AU'
     const groups = getEnabledOnboardingCountryGroups()
     const labels = groups.map((g) => g.label)
 
     expect(labels).toContain('European Union')
     expect(labels).toContain('Other Stripe Connect countries')
-    // No enabled EEA-outside-EU country in this set (NO/IS not included) —
+    // No enabled EEA-outside-EU country in this set (LI/NO not included) —
     // that whole group must be absent, not present-but-empty.
     expect(labels).not.toContain('EEA (outside the EU)')
 
     const flatCodes = groups.flatMap((g) => g.countries.map((c) => c.code))
-    expect(flatCodes.sort()).toEqual(['DE', 'PE'])
+    expect(flatCodes.sort()).toEqual(['AU', 'DE'])
   })
 })
 
@@ -155,9 +156,9 @@ describe('getDirectChargeEnabledCountryCodes / isDirectChargeCountryEnabled — 
     expect(getDirectChargeEnabledCountryCodes()).toEqual([])
   })
 
-  it('rejects a real ISO code outside the Stripe Express catalog (e.g. Croatia)', () => {
+  it('accepts Croatia in the raw Direct Charge allowlist; Standard onboarding is checked separately', () => {
     process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'FR,HR'
-    expect(getDirectChargeEnabledCountryCodes()).toEqual(['FR'])
+    expect(getDirectChargeEnabledCountryCodes()).toEqual(['FR', 'HR'])
   })
 
   it('de-duplicates and is case-insensitive', () => {

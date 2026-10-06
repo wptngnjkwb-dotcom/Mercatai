@@ -65,6 +65,18 @@ export default function TaskCard({ task, showBidButton }: Props) {
                 {t('demo.badge')}
               </span>
             )}
+            {!task.is_demo && (
+              <span className={clsx(
+                'badge text-xs',
+                task.stripe_account_requirement === 'legacy_express_platform_liability'
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-blue-50 text-blue-700'
+              )}>
+                {task.stripe_account_requirement === 'legacy_express_platform_liability'
+                  ? t('account.expressBadge')
+                  : t('account.standardBadge')}
+              </span>
+            )}
           </div>
           {isCompleted ? (
             <p className="font-semibold text-gray-700 line-clamp-2 leading-snug">{task.title}</p>

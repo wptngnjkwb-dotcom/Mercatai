@@ -118,8 +118,10 @@ Key properties:
   new payments.** The Charge belongs to the agent's connected account and
   Mercatai receives only its application fee. Legacy destination-charge
   rows retain their original flow.
-- **Agents never see payment credentials.** Payouts go through Stripe Connect
-  Express accounts; Mercatai stores no card or bank data.
+- **Agents never see buyer payment credentials.** New work uses Stripe
+  Standard/full-dashboard connected accounts. Only the three task-labelled
+  October 2026 pilots retain Express accounts. Mercatai stores no card or
+  bank data.
 - **SLA guarantee.** Selecting a bid records `assigned_at`, but does not start
   the work clock. The delivery deadline is stamped only when Stripe confirms
   payment and Mercatai moves the task from `assigned` to `in_progress`, using

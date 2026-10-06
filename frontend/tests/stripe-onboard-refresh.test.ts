@@ -10,9 +10,14 @@ const OWN_AGENT_ID = '77777777-7777-7777-7777-777777777777'
 const OTHER_AGENT_ID = '66666666-6666-6666-6666-666666666666'
 const EXISTING_ACCOUNT_ID = 'acct_existing_de'
 
-let agentRow: { id: string; stripe_account_id: string | null } = {
+let agentRow: {
+  id: string
+  stripe_account_id: string | null
+  stripe_standard_account_id: string | null
+} = {
   id: OWN_AGENT_ID,
-  stripe_account_id: EXISTING_ACCOUNT_ID,
+  stripe_account_id: null,
+  stripe_standard_account_id: EXISTING_ACCOUNT_ID,
 }
 
 vi.mock('@/lib/server/supabase', () => ({
@@ -41,6 +46,7 @@ vi.mock('@/lib/server/audit', () => ({ auditLog }))
 // is missing entirely.
 const accountsRetrieve = vi.fn(async () => ({
   id: EXISTING_ACCOUNT_ID,
+  type: 'standard',
   country: 'DE',
   charges_enabled: true,
   payouts_enabled: true,
@@ -71,7 +77,7 @@ function request(bearer?: string) {
 
 describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
   beforeEach(() => {
-    agentRow = { id: OWN_AGENT_ID, stripe_account_id: EXISTING_ACCOUNT_ID }
+    agentRow = { id: OWN_AGENT_ID, stripe_account_id: null, stripe_standard_account_id: EXISTING_ACCOUNT_ID }
     accountsRetrieve.mockClear()
     accountsCreate.mockClear()
     accountsUpdate.mockClear()
@@ -153,7 +159,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
   })
 
   it('returns 400 when the agent has no existing Stripe account to refresh a link for', async () => {
-    agentRow = { id: OWN_AGENT_ID, stripe_account_id: null }
+    agentRow = { id: OWN_AGENT_ID, stripe_account_id: null, stripe_standard_account_id: null }
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(request(token), { params: { id: OWN_AGENT_ID } })
     const body = await response.json()
@@ -168,6 +174,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
     it('requirements.past_due is a normal, self-service state — mints a fresh link for the SAME account, never a new one', async () => {
       accountsRetrieve.mockResolvedValueOnce({
         id: EXISTING_ACCOUNT_ID,
+        type: 'standard',
         country: 'DE',
         charges_enabled: false,
         payouts_enabled: false,
@@ -189,6 +196,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
     it('action_required.requested_capabilities requests the missing capabilities first, then still creates a fresh link', async () => {
       accountsRetrieve.mockResolvedValueOnce({
         id: EXISTING_ACCOUNT_ID,
+        type: 'standard',
         country: 'DE',
         charges_enabled: true,
         payouts_enabled: true,
@@ -209,26 +217,22 @@ describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
       expect(accountsCreate).not.toHaveBeenCalled()
     })
 
-    it.each(['FR', 'ES', 'GB'])('requests the missing transfers capability for an existing %s account that never had it — the exact "card_payments without transfers" failure Stripe rejects', async (country) => {
+    it.each(['FR', 'ES', 'GB'])('does not require transfers when refreshing an otherwise-ready %s Standard account', async (country) => {
       accountsRetrieve.mockResolvedValueOnce({
         id: EXISTING_ACCOUNT_ID,
+        type: 'standard',
         country,
         charges_enabled: true,
         payouts_enabled: true,
         details_submitted: true,
         requirements: { disabled_reason: 'action_required.requested_capabilities', currently_due: [] },
-        // card_payments and sepa_debit_payments are active, but transfers
-        // was never requested — the accounts.create()-time bug this fix
-        // addresses, surfacing here on the remediation path instead.
         capabilities: { card_payments: 'active', sepa_debit_payments: 'active' },
       } as any)
       const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
       const response = await POST(request(token), { params: { id: OWN_AGENT_ID } })
       const body = await response.json()
 
-      expect(accountsUpdate).toHaveBeenCalledWith(EXISTING_ACCOUNT_ID, {
-        capabilities: { transfers: { requested: true } },
-      })
+      expect(accountsUpdate).not.toHaveBeenCalled()
       expect(response.status).toBe(200)
       expect(body.onboarding_url).toBeTruthy()
       expect(accountsCreate).not.toHaveBeenCalled()
@@ -237,6 +241,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
     it('requirements.pending_verification waits for Stripe — 409, no new link, no claim that the user must do anything', async () => {
       accountsRetrieve.mockResolvedValueOnce({
         id: EXISTING_ACCOUNT_ID,
+        type: 'standard',
         country: 'DE',
         requirements: { disabled_reason: 'requirements.pending_verification', currently_due: [] },
         capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
@@ -255,6 +260,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
     it('under_review waits for Stripe — 409, no new link', async () => {
       accountsRetrieve.mockResolvedValueOnce({
         id: EXISTING_ACCOUNT_ID,
+        type: 'standard',
         country: 'DE',
         requirements: { disabled_reason: 'under_review', currently_due: [] },
         capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
@@ -271,6 +277,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
     it('rejected.fraud is genuinely blocked — 409 manual_stripe_dashboard_review, no new link', async () => {
       accountsRetrieve.mockResolvedValueOnce({
         id: EXISTING_ACCOUNT_ID,
+        type: 'standard',
         country: 'DE',
         requirements: { disabled_reason: 'rejected.fraud', currently_due: [] },
         capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
@@ -287,6 +294,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
     it('listed is genuinely blocked — 409 manual_stripe_dashboard_review, no new link', async () => {
       accountsRetrieve.mockResolvedValueOnce({
         id: EXISTING_ACCOUNT_ID,
+        type: 'standard',
         country: 'DE',
         requirements: { disabled_reason: 'listed', currently_due: [] },
         capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },
@@ -303,6 +311,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
     it('an unrecognized disabled_reason fails toward manual review rather than silently proceeding', async () => {
       accountsRetrieve.mockResolvedValueOnce({
         id: EXISTING_ACCOUNT_ID,
+        type: 'standard',
         country: 'DE',
         requirements: { disabled_reason: 'some_future_stripe_value_not_yet_handled', currently_due: [] },
         capabilities: { card_payments: 'active', sepa_debit_payments: 'active', transfers: 'active' },

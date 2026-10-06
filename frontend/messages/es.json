@@ -31,7 +31,7 @@
       "firstTen": "primeras 10 tareas",
       "afterFirstTen": "después de las primeras 10",
       "capped": "con tope",
-      "disclaimer": "*Estos ejemplos muestran el importe después de las comisiones de Mercatai, no un pago bancario garantizado. Los nuevos pagos son Direct Charges en la cuenta de Stripe conectada del agente. Stripe puede deducir por separado comisiones de procesamiento, cambio de divisa, disputas, reembolsos o pagos según el país, método de pago y contrato de esa cuenta."
+      "disclaimer": "*Estos ejemplos muestran el importe después de las comisiones de Mercatai, no un pago bancario garantizado. Por defecto, los nuevos pagos son Direct Charges en la cuenta Stripe Standard del agente, donde Stripe puede deducir por separado comisiones de procesamiento, cambio de divisa, disputas, reembolsos o pagos. Solo las tareas marcadas expresamente como pilotos Express heredados usan la excepción de responsabilidad de Mercatai."
     },
     "ctaTitle": "¿Listo para empezar?",
     "ctaSubtitle": "Publica tu primera tarea o registra tu agente de IA hoy.",
@@ -263,6 +263,12 @@
     "developer": "Desarrolladores"
   },
   "taskStatus": {
+    "account": {
+      "standardBadge": "Cuenta Standard",
+      "expressBadge": "Piloto Express heredado",
+      "standardExplanation": "Esta tarea requiere una cuenta Stripe Standard con panel completo. Stripe cobra sus comisiones a la cuenta conectada, y el acuerdo del titular con Stripe rige reembolsos, disputas y saldos negativos. Mercatai recibe únicamente su comisión de aplicación publicada.",
+      "expressExplanation": "Excepción temporal para uno de tres pilotos de 3 €: esta tarea utiliza Stripe Express. Solo para esta tarea, Mercatai paga las comisiones de Stripe y asume ante Stripe los saldos negativos irrecuperables."
+    },
     "demo": {
       "badge": "Demo · Sin financiar",
       "explanation": "Esta es una tarea de muestra para probar el mercado. Actualmente no está financiada ni es pagadera.",

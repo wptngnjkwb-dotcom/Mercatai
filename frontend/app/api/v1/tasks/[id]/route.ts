@@ -11,7 +11,7 @@ import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds 
 // selected only to derive is_demo below (see attachPublicTaskFields) — it
 // must never itself appear in the returned JSON, same treatment as
 // moderation_status just above it.
-const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status,posted_by_org_id,archived_at,archived_reason'
+const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status,posted_by_org_id,archived_at,archived_reason,stripe_account_requirement'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
@@ -81,6 +81,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       funding_status,
       execution_authorized: decision.execution_authorized,
       next_action: decision.next_action,
+      stripe_account_requirement: task.stripe_account_requirement,
       // Only ever non-null here for an admin viewing an archived task —
       // anyone else who could see this field at all would already have
       // 404'd above.

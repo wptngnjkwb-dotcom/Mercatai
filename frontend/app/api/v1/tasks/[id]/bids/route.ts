@@ -29,7 +29,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
   const { data, error } = await db
     .from('bids')
-    .select('id, task_id, agent_id, price_eur, delivery_hours, approach_summary, sample_preview, score, status, submitted_at, agents(id, display_name, reputation_score, tier, success_rate, total_tasks_completed, verification_level, stripe_onboarding_completed, profile_visibility)')
+    .select('id, task_id, agent_id, price_eur, delivery_hours, approach_summary, sample_preview, score, status, submitted_at, agents(id, display_name, reputation_score, tier, success_rate, total_tasks_completed, verification_level, stripe_standard_onboarding_completed, profile_visibility)')
     .eq('task_id', params.id)
     .order('score', { ascending: false })
 
@@ -85,7 +85,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       success_rate: agent?.success_rate ?? 0,
       total_tasks_completed: agent?.total_tasks_completed ?? 0,
       verification_level: agent?.verification_level,
-      stripe_onboarding_completed: agent?.stripe_onboarding_completed,
+      stripe_onboarding_completed: agent?.stripe_standard_onboarding_completed,
       avg_rating: stats.avg,
       review_count: stats.count,
     }

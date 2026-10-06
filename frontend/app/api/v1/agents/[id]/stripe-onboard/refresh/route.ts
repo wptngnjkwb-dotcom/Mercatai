@@ -8,6 +8,12 @@ import {
   classifyDisabledReason,
   disabledReasonBlockingResponse,
 } from '@/lib/server/stripeAccountReadiness'
+import {
+  publicPaymentResponsibility,
+  resolveOnboardingRequirement,
+  stripeAccountFields,
+  stripeAccountMatchesRequirement,
+} from '@/lib/server/stripeAccountRequirement'
 
 // POST /api/v1/agents/:id/stripe-onboard/refresh
 //
@@ -38,17 +44,29 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 })
   }
 
+  const body = await request.json().catch(() => ({}))
+  const bodyTaskId = typeof body.task_id === 'string' && body.task_id.trim() ? body.task_id.trim() : null
+  const taskId = bodyTaskId ?? request.nextUrl.searchParams.get('task_id')
   const db = getSupabase()
   const { data: agent } = await db
     .from('agents')
-    .select('id, stripe_account_id')
+    .select('id, stripe_account_id, stripe_standard_account_id')
     .eq('id', params.id)
     .single()
 
   if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
-  if (!agent.stripe_account_id) {
+  const resolved = await resolveOnboardingRequirement(db, taskId, agent.id)
+  if ('error' in resolved) {
+    return NextResponse.json({ error: resolved.error }, { status: resolved.status })
+  }
+  const accountRequirement = resolved.requirement
+  const accountFields = stripeAccountFields(accountRequirement)
+  const responsibility = publicPaymentResponsibility(accountRequirement)
+  const stripeAccountId = agent[accountFields.accountId]
+  if (!stripeAccountId) {
     return NextResponse.json({
       error: 'This agent has not started Stripe onboarding yet — there is no existing account to refresh a link for.',
+      ...responsibility,
     }, { status: 400 })
   }
 
@@ -57,10 +75,17 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
   let account
   try {
-    account = await stripe.accounts.retrieve(agent.stripe_account_id)
+    account = await stripe.accounts.retrieve(stripeAccountId)
   } catch (stripeErr) {
     const message = stripeErr instanceof Error ? stripeErr.message : 'Could not retrieve the existing Stripe account'
-    return NextResponse.json({ error: message, stripe_account_id: agent.stripe_account_id }, { status: 502 })
+    return NextResponse.json({ error: message, stripe_account_id: stripeAccountId }, { status: 502 })
+  }
+  if (!stripeAccountMatchesRequirement(account, accountRequirement)) {
+    return NextResponse.json({
+      error: `The stored Stripe account does not match the required ${accountFields.stripeType} responsibility model.`,
+      stripe_account_id: stripeAccountId,
+      ...responsibility,
+    }, { status: 409 })
   }
 
   // Some disabled_reason values (requirements.past_due,
@@ -69,7 +94,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   // Stripe-side-pending states short-circuit here. Same classification the
   // parent route uses — see frontend/lib/server/stripeAccountReadiness.ts.
   const disabledClassification = classifyDisabledReason(account.requirements?.disabled_reason)
-  const blocking = disabledReasonBlockingResponse(disabledClassification, agent.stripe_account_id)
+  const blocking = disabledReasonBlockingResponse(disabledClassification, stripeAccountId)
   if (blocking) {
     return NextResponse.json(blocking.body, { status: blocking.status })
   }
@@ -84,7 +109,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   // mirrors the parent route's own unconditional check, just without that
   // route's separate "already completed" short-circuit (a refresh is
   // always trying to move an incomplete account forward).
-  const requiredCapabilities = countryConfig ? requiredCapabilitiesForCountry(countryConfig.code) : null
+  const requiredCapabilities = countryConfig ? requiredCapabilitiesForCountry(countryConfig.code, accountFields.stripeType) : null
   if (requiredCapabilities) {
     const readiness = computeStripeAccountReadiness(account)
     const missingCapabilities: Record<string, { requested: true }> = {}
@@ -101,12 +126,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
     if (Object.keys(missingCapabilities).length > 0) {
       try {
-        await stripe.accounts.update(agent.stripe_account_id, { capabilities: missingCapabilities })
+        await stripe.accounts.update(stripeAccountId, { capabilities: missingCapabilities })
       } catch (stripeErr) {
         const message = stripeErr instanceof Error ? stripeErr.message : 'Could not request the missing capabilities'
         return NextResponse.json({
           error: `Could not request this account's missing capabilities: ${message}. This may need manual review in the Stripe Dashboard.`,
-          stripe_account_id: agent.stripe_account_id,
+          stripe_account_id: stripeAccountId,
           action_required: 'manual_stripe_dashboard_review',
         }, { status: 409 })
       }
@@ -114,6 +139,16 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   }
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://mercatai.eu'
+  const refreshUrl = new URL('/agent/stripe-onboard', baseUrl)
+  refreshUrl.searchParams.set('refresh', '1')
+  refreshUrl.searchParams.set('agent_db_id', params.id)
+  const returnUrl = new URL('/agent/stripe-onboard', baseUrl)
+  returnUrl.searchParams.set('success', '1')
+  returnUrl.searchParams.set('agent_db_id', params.id)
+  if (resolved.taskId) {
+    refreshUrl.searchParams.set('task_id', resolved.taskId)
+    returnUrl.searchParams.set('task_id', resolved.taskId)
+  }
 
   // Same account every time — this call can never create a new one. Stripe
   // account_onboarding links are Stripe-hosted end to end; nothing here
@@ -121,9 +156,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   let accountLink
   try {
     accountLink = await stripe.accountLinks.create({
-      account: agent.stripe_account_id,
-      refresh_url: `${baseUrl}/agent/stripe-onboard?refresh=1&agent_db_id=${params.id}`,
-      return_url: `${baseUrl}/agent/stripe-onboard?success=1&agent_db_id=${params.id}`,
+      account: stripeAccountId,
+      refresh_url: refreshUrl.toString(),
+      return_url: returnUrl.toString(),
       type: 'account_onboarding',
     })
   } catch (linkErr) {
@@ -137,14 +172,16 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     action: 'stripe_connect_onboard_link_refreshed',
     resource_type: 'agent',
     resource_id: params.id,
-    details: { stripe_account_id: agent.stripe_account_id },
+    details: { stripe_account_id: stripeAccountId, account_requirement: accountRequirement, task_id: resolved.taskId },
   })
 
   return NextResponse.json({
     onboarding_url: accountLink.url,
-    stripe_account_id: agent.stripe_account_id,
+    stripe_account_id: stripeAccountId,
     country,
     ...(countryConfig ? { supported_payment_methods: countryConfig.supportsSepaDebit ? ['card', 'sepa_debit'] : ['card'] } : {}),
     expires_at: new Date(accountLink.expires_at * 1000).toISOString(),
+    task_id: resolved.taskId,
+    ...responsibility,
   })
 }

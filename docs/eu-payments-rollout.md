@@ -1,10 +1,10 @@
 # EU/EEA + UK payments rollout — Direct Charges
 
-Last reviewed: 2026-09-22.
+Last reviewed: 2026-10-06.
 
 ## Decision
 
-New Mercatai payments use Stripe Connect **Direct Charges**. The
+New Mercatai payments use Stripe Connect **Direct Charges on Standard/full-dashboard connected accounts**. The
 PaymentIntent and Charge are created in the assigned agent's connected
 account (`Stripe-Account: acct_...`); Mercatai receives only
 `application_fee_amount`. Existing destination-charge payments keep their
@@ -19,7 +19,10 @@ which Stripe does not support that flow.
 
 Stripe may debit its own processing, FX, dispute, refund and payout fees from
 the connected account, depending on the account's controller settings and
-agreement. Mercatai's `agent_payout_eur` is therefore a historical API name:
+agreement. Under Stripe's Standard-account responsibility model, Stripe is
+the fee payer/loss collector and the account holder manages disputes,
+refunds and any account restrictions in its own Dashboard. Mercatai's
+`agent_payout_eur` is therefore a historical API name:
 it is the amount after Mercatai fees, not a guaranteed bank payout.
 
 Primary Stripe references:
@@ -30,17 +33,19 @@ Primary Stripe references:
 
 ## Public rollout set
 
-Mercatai's default rollout is every catalog country in the EU/EEA for which
-Stripe Express onboarding is supported, plus the UK:
+Mercatai's rollout allowlist covers the following EU/EEA countries plus the
+UK. Listing controls where Standard onboarding may start; Stripe still makes
+the final account-availability decision:
 
 ```text
-AT,BE,BG,CY,CZ,DK,EE,FI,FR,DE,GR,HU,IE,IT,LV,LT,LU,MT,NL,PL,PT,RO,SK,SI,ES,SE,IS,NO,GB
+AT,BE,BG,HR,CY,CZ,DK,EE,FI,FR,DE,GR,HU,IE,IT,LV,LT,LU,MT,NL,PL,PT,RO,SK,SI,ES,SE,LI,NO,GB
 ```
 
-- Croatia and Liechtenstein remain excluded because they are not in the
-  application's verified Stripe Express catalog. Re-check Stripe before
-  adding either.
-- Iceland is card-only in the current catalog.
+- All 27 EU member states are included. Croatia and Liechtenstein are
+  Standard/full-dashboard markets even though the legacy Express catalog
+  excluded them.
+- Iceland remains available only to the historical Express account model;
+  it is not offered for new Standard onboarding.
 - The UK supports card and SEPA Direct Debit. Stripe's SEPA documentation
   lists GB as a supported business location.
 - Listing a country permits onboarding; it is not a promise that Stripe will
@@ -60,7 +65,8 @@ Required order:
 3. Verify new columns, both RPCs and service-role-only ACLs.
 4. Update the Connect event destination to include Direct Charge payment and
    dispute events (see below).
-5. Set the production country allowlist to the exact rollout set above.
+5. Set both production country allowlists to the exact Standard rollout set
+   above (add HR/LI and remove IS from the old Express-derived value).
 6. Deploy the code.
 7. Run read-only smoke checks, then isolated test-mode payments.
 
@@ -98,9 +104,12 @@ rejects a mismatch with the frozen transaction context.
 
 ## Capability and payment gates
 
-Direct Charges request `card_payments`, plus `sepa_debit_payments` where the
-country is in Stripe's SEPA business-location list. The old `transfers`
-capability is not a Direct Charge prerequisite.
+Standard accounts request `card_payments`, plus `sepa_debit_payments` where
+the country is in Stripe's SEPA business-location list. They do not request
+`transfers`. The only Express onboarding still reachable is task-scoped to
+the three October 2026 €3 pilot task IDs listed in migration 24; those
+accounts request `transfers` because Stripe pairs it with `card_payments` on
+Express. A client cannot select Express directly.
 
 Before every buyer payment, Mercatai re-fetches the connected account and
 requires:
@@ -117,7 +126,7 @@ contains the country.
 
 For FR, ES and GB first, then at least one country from each remaining group:
 
-1. Complete hosted Express onboarding in Stripe test mode.
+1. Complete hosted Standard/full-dashboard onboarding in Stripe test mode.
 2. Confirm account country and payment/payout readiness from Stripe.
 3. Card: authorize → task starts → deliver → approve → capture → refund.
 4. SEPA where enabled: processing → succeeded webhook → task starts;

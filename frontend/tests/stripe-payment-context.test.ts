@@ -35,24 +35,25 @@ describe('Stripe payment object namespace', () => {
 
   it('binds the account namespace through the database RPC and verifies the returned values', async () => {
     const rpc = vi.fn(async () => ({
-      data: [{ stripe_charge_model: 'direct', stripe_connected_account_id: 'acct_agent_1' }], error: null,
+      data: [{ stripe_charge_model: 'direct', stripe_connected_account_id: 'acct_agent_1', stripe_account_requirement: 'standard_agent_liability' }], error: null,
     }))
-    const result = await bindDirectChargeContext({ rpc } as any, 'tx-1', 'acct_agent_1')
+    const result = await bindDirectChargeContext({ rpc } as any, 'tx-1', 'acct_agent_1', 'standard_agent_liability')
     expect(result).toEqual({ chargeModel: 'direct', connectedAccountId: 'acct_agent_1' })
-    expect(rpc).toHaveBeenCalledWith('bind_payment_charge_context', {
+    expect(rpc).toHaveBeenCalledWith('bind_payment_charge_context_v2', {
       p_transaction_id: 'tx-1', p_charge_model: 'direct', p_stripe_connected_account_id: 'acct_agent_1',
+      p_stripe_account_requirement: 'standard_agent_liability',
     })
   })
 
   it('fails closed when the context RPC errors or confirms a different account', async () => {
     await expect(bindDirectChargeContext({
       rpc: vi.fn(async () => ({ data: null, error: { message: 'database unavailable' } })),
-    } as any, 'tx-1', 'acct_agent_1')).rejects.toThrow(/database unavailable/i)
+    } as any, 'tx-1', 'acct_agent_1', 'standard_agent_liability')).rejects.toThrow(/database unavailable/i)
 
     await expect(bindDirectChargeContext({
       rpc: vi.fn(async () => ({
-        data: [{ stripe_charge_model: 'direct', stripe_connected_account_id: 'acct_other' }], error: null,
+        data: [{ stripe_charge_model: 'direct', stripe_connected_account_id: 'acct_other', stripe_account_requirement: 'standard_agent_liability' }], error: null,
       })),
-    } as any, 'tx-1', 'acct_agent_1')).rejects.toThrow(/not confirmed/i)
+    } as any, 'tx-1', 'acct_agent_1', 'standard_agent_liability')).rejects.toThrow(/not confirmed/i)
   })
 })

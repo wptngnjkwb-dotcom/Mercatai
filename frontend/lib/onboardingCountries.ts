@@ -1,9 +1,10 @@
 /**
- * Countries in which Stripe documents Express connected-account
- * availability. This is intentionally the Connect/Express list, not
- * ordinary Stripe merchant availability: Mercatai needs a connected payout
- * account. Cross-checked against two separate, independent Stripe sources
- * on 2026-09-09:
+ * Countries in which Stripe documents at least one connected-account model.
+ * Standard/full-dashboard and legacy Express availability are deliberately
+ * tracked separately: Croatia and Liechtenstein support ordinary Stripe
+ * accounts but not the old Express catalog, while Iceland is the reverse.
+ * Cross-checked against separate Stripe sources on 2026-10-06:
+ *   - Standard/full-dashboard markets: https://stripe.com/global
  *   - Express connected-account availability: https://docs.stripe.com/connect/accounts
  *   - SEPA Direct Debit business-location availability: https://docs.stripe.com/payments/sepa-debit?pm-info=business-locations
  * The two lists disagree at the edges — see the per-country notes below —
@@ -31,7 +32,7 @@ export interface OnboardingCountry {
 export interface RequiredStripeCapabilities {
   card_payments: { requested: true }
   sepa_debit_payments?: { requested: true }
-  // Stripe rejects `card_payments` on an Express account unless `transfers`
+  // Stripe rejects `card_payments` on a legacy Express account unless `transfers`
   // is requested alongside it — a platform-level pairing rule enforced at
   // account-creation time, unrelated to which charge architecture actually
   // moves the money. Direct Charges settle on the connected account itself
@@ -39,17 +40,16 @@ export interface RequiredStripeCapabilities {
   // which deliberately excludes it from payoutReady/onboardingComplete) —
   // but it must still be REQUESTED, every time card_payments is, or Stripe
   // refuses to create or update the account at all.
-  transfers: { requested: true }
+  transfers?: { requested: true }
 }
 
 const EU_COUNTRIES: readonly OnboardingCountry[] = [
   { code: 'AT', label: 'Austria', region: 'eu', supportsSepaDebit: true },
   { code: 'BE', label: 'Belgium', region: 'eu', supportsSepaDebit: true },
   { code: 'BG', label: 'Bulgaria', region: 'eu', supportsSepaDebit: true },
-  // Croatia is an EU member state but is NOT in Stripe's documented Express
-  // connected-account availability list (checked 2026-09-09) — creating an
-  // Express account with country: 'HR' fails at Stripe's API. Do not add it
-  // back without first confirming Stripe has added Express support for HR.
+  // Standard/full-dashboard is available in Croatia. Legacy Express is not;
+  // isStripeAccountTypeAvailable() preserves that distinction.
+  { code: 'HR', label: 'Croatia', region: 'eu', supportsSepaDebit: true },
   { code: 'CY', label: 'Cyprus', region: 'eu', supportsSepaDebit: true },
   { code: 'CZ', label: 'Czech Republic', region: 'eu', supportsSepaDebit: true },
   { code: 'DK', label: 'Denmark', region: 'eu', supportsSepaDebit: true },
@@ -80,9 +80,10 @@ const EEA_COUNTRIES: readonly OnboardingCountry[] = [
   // Stripe's SEPA Direct Debit business-location list — an Icelandic
   // account can onboard, but only for card payments.
   { code: 'IS', label: 'Iceland', region: 'eea', supportsSepaDebit: false },
-  // Liechtenstein, unlike Iceland, has no Express connected-account
-  // availability at all (checked 2026-09-09) — same exclusion reason as
-  // Croatia above.
+  // Standard/full-dashboard is available in Liechtenstein. Legacy Express
+  // is not. Iceland has the inverse availability and therefore remains in
+  // the combined catalog but is filtered from ordinary Standard onboarding.
+  { code: 'LI', label: 'Liechtenstein', region: 'eea', supportsSepaDebit: true },
   { code: 'NO', label: 'Norway', region: 'eea', supportsSepaDebit: true },
 ]
 
@@ -176,6 +177,26 @@ export const SUPPORTED_ONBOARDING_COUNTRIES: readonly OnboardingCountry[] = [
 
 export const SUPPORTED_ONBOARDING_COUNTRY_CODES = SUPPORTED_ONBOARDING_COUNTRIES.map((country) => country.code)
 
+// Standard/full-dashboard markets represented in this catalog. Public
+// rollout remains narrower (EU + supported non-EU EEA + UK) unless an
+// operator explicitly enables another reviewed code in the server env.
+// Iceland and Peru are absent from Stripe's ordinary global-account list.
+export const STANDARD_ACCOUNT_COUNTRY_CODES = new Set([
+  'AE', 'AT', 'AU', 'BE', 'BG', 'CA', 'CH', 'CI', 'CY', 'CZ', 'DE', 'DK',
+  'EE', 'ES', 'FI', 'FR', 'GB', 'GH', 'GR', 'HK', 'HR', 'HU', 'IE', 'IT',
+  'JP', 'KE', 'LI', 'LT', 'LU', 'LV', 'MT', 'MX', 'NG', 'NL', 'NO', 'NZ',
+  'PL', 'PT', 'RO', 'SE', 'SG', 'SI', 'SK', 'TH', 'US', 'ZA',
+])
+
+// Exact historical Express catalog used by the three legacy €3 pilots. HR
+// and LI are intentionally absent; IS is intentionally present.
+export const EXPRESS_ACCOUNT_COUNTRY_CODES = new Set(`
+  AE AG AL AM AR AT AU BA BE BG BH BJ BN BO BS BW CA CH CI CL CO CR CY CZ DE DK
+  DO EC EE EG ES ET FI FR GB GH GM GR GT GY HK HU IE IL IS IT JM JO JP KE KH KR
+  KW LC LK LT LU LV MA MC MD MG MK MN MO MT MU MX NA NG NL NO NZ OM PA PE PH PK
+  PL PT PY QA RO RS RW SA SE SG SI SK SN SV TH TN TR TT TW TZ US UY UZ VN ZA
+`.trim().split(/\s+/))
+
 const COUNTRY_BY_CODE = new Map(SUPPORTED_ONBOARDING_COUNTRIES.map((country) => [country.code, country]))
 
 export function getOnboardingCountry(code: string): OnboardingCountry | undefined {
@@ -186,13 +207,26 @@ export function isSupportedOnboardingCountry(code: string): boolean {
   return COUNTRY_BY_CODE.has(code)
 }
 
-export function requiredCapabilitiesForCountry(code: string): RequiredStripeCapabilities | null {
+export function isStripeAccountTypeAvailable(code: string, accountType: 'standard' | 'express'): boolean {
+  const upper = code.toUpperCase()
+  return accountType === 'standard'
+    ? STANDARD_ACCOUNT_COUNTRY_CODES.has(upper)
+    : EXPRESS_ACCOUNT_COUNTRY_CODES.has(upper)
+}
+
+export function requiredCapabilitiesForCountry(
+  code: string,
+  accountType: 'standard' | 'express' = 'standard'
+): RequiredStripeCapabilities | null {
   const country = getOnboardingCountry(code)
-  if (!country) return null
+  if (!country || !isStripeAccountTypeAvailable(code, accountType)) return null
 
   return {
     card_payments: { requested: true },
-    transfers: { requested: true },
+    // Stripe requires this pairing for legacy Express creation. Standard
+    // accounts used by every new task own their Direct Charges and do not
+    // need the platform-transfer capability.
+    ...(accountType === 'express' ? { transfers: { requested: true as const } } : {}),
     ...(country.supportsSepaDebit ? { sepa_debit_payments: { requested: true as const } } : {}),
   }
 }

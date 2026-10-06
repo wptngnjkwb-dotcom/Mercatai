@@ -1,5 +1,8 @@
 import type Stripe from 'stripe'
 import type { getSupabase } from '@/lib/server/supabase'
+import {
+  type StripeAccountRequirement,
+} from '@/lib/server/stripeAccountRequirement'
 
 export type StripeChargeModel = 'destination' | 'direct'
 
@@ -50,16 +53,21 @@ export async function bindDirectChargeContext(
   db: ReturnType<typeof getSupabase>,
   transactionId: string,
   connectedAccountId: string,
+  accountRequirement: StripeAccountRequirement,
 ): Promise<StripePaymentContext> {
   if (!connectedAccountId.startsWith('acct_')) throw new Error('Invalid connected Stripe account id')
-  const { data, error } = await db.rpc('bind_payment_charge_context', {
+  const { data, error } = await db.rpc('bind_payment_charge_context_v2', {
     p_transaction_id: transactionId,
     p_charge_model: 'direct',
     p_stripe_connected_account_id: connectedAccountId,
+    p_stripe_account_requirement: accountRequirement,
   })
   if (error) throw new Error(`Failed to bind payment charge context: ${error.message}`)
   const row = Array.isArray(data) ? data[0] : data
-  if (!row || row.stripe_charge_model !== 'direct' || row.stripe_connected_account_id !== connectedAccountId) {
+  if (!row
+      || row.stripe_charge_model !== 'direct'
+      || row.stripe_connected_account_id !== connectedAccountId
+      || row.stripe_account_requirement !== accountRequirement) {
     throw new Error('Payment charge context was not confirmed')
   }
   return { chargeModel: 'direct', connectedAccountId }

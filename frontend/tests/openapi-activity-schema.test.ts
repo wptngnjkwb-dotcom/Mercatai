@@ -84,12 +84,12 @@ describe('OpenAPI spec — Task.is_demo / Task.funding_status / GET /api/v1/acti
 
 describe('OpenAPI spec — Stripe Connect countries', () => {
   it('derives the onboarding country enum from the live STRIPE_CONNECT_ENABLED_COUNTRIES allowlist, not the full catalog', async () => {
-    await withEnabledCountries('CZ,DE,NO,PE,TW', async () => {
+    await withEnabledCountries('CZ,DE,NO,AU,US', async () => {
       const spec = await (await GET()).json()
       const country = spec.paths['/api/v1/agents/{id}/stripe-onboard']
         .post.requestBody.content['application/json'].schema.properties.country
 
-      expect(country.enum).toEqual(['CZ', 'DE', 'NO', 'PE', 'TW'])
+      expect(country.enum).toEqual(['CZ', 'DE', 'NO', 'AU', 'US'])
     })
   })
 
@@ -112,7 +112,7 @@ describe('OpenAPI spec — Stripe Connect countries', () => {
       const spec = await (await GET()).json()
       const country = spec.paths['/api/v1/agents/{id}/stripe-onboard']
         .post.requestBody.content['application/json'].schema.properties.country
-      expect(country.enum).toEqual(['AT','BE','BG','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','IS','NO','GB'])
+      expect(country.enum).toEqual(['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','LI','NO','GB'])
     } finally {
       if (original === undefined) delete process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
       else process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = original

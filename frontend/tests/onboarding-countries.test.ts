@@ -2,15 +2,17 @@ import { describe, expect, it } from 'vitest'
 import {
   SUPPORTED_ONBOARDING_COUNTRIES,
   SUPPORTED_ONBOARDING_COUNTRY_CODES,
+  EXPRESS_ACCOUNT_COUNTRY_CODES,
+  STANDARD_ACCOUNT_COUNTRY_CODES,
   getOnboardingCountry,
+  isStripeAccountTypeAvailable,
   onboardingCountryGroups,
   requiredCapabilitiesForCountry,
 } from '@/lib/onboardingCountries'
 
-// 26 of the 27 EU member states — Croatia is excluded, see the dedicated
-// test below for why.
+// All 27 EU member states are available for Standard/full-dashboard accounts.
 const EU_CODES = [
-  'AT', 'BE', 'BG', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
+  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
   'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK',
   'SI', 'ES', 'SE',
 ]
@@ -27,12 +29,13 @@ const STRIPE_EXPRESS_CODES = `
 `.trim().split(/\s+/)
 
 describe('Stripe Connect onboarding countries', () => {
-  it('matches Stripe’s complete documented Express connected-account country list', () => {
-    expect([...SUPPORTED_ONBOARDING_COUNTRY_CODES].sort()).toEqual([...STRIPE_EXPRESS_CODES].sort())
-    expect(SUPPORTED_ONBOARDING_COUNTRY_CODES).toHaveLength(103)
+  it('preserves Stripe’s documented Express list and adds the two Standard-only rollout countries', () => {
+    expect(Array.from(EXPRESS_ACCOUNT_COUNTRY_CODES).sort()).toEqual([...STRIPE_EXPRESS_CODES].sort())
+    expect([...SUPPORTED_ONBOARDING_COUNTRY_CODES].sort()).toEqual([...STRIPE_EXPRESS_CODES, 'HR', 'LI'].sort())
+    expect(SUPPORTED_ONBOARDING_COUNTRY_CODES).toHaveLength(105)
   })
 
-  it('contains 26 of the 27 EU member states exactly once', () => {
+  it('contains all 27 EU member states exactly once', () => {
     const configuredEuCodes = SUPPORTED_ONBOARDING_COUNTRIES
       .filter((country) => country.region === 'eu')
       .map((country) => country.code)
@@ -42,59 +45,56 @@ describe('Stripe Connect onboarding countries', () => {
     expect(new Set(SUPPORTED_ONBOARDING_COUNTRY_CODES).size).toBe(SUPPORTED_ONBOARDING_COUNTRY_CODES.length)
   })
 
-  it('excludes Croatia and Liechtenstein — EU/EEA members with no Stripe Express connected-account availability', () => {
-    // Verified directly against https://docs.stripe.com/connect/accounts on
-    // 2026-09-09: neither code appears in Stripe's documented Express
-    // country list, so stripe.accounts.create({ type: 'express', country:
-    // 'HR' | 'LI', ... }) fails at Stripe's API. Do not re-add either
-    // without re-checking that page first.
-    expect(getOnboardingCountry('HR')).toBeUndefined()
-    expect(getOnboardingCountry('LI')).toBeUndefined()
-    expect(SUPPORTED_ONBOARDING_COUNTRY_CODES).not.toContain('HR')
-    expect(SUPPORTED_ONBOARDING_COUNTRY_CODES).not.toContain('LI')
+  it('supports Croatia and Liechtenstein for Standard but never for legacy Express', () => {
+    for (const code of ['HR', 'LI']) {
+      expect(getOnboardingCountry(code)).toBeDefined()
+      expect(isStripeAccountTypeAvailable(code, 'standard')).toBe(true)
+      expect(isStripeAccountTypeAvailable(code, 'express')).toBe(false)
+      expect(requiredCapabilitiesForCountry(code, 'express')).toBeNull()
+    }
   })
 
-  it('also contains the two remaining non-EU EEA countries with Express availability', () => {
-    expect(['IS', 'NO'].every((code) => getOnboardingCountry(code)?.region === 'eea')).toBe(true)
+  it('keeps account-model availability distinct inside the non-EU EEA group', () => {
+    expect(['IS', 'LI', 'NO'].every((code) => getOnboardingCountry(code)?.region === 'eea')).toBe(true)
+    expect(isStripeAccountTypeAvailable('IS', 'standard')).toBe(false)
+    expect(isStripeAccountTypeAvailable('IS', 'express')).toBe(true)
+    expect(isStripeAccountTypeAvailable('LI', 'standard')).toBe(true)
+    expect(isStripeAccountTypeAvailable('LI', 'express')).toBe(false)
   })
 
-  it('requests only card for Iceland, unlike SEPA-capable EU/EEA countries', () => {
-    // Iceland has Express connected-account availability but is absent from
-    // Stripe's SEPA Direct Debit business-location list (checked
-    // 2026-09-09) — requesting sepa_debit_payments for an 'IS' account
-    // would request a capability Stripe won't grant.
+  it('does not offer a Standard account in Iceland, but preserves card-only Express for a legacy pilot', () => {
     expect(getOnboardingCountry('IS')?.supportsSepaDebit).toBe(false)
-    expect(requiredCapabilitiesForCountry('IS')).toEqual({
+    expect(requiredCapabilitiesForCountry('IS', 'standard')).toBeNull()
+    expect(requiredCapabilitiesForCountry('IS', 'express')).toEqual({
       card_payments: { requested: true },
       transfers: { requested: true },
     })
   })
 
-  it('requests card, SEPA Direct Debit, and the paired transfers capability for every other enabled EU/EEA country', () => {
-    for (const country of SUPPORTED_ONBOARDING_COUNTRIES.filter((item) => item.region !== 'stripe_connect' && item.code !== 'IS')) {
+  it('requests card and SEPA, but not transfers, for every Standard rollout country except its documented method exceptions', () => {
+    for (const country of SUPPORTED_ONBOARDING_COUNTRIES.filter((item) => STANDARD_ACCOUNT_COUNTRY_CODES.has(item.code))) {
       expect(requiredCapabilitiesForCountry(country.code)).toEqual({
         card_payments: { requested: true },
-        sepa_debit_payments: { requested: true },
-        transfers: { requested: true },
-      })
-    }
-  })
-
-  it('requests card and transfers for every other Stripe Connect country, plus SEPA where supported', () => {
-    for (const country of SUPPORTED_ONBOARDING_COUNTRIES.filter((item) => item.region === 'stripe_connect')) {
-      expect(requiredCapabilitiesForCountry(country.code)).toEqual({
-        card_payments: { requested: true },
-        transfers: { requested: true },
         ...(country.supportsSepaDebit ? { sepa_debit_payments: { requested: true } } : {}),
       })
     }
   })
 
-  it('always pairs transfers with card_payments — Stripe rejects card_payments alone on an Express account', () => {
+  it('does not silently create Standard accounts outside the reviewed Standard rollout', () => {
+    for (const country of SUPPORTED_ONBOARDING_COUNTRIES.filter((item) => !STANDARD_ACCOUNT_COUNTRY_CODES.has(item.code))) {
+      expect(requiredCapabilitiesForCountry(country.code, 'standard')).toBeNull()
+    }
+  })
+
+  it('pairs transfers with card_payments only where the server-selected Express model is available', () => {
     for (const country of SUPPORTED_ONBOARDING_COUNTRIES) {
-      expect(requiredCapabilitiesForCountry(country.code)).toMatchObject({
-        transfers: { requested: true },
-      })
+      if (EXPRESS_ACCOUNT_COUNTRY_CODES.has(country.code)) {
+        expect(requiredCapabilitiesForCountry(country.code, 'express')).toMatchObject({ transfers: { requested: true } })
+      } else {
+        expect(requiredCapabilitiesForCountry(country.code, 'express')).toBeNull()
+      }
+      const standard = requiredCapabilitiesForCountry(country.code, 'standard')
+      if (standard) expect(standard).not.toHaveProperty('transfers')
     }
   })
 

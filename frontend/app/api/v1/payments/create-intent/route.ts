@@ -15,6 +15,14 @@ import {
   paymentContextFromTransaction,
   stripeRequestOptions,
 } from '@/lib/server/stripePaymentContext'
+import {
+  isStripeAccountRequirement,
+  isLegacyExpressPilotTask,
+  LEGACY_EXPRESS_PLATFORM_LIABILITY,
+  publicPaymentResponsibility,
+  stripeAccountFields,
+  stripeAccountMatchesRequirement,
+} from '@/lib/server/stripeAccountRequirement'
 
 const MIN_AMOUNT = 1
 
@@ -48,7 +56,7 @@ export async function POST(request: NextRequest) {
     // Zkontrolovat že task existuje a má správný stav
     const { data: task, error: taskError } = await db
       .from('tasks')
-      .select('*, agents!assigned_agent_id(id, stripe_account_id, stripe_onboarding_completed, free_tasks_remaining), organizations!posted_by_org_id(is_platform_seed)')
+      .select('*, agents!assigned_agent_id(id, stripe_account_id, stripe_onboarding_completed, stripe_standard_account_id, stripe_standard_onboarding_completed, free_tasks_remaining), organizations!posted_by_org_id(is_platform_seed)')
       .eq('id', task_id)
       .single()
     if (taskError && taskError.code !== 'PGRST116') {
@@ -69,6 +77,13 @@ export async function POST(request: NextRequest) {
     }
     if (!task.assigned_agent_id) {
       return NextResponse.json({ error: 'Task has no assigned agent yet' }, { status: 400 })
+    }
+    if (!isStripeAccountRequirement(task.stripe_account_requirement)) {
+      return NextResponse.json({ error: 'Task has an invalid Stripe account requirement' }, { status: 500 })
+    }
+    if (task.stripe_account_requirement === LEGACY_EXPRESS_PLATFORM_LIABILITY
+        && !isLegacyExpressPilotTask(task.id)) {
+      return NextResponse.json({ error: 'Express payments are not available for this task' }, { status: 409 })
     }
     const resolvedBuyerOrgId = buyer_org_id ?? task.posted_by_org_id
     if (isAdmin && !resolvedBuyerOrgId) {
@@ -121,18 +136,45 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
+    // Existing attempts keep their already-frozen responsibility model. Rows
+    // created before migration 24 have no explicit requirement; those were
+    // all created against the former Express flow and remain legacy Express.
+    const { data: existingTxForGate, error: existingTxForGateError } = await db
+      .from('transactions')
+      .select('stripe_payment_intent_id,stripe_account_requirement,stripe_charge_model,stripe_connected_account_id')
+      .eq('task_id', task_id)
+      .in('escrow_status', ['pending', 'held', 'released'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (existingTxForGateError) throw existingTxForGateError
+
+    const hasExistingIntent = existingTxForGate?.stripe_payment_intent_id?.startsWith('pi_') === true
+    const accountRequirement = hasExistingIntent
+      ? (isStripeAccountRequirement(existingTxForGate?.stripe_account_requirement)
+          ? existingTxForGate.stripe_account_requirement
+          : LEGACY_EXPRESS_PLATFORM_LIABILITY)
+      : task.stripe_account_requirement
+    const accountFields = stripeAccountFields(accountRequirement)
+    const responsibility = publicPaymentResponsibility(accountRequirement)
+
     // Only a missing Stripe account at all is rejected here without a live
     // check — whether an existing account is actually ready is decided
     // below, from Stripe's own current data, not from the stored
     // stripe_onboarding_completed flag (which can be stale in either
     // direction: false when the account is actually ready, just as easily
     // as true when Stripe has since restricted it).
-    const agentStripeAccount = (task.agents as any)?.stripe_account_id
-    const agentOnboardingDone = (task.agents as any)?.stripe_onboarding_completed
+    const agentStripeAccount = (task.agents as any)?.[accountFields.accountId]
+    const agentOnboardingDone = (task.agents as any)?.[accountFields.onboardingCompleted]
     if (!agentStripeAccount) {
       return NextResponse.json({
-        error: 'Agent has not started Stripe Connect onboarding. Payment cannot be created until the agent links their payout account.',
+        error: `Agent has not completed the required Stripe ${accountFields.stripeType === 'standard' ? 'Standard/full-dashboard' : 'Express'} onboarding for this task.`,
         stripe_onboarding_required: true,
+        onboarding_task_id: task_id,
+        stripe_onboarding_path: accountRequirement === LEGACY_EXPRESS_PLATFORM_LIABILITY
+          ? `/agent/stripe-onboard?task_id=${encodeURIComponent(task_id)}`
+          : '/agent/stripe-onboard',
+        ...responsibility,
       }, { status: 402 })
     }
 
@@ -161,15 +203,6 @@ export async function POST(request: NextRequest) {
     // checking STRIPE_DIRECT_CHARGE_COUNTRIES alone would let a country
     // removed from (or never added to) STRIPE_CONNECT_ENABLED_COUNTRIES
     // still accept live payments. See stripeConnectCountries.ts.
-    const { data: existingTxForGate, error: existingTxForGateError } = await db
-      .from('transactions')
-      .select('stripe_payment_intent_id')
-      .eq('task_id', task_id)
-      .in('escrow_status', ['pending', 'held', 'released'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (existingTxForGateError) throw existingTxForGateError
     // A pre-claim snapshot ONLY — decides whether to run the gate at all.
     // The authoritative "is this actually new" determination is
     // recomputed after claim_task_payment (see isNewChargeAttempt below),
@@ -179,8 +212,16 @@ export async function POST(request: NextRequest) {
     let accountForGate: Stripe.Account | null = null
     if (looksLikeNewAttempt) {
       accountForGate = await stripe.accounts.retrieve(agentStripeAccount)
+      if (!stripeAccountMatchesRequirement(accountForGate, accountRequirement)) {
+        return NextResponse.json({
+          error: `The agent's connected account does not match this task's required ${accountFields.stripeType} responsibility model.`,
+          stripe_onboarding_required: true,
+          onboarding_task_id: task_id,
+          ...responsibility,
+        }, { status: 409 })
+      }
       const gateCountryCode = typeof accountForGate.country === 'string' ? accountForGate.country.toUpperCase() : undefined
-      if (!gateCountryCode || !isPaymentCountryEnabled(gateCountryCode)) {
+      if (!gateCountryCode || !isPaymentCountryEnabled(gateCountryCode, accountFields.stripeType)) {
         return NextResponse.json({
           error: gateCountryCode
             ? `Direct Charge payments are not yet enabled for ${gateCountryCode}. Contact support.`
@@ -233,7 +274,7 @@ export async function POST(request: NextRequest) {
     // required for a safe rolling deploy from destination charges.
     const { data: claimedTx, error: claimedTxError } = await db
       .from('transactions')
-      .select('id,stripe_payment_intent_id,stripe_charge_model,stripe_connected_account_id')
+      .select('id,stripe_payment_intent_id,stripe_charge_model,stripe_connected_account_id,stripe_account_requirement')
       .eq('id', paymentTx.transaction_id)
       .maybeSingle()
     if (claimedTxError) throw claimedTxError
@@ -254,8 +295,15 @@ export async function POST(request: NextRequest) {
     const existingPaymentIntentId = claimedTx.stripe_payment_intent_id ?? paymentTx.stripe_payment_intent_id
     const isNewChargeAttempt = !existingPaymentIntentId?.startsWith('pi_')
 
+    const frozenRequirement = isStripeAccountRequirement(claimedTx.stripe_account_requirement)
+      ? claimedTx.stripe_account_requirement
+      : (isNewChargeAttempt ? accountRequirement : LEGACY_EXPRESS_PLATFORM_LIABILITY)
+    if (frozenRequirement !== accountRequirement) {
+      return NextResponse.json({ error: 'This payment attempt is tied to a different Stripe responsibility model. Contact support.' }, { status: 409 })
+    }
+
     const paymentContext = isNewChargeAttempt
-      ? await bindDirectChargeContext(db, paymentTx.transaction_id, agentStripeAccount)
+      ? await bindDirectChargeContext(db, paymentTx.transaction_id, agentStripeAccount, accountRequirement)
       : paymentContextFromTransaction(claimedTx)
 
     if (paymentContext.chargeModel === 'direct' && paymentContext.connectedAccountId !== agentStripeAccount) {
@@ -276,6 +324,14 @@ export async function POST(request: NextRequest) {
     const accountForReadiness = accountForGate && readinessAccountId === agentStripeAccount
       ? accountForGate
       : await stripe.accounts.retrieve(readinessAccountId)
+    if (!stripeAccountMatchesRequirement(accountForReadiness, accountRequirement)) {
+      return NextResponse.json({
+        error: `The agent's connected account does not match this task's required ${accountFields.stripeType} responsibility model.`,
+        stripe_onboarding_required: true,
+        onboarding_task_id: task_id,
+        ...responsibility,
+      }, { status: 409 })
+    }
     const connectedCountry = typeof accountForReadiness.country === 'string'
       ? getOnboardingCountry(accountForReadiness.country.toUpperCase())
       : undefined
@@ -287,7 +343,13 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
     const readiness = computeStripeAccountReadiness(accountForReadiness)
-    await syncOnboardingCompletedFlag(db, (task.agents as any)?.id, agentOnboardingDone, readiness.onboardingComplete)
+    await syncOnboardingCompletedFlag(
+      db,
+      (task.agents as any)?.id,
+      agentOnboardingDone,
+      readiness.onboardingComplete,
+      accountFields.onboardingCompleted
+    )
     if (!isMethodReady(readiness, paymentMethod)) {
       return NextResponse.json({
         error: `Agent's Stripe account is not currently ready to accept ${paymentMethod === 'card' ? 'card' : 'SEPA Direct Debit'} payments.`,
@@ -295,6 +357,8 @@ export async function POST(request: NextRequest) {
         payout_ready: readiness.payoutReady,
         card_ready: readiness.cardReady,
         sepa_debit_ready: readiness.sepaDebitReady,
+        onboarding_task_id: task_id,
+        ...responsibility,
       }, { status: 402 })
     }
 
@@ -327,6 +391,7 @@ export async function POST(request: NextRequest) {
           payment_method: existingMethod,
           stripe_connected_account_id: paymentContext.connectedAccountId,
           charge_model: paymentContext.chargeModel,
+          ...responsibility,
         })
       }
 
@@ -363,6 +428,7 @@ export async function POST(request: NextRequest) {
         free_task: isFreeTask ? 'true' : 'false',
         capture_mode: captureMode,
         charge_model: 'direct',
+        stripe_account_requirement: accountRequirement,
       },
     }, directChargeCreateOptions(agentStripeAccount, `mercatai-payment-${paymentTx.payment_attempt_key}`))
     if (!intent.client_secret) throw new Error('Stripe returned no client_secret')
@@ -423,6 +489,7 @@ export async function POST(request: NextRequest) {
       payment_method: paymentMethod,
       stripe_connected_account_id: agentStripeAccount,
       charge_model: 'direct',
+      ...responsibility,
     }, { status: paymentTx.created ? 201 : 200 })
 
   } catch (err) {

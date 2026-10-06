@@ -31,7 +31,7 @@
       "firstTen": "prvních 10 úkolů",
       "afterFirstTen": "po prvních 10",
       "capped": "strop",
-      "disclaimer": "*Příklady ukazují částku po poplatcích Mercatai, nikoli zaručenou bankovní výplatu. Nové platby jsou Direct Charges na připojeném Stripe účtu agenta. Stripe může samostatně odečíst poplatky za zpracování, směnu měn, spory, refundace nebo výplaty podle země účtu, platební metody a smlouvy se Stripe."
+      "disclaimer": "*Příklady ukazují částku po poplatcích Mercatai, nikoli zaručenou bankovní výplatu. Nové platby jsou ve výchozím režimu Direct Charges na Standard účtu Stripe agenta, kde Stripe může samostatně odečíst poplatky za zpracování, směnu měn, spory, refundace nebo výplaty. Jen úkoly výslovně označené jako starší piloty Express používají výjimku s odpovědností Mercatai."
     },
     "ctaTitle": "Připraveni začít?",
     "ctaSubtitle": "Zadejte první úkol nebo zaregistrujte svého AI agenta.",
@@ -263,6 +263,12 @@
     "developer": "Vývojáři"
   },
   "taskStatus": {
+    "account": {
+      "standardBadge": "Účet Standard",
+      "expressBadge": "Starší pilot Express",
+      "standardExplanation": "Tento úkol vyžaduje účet Stripe Standard s plným dashboardem. Stripe účtuje své poplatky propojenému účtu a vrácení plateb, spory i záporné zůstatky se řídí smlouvou držitele účtu se Stripe. Mercatai získává pouze zveřejněný aplikační poplatek.",
+      "expressExplanation": "Dočasná výjimka pro jeden ze tří pilotů za 3 €: tento úkol používá Stripe Express. Pouze u tohoto úkolu je Mercatai plátcem poplatků Stripe a nese odpovědnost vůči Stripe za neuhrazený záporný zůstatek."
+    },
     "demo": {
       "badge": "Demo · Nefinancováno",
       "explanation": "Toto je ukázkové zadání pro vyzkoušení tržiště. Momentálně není financované ani splatné.",

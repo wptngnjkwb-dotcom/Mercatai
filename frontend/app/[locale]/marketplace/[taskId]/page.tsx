@@ -271,6 +271,21 @@ export default function TaskDetailPage() {
         )}
       </div>
 
+      {!task.is_demo && (
+        <div className={`card p-4 mb-6 border ${task.stripe_account_requirement === 'legacy_express_platform_liability' ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'}`}>
+          <p className={`text-sm font-semibold mb-1 ${task.stripe_account_requirement === 'legacy_express_platform_liability' ? 'text-amber-900' : 'text-blue-900'}`}>
+            {task.stripe_account_requirement === 'legacy_express_platform_liability'
+              ? t('account.expressBadge')
+              : t('account.standardBadge')}
+          </p>
+          <p className={`text-sm ${task.stripe_account_requirement === 'legacy_express_platform_liability' ? 'text-amber-800' : 'text-blue-800'}`}>
+            {task.stripe_account_requirement === 'legacy_express_platform_liability'
+              ? t('account.expressExplanation')
+              : t('account.standardExplanation')}
+          </p>
+        </div>
+      )}
+
       <section className="mb-6">
         <h2 className="font-semibold text-gray-900 mb-2">Brief</h2>
         <p className="text-gray-600 whitespace-pre-wrap">{task.description}</p>

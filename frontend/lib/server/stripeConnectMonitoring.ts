@@ -10,10 +10,49 @@ import {
   type FrozenAdminAlertPayload,
 } from '@/lib/server/email'
 import { minorUnitExponent, formatMinorAmount } from '@/lib/server/currency'
+import {
+  LEGACY_EXPRESS_PLATFORM_LIABILITY,
+  STANDARD_AGENT_LIABILITY,
+  stripeAccountFields,
+  type StripeAccountRequirement,
+} from '@/lib/server/stripeAccountRequirement'
 
 type Db = ReturnType<typeof getSupabase>
 
 const DEFAULT_LEASE_SECONDS = 300
+
+type ConnectedAccountAgent = {
+  id: string
+  owner_email?: string | null
+  stripe_account_id?: string | null
+  stripe_onboarding_completed?: boolean | null
+  stripe_standard_account_id?: string | null
+  stripe_standard_onboarding_completed?: boolean | null
+}
+
+async function findAgentByConnectedAccount(
+  db: Db,
+  stripeAccountId: string,
+): Promise<{ agent: ConnectedAccountAgent | null; requirement: StripeAccountRequirement | null }> {
+  const columns = 'id,owner_email,stripe_account_id,stripe_onboarding_completed,stripe_standard_account_id,stripe_standard_onboarding_completed'
+  const { data: standardAgent, error: standardError } = await db
+    .from('agents')
+    .select(columns)
+    .eq('stripe_standard_account_id', stripeAccountId)
+    .maybeSingle()
+  if (standardError) throw new Error(`Failed to look up Standard agent for connected account ${stripeAccountId}: ${standardError.message}`)
+  if (standardAgent) return { agent: standardAgent, requirement: STANDARD_AGENT_LIABILITY }
+
+  const { data: legacyAgent, error: legacyError } = await db
+    .from('agents')
+    .select(columns)
+    .eq('stripe_account_id', stripeAccountId)
+    .maybeSingle()
+  if (legacyError) throw new Error(`Failed to look up legacy Express agent for connected account ${stripeAccountId}: ${legacyError.message}`)
+  return legacyAgent
+    ? { agent: legacyAgent, requirement: LEGACY_EXPRESS_PLATFORM_LIABILITY }
+    : { agent: null, requirement: null }
+}
 
 export type ConnectEventClaim = { claimed: true; id: string; claimToken: string; attemptCount: number } | { claimed: false }
 
@@ -146,12 +185,7 @@ export async function handleAccountUpdated(db: Db, stripe: Stripe, event: Stripe
     throw new Error(`Failed to fetch current account state for connected account ${stripeAccountId}`)
   }
 
-  const { data: agent, error: agentError } = await db
-    .from('agents')
-    .select('id, stripe_onboarding_completed')
-    .eq('stripe_account_id', stripeAccountId)
-    .maybeSingle()
-  if (agentError) throw new Error(`Failed to look up agent for connected account ${stripeAccountId}: ${agentError.message}`)
+  const { agent, requirement } = await findAgentByConnectedAccount(db, stripeAccountId)
 
   if (!agent) {
     // A real, if unusual, situation — not every connected account this
@@ -208,7 +242,14 @@ export async function handleAccountUpdated(db: Db, stripe: Stripe, event: Stripe
     .upsert({ stripe_account_id: stripeAccountId, agent_id: agent.id, ...current, updated_at: new Date().toISOString() }, { onConflict: 'stripe_account_id' })
   if (upsertError) throw new Error(`Failed to record account status for ${stripeAccountId}: ${upsertError.message}`)
 
-  await syncOnboardingCompletedFlag(db, agent.id, agent.stripe_onboarding_completed, readiness.onboardingComplete)
+  const fields = stripeAccountFields(requirement!)
+  await syncOnboardingCompletedFlag(
+    db,
+    agent.id,
+    agent[fields.onboardingCompleted],
+    readiness.onboardingComplete,
+    fields.onboardingCompleted
+  )
 }
 
 const PAYOUT_STATUSES = new Set(['pending', 'in_transit', 'paid', 'failed', 'canceled'])
@@ -463,8 +504,7 @@ export async function handlePayoutEvent(db: Db, stripe: Stripe, event: Stripe.Ev
   const arrivalDate = payout.arrival_date ? new Date(payout.arrival_date * 1000).toISOString() : null
   const failureCode = payout.failure_code ?? null
 
-  const { data: agent, error: agentError } = await db.from('agents').select('id, owner_email').eq('stripe_account_id', stripeAccountId).maybeSingle()
-  if (agentError) throw new Error(`Failed to look up agent for connected account ${stripeAccountId}: ${agentError.message}`)
+  const { agent } = await findAgentByConnectedAccount(db, stripeAccountId)
 
   const { data: existingRow, error: existingError } = await db
     .from('stripe_connect_payouts')
@@ -588,8 +628,7 @@ export async function handleExternalAccountUpdated(db: Db, event: Stripe.Event):
   const safeStatus = typeof externalAccount.status === 'string' ? externalAccount.status : 'unknown'
   const externalAccountType = externalAccount.object === 'card' ? 'card' : 'bank_account'
 
-  const { data: agent, error: agentError } = await db.from('agents').select('id').eq('stripe_account_id', stripeAccountId).maybeSingle()
-  if (agentError) throw new Error(`Failed to look up agent for connected account ${stripeAccountId}: ${agentError.message}`)
+  const { agent } = await findAgentByConnectedAccount(db, stripeAccountId)
 
   await auditLog({
     action: 'stripe_connect_external_account_updated',

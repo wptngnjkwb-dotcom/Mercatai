@@ -6,6 +6,7 @@ import { fireWebhooks } from '@/lib/server/webhooks'
 import { sendTaskCreated } from '@/lib/server/email'
 import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
 import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
+import { STANDARD_AGENT_LIABILITY, publicPaymentResponsibility } from '@/lib/server/stripeAccountRequirement'
 
 /**
  * Instant hire — the second entry point into the marketplace.
@@ -140,6 +141,7 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       agent: task.agent_display_name,
       price_eur: listing.price_eur,
       delivery_deadline_at: null,
+      ...publicPaymentResponsibility(STANDARD_AGENT_LIABILITY),
       buyer_token: buyerToken,
       buyer_token_note: 'Save this token — required to pay, approve, or dispute this task',
       next_step: 'POST /api/v1/payments/create-intent with this buyer_token to fund the task',

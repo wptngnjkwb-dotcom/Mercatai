@@ -5,11 +5,12 @@ import { signToken } from '@/lib/server/auth'
 process.env.JWT_SECRET_KEY = 'test-secret-for-money-flow-moderation-32ch'
 process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'
 
-const TASK_ID = 'task-money-flow-1'
+const TASK_ID = 'e427ab6c-62fa-473f-8e84-93003b13a47f'
 const BID_ID = 'bid-1'
 
 let taskModerationStatus = 'approved'
 let agentStripeOnboardingCompleted = true
+let taskStripeAccountRequirement: 'standard_agent_liability' | 'legacy_express_platform_liability' = 'standard_agent_liability'
 let acceptedBidAgentVisibility = 'public'
 const taskUpdates: Record<string, unknown>[] = []
 const agentUpdates: Record<string, unknown>[] = []
@@ -24,6 +25,8 @@ const bidRow = { id: BID_ID, task_id: TASK_ID, agent_id: 'agent-1', price_eur: 5
 let accountRetrieveResult: Record<string, unknown> = {}
 function resetAccountRetrieveResult() {
   accountRetrieveResult = {
+    type: 'standard',
+    controller: { fees: { payer: 'stripe' }, losses: { payments: 'stripe' } },
     country: 'CZ',
     details_submitted: true,
     requirements: { currently_due: [] },
@@ -87,8 +90,12 @@ vi.mock('@/lib/server/supabase', () => ({
           created: !tx,
         }], error: null }
       }
-      if (name === 'bind_payment_charge_context') {
-        return { data: [{ stripe_charge_model: args.p_charge_model, stripe_connected_account_id: args.p_stripe_connected_account_id }], error: null }
+      if (name === 'bind_payment_charge_context_v2') {
+        return { data: [{
+          stripe_charge_model: args.p_charge_model,
+          stripe_connected_account_id: args.p_stripe_connected_account_id,
+          stripe_account_requirement: args.p_stripe_account_requirement,
+        }], error: null }
       }
       throw new Error(`unexpected rpc ${name}`)
     },
@@ -113,6 +120,7 @@ vi.mock('@/lib/server/supabase', () => ({
             data: existingTxRow ?? {
               id: 'tx-fake-1', stripe_payment_intent_id: null,
               stripe_charge_model: null, stripe_connected_account_id: null,
+              stripe_account_requirement: null,
             },
             error: null,
           }
@@ -128,7 +136,15 @@ vi.mock('@/lib/server/supabase', () => ({
                 assigned_agent_id: 'agent-1',
                 posted_by_org_id: 'org-1',
                 moderation_status: taskModerationStatus,
-                agents: { id: 'agent-1', stripe_account_id: 'acct_1', stripe_onboarding_completed: agentStripeOnboardingCompleted, free_tasks_remaining: 0 },
+                stripe_account_requirement: taskStripeAccountRequirement,
+                agents: {
+                  id: 'agent-1',
+                  stripe_account_id: 'acct_express',
+                  stripe_onboarding_completed: true,
+                  stripe_standard_account_id: 'acct_1',
+                  stripe_standard_onboarding_completed: agentStripeOnboardingCompleted,
+                  free_tasks_remaining: 0,
+                },
               },
               error: null,
             }
@@ -163,6 +179,7 @@ beforeEach(() => {
   bidRow.delivery_hours = 24
   taskModerationStatus = 'approved'
   agentStripeOnboardingCompleted = true
+  taskStripeAccountRequirement = 'standard_agent_liability'
   acceptedBidAgentVisibility = 'public'
   taskUpdates.length = 0
   agentUpdates.length = 0
@@ -297,13 +314,13 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
   })
 
   it('rejects SEPA for a non-EEA connected account with an actionable card-only response', async () => {
-    accountRetrieveResult.country = 'PE'
-    // Enable PE for BOTH allowlists (isPaymentCountryEnabled needs the
+    accountRetrieveResult.country = 'AU'
+    // Enable AU for BOTH allowlists (isPaymentCountryEnabled needs the
     // intersection) — this test is specifically about the SEPA-
     // availability check, not the country gate (which has its own
     // dedicated describe block below).
-    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ,PE'
-    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'CZ,PE'
+    process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ,AU'
+    process.env.STRIPE_DIRECT_CHARGE_COUNTRIES = 'CZ,AU'
     const response = await fundRequest('sepa_debit')()
     const body = await response.json()
 
@@ -334,7 +351,38 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
     expect(params).not.toHaveProperty('transfer_data')
     expect(params).toMatchObject({ application_fee_amount: 350 })
     expect(options).toMatchObject({ stripeAccount: 'acct_1', idempotencyKey: 'mercatai-payment-attempt-key-1' })
-    expect(await response.json()).toMatchObject({ stripe_connected_account_id: 'acct_1', charge_model: 'direct' })
+    expect(await response.json()).toMatchObject({
+      stripe_connected_account_id: 'acct_1',
+      charge_model: 'direct',
+      stripe_account_requirement: 'standard_agent_liability',
+      stripe_account_type: 'standard',
+      stripe_dashboard: 'full',
+      stripe_negative_balance_responsibility: 'stripe',
+      agent_operator_manages_refunds_and_disputes: true,
+      mercatai_platform_loss_liability: false,
+    })
+  })
+
+  it('funds an explicitly migrated pilot task through its frozen Express/platform-liability account only', async () => {
+    taskStripeAccountRequirement = 'legacy_express_platform_liability'
+    accountRetrieveResult = {
+      ...accountRetrieveResult,
+      type: 'express',
+      controller: { fees: { payer: 'application' }, losses: { payments: 'application' } },
+    }
+
+    const response = await fundRequest('card')()
+    const body = await response.json()
+
+    expect(response.status).toBe(201)
+    expect(stripeAccountsRetrieve).toHaveBeenCalledWith('acct_express')
+    expect(stripePaymentIntentsCreate.mock.calls.at(-1)?.[1]).toMatchObject({ stripeAccount: 'acct_express' })
+    expect(body).toMatchObject({
+      stripe_account_requirement: 'legacy_express_platform_liability',
+      stripe_account_type: 'express',
+      stripe_negative_balance_responsibility: 'application',
+      mercatai_platform_loss_liability: true,
+    })
   })
 
   it('rejects an invalid accepted-bid SLA before claiming or creating a Stripe payment', async () => {
@@ -354,7 +402,7 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
 
     expect(response.status).toBe(201)
     expect(stripePaymentIntentsCreate).toHaveBeenCalled()
-    expect(agentUpdates).toContainEqual({ stripe_onboarding_completed: true })
+    expect(agentUpdates).toContainEqual({ stripe_standard_onboarding_completed: true })
   })
 
   it('rejects an invalid payment_method with 400 rather than silently defaulting to card', async () => {
@@ -380,6 +428,7 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
         id: 'tx-pending-1',
         escrow_status: 'pending',
         stripe_payment_intent_id: 'pi_existing_pending',
+        stripe_account_requirement: 'standard_agent_liability',
         gross_amount_eur: 50,
         platform_fee_eur: 2.1,
         stripe_fee_eur: 0.4,
@@ -429,6 +478,7 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
         ...existingTxRow,
         stripe_charge_model: 'direct',
         stripe_connected_account_id: 'acct_1',
+        stripe_account_requirement: 'standard_agent_liability',
       }
 
       const response = await fundRequest('card')()
@@ -526,7 +576,7 @@ describe('POST /api/v1/payments/create-intent — STRIPE_DIRECT_CHARGE_COUNTRIES
 
     expect(response.status).toBe(403)
     expect(rpcCallNames).not.toContain('claim_task_payment')
-    expect(rpcCallNames).not.toContain('bind_payment_charge_context')
+    expect(rpcCallNames).not.toContain('bind_payment_charge_context_v2')
     expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
 
     // A later attempt with a DIFFERENT payment_method must be free to
@@ -543,6 +593,7 @@ describe('POST /api/v1/payments/create-intent — STRIPE_DIRECT_CHARGE_COUNTRIES
       stripe_payment_intent_id: 'pi_race_winner',
       stripe_charge_model: 'direct',
       stripe_connected_account_id: 'acct_1',
+      stripe_account_requirement: 'standard_agent_liability',
       escrow_status: 'pending',
       gross_amount_eur: 50, platform_fee_eur: 2.1, stripe_fee_eur: 0.4, agent_payout_eur: 47.5,
     }
@@ -569,6 +620,7 @@ describe('POST /api/v1/payments/create-intent — STRIPE_DIRECT_CHARGE_COUNTRIES
       stripe_payment_intent_id: 'pi_existing_pending',
       stripe_charge_model: 'destination',
       stripe_connected_account_id: null,
+      stripe_account_requirement: 'standard_agent_liability',
       gross_amount_eur: 50,
       platform_fee_eur: 2.1,
       stripe_fee_eur: 0.4,

@@ -1,11 +1,11 @@
 # Stripe Connect country support
 
-Last reviewed: 2026-09-22.
+Last reviewed: 2026-10-06.
 
 Mercatai separates two concepts:
 
-1. `frontend/lib/onboardingCountries.ts` is the documented Stripe Express
-   catalog and per-country SEPA capability profile.
+1. `frontend/lib/onboardingCountries.ts` is Mercatai's verified Stripe
+   Connect catalog and per-country SEPA capability profile.
 2. `STRIPE_CONNECT_ENABLED_COUNTRIES` is the runtime allowlist this
    Mercatai platform publicly offers.
 
@@ -15,22 +15,32 @@ readiness check.
 
 ## Current EU/EEA + UK default
 
-The default is 26 EU countries (Croatia excluded), Iceland, Norway and the
-United Kingdom. Liechtenstein is also excluded from this application's
-verified Express catalog. Iceland is card-only; GB is card + SEPA.
+The Standard/full-dashboard default is all 27 EU countries, Liechtenstein,
+Norway and the United Kingdom (30 countries). Croatia and Liechtenstein are
+Standard-capable even though Stripe's legacy Express catalog excluded them.
+Iceland is Express-only in this integration and is therefore not offered for
+new ordinary onboarding. All countries in the Standard default support card
+and SEPA Direct Debit subject to Stripe's live capability decision.
 
 Stripe source for SEPA business locations:
 https://docs.stripe.com/payments/sepa-debit
 
+Stripe source for Standard/full-dashboard markets:
+https://stripe.com/global
+
 ## Direct Charge capability profile
 
-New payments are Direct Charges in the connected account. Onboarding asks
-for:
+New payments are Direct Charges in the connected account. The default
+onboarding creates a Standard/full-dashboard account and asks for:
 
 - `card_payments` for every enabled account;
 - `sepa_debit_payments` only where `supportsSepaDebit` is true.
 
-The old `transfers` capability is not required for Direct Charges. A live
+Standard accounts do not request `transfers`. The three explicitly migrated
+€3 pilots are the only exception: their assigned agent receives a
+task-scoped Express onboarding flow, where Stripe requires `transfers` to be
+requested alongside `card_payments`. There is no public account-type switch
+and a client-supplied Express value cannot enable it. A live
 payment requires the selected payment capability, `charges_enabled` and
 `payouts_enabled`; identity details and Stripe requirements must also be
 complete. These checks run again before every PaymentIntent is created or
@@ -46,10 +56,11 @@ country as bank-payout verified solely because it appears in the selector.
 ## Charge ownership and fees
 
 For a Direct Charge, the PaymentIntent and Charge belong to the connected
-account. Mercatai receives its application fee. Stripe's own processing, FX,
-dispute, refund and payout fees follow the connected account/controller
-configuration and can reduce the final bank payout independently of
-Mercatai's fees.
+account. Mercatai receives its application fee. On the default Standard
+account, Stripe charges its own processing, FX, dispute, refund and payout
+fees to the connected account and Stripe's agreement with the account holder
+governs negative balances. The three task-labelled Express pilots retain the
+platform fee/loss-collector configuration for those pilots only.
 
 Existing pre-migration destination charges are permanently tagged as
 `destination` and continue to use the platform account. New transactions

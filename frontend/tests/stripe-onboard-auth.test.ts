@@ -6,15 +6,16 @@ import { POST, GET } from '@/app/api/v1/agents/[id]/stripe-onboard/route'
 process.env.JWT_SECRET_KEY = 'test-secret-for-stripe-onboard-auth-32ch'
 process.env.STRIPE_SECRET_KEY = 'sk_test_dummy'
 // Broad on purpose: this file's existing tests exercise per-country
-// CAPABILITY-shape correctness (CZ/DE/NO/PE), a concern independent of the
+// CAPABILITY-shape correctness (CZ/DE/NO/AU), a concern independent of the
 // STRIPE_CONNECT_ENABLED_COUNTRIES allowlist feature — so they all need to
 // stay enabled here. The allowlist gate itself (rejecting a catalog-valid
 // but non-enabled country) gets its own dedicated tests below, which
 // override this value locally.
-process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ,DE,NO,PE,GB'
+process.env.STRIPE_CONNECT_ENABLED_COUNTRIES = 'CZ,DE,NO,AU,GB'
 
 const OWN_AGENT_ID = '88888888-8888-8888-8888-888888888888'
 const OTHER_AGENT_ID = '99999999-9999-9999-9999-999999999999'
+const PILOT_TASK_ID = 'e427ab6c-62fa-473f-8e84-93003b13a47f'
 
 const agentRow = {
   id: OWN_AGENT_ID,
@@ -22,9 +23,12 @@ const agentRow = {
   owner_email: 'owner@example.com',
   stripe_account_id: null,
   stripe_onboarding_completed: false,
+  stripe_standard_account_id: null,
+  stripe_standard_onboarding_completed: false,
 }
 const agentUpdates: Record<string, unknown>[] = []
 let dbAgentUpdateError: { message: string } | null = null
+let taskRow: Record<string, unknown> | null = null
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
@@ -37,6 +41,7 @@ vi.mock('@/lib/server/supabase', () => ({
           return builder
         },
         single: async () => (table === 'agents' ? { data: agentRow, error: null } : { data: null, error: null }),
+        maybeSingle: async () => (table === 'tasks' ? { data: taskRow, error: null } : { data: null, error: null }),
         then: (resolve: (v: unknown) => unknown) =>
           resolve({ data: null, error: table === 'agents' ? dbAgentUpdateError : null }),
       }
@@ -55,6 +60,7 @@ const accountsCreate = vi.fn(async () => ({ id: 'acct_test123' }))
 const accountsUpdate = vi.fn(async () => ({ id: 'acct_existing' }))
 const accountLinksCreate = vi.fn(async () => ({ url: 'https://connect.stripe.com/setup/test', expires_at: Math.floor(Date.now() / 1000) + 3600 }))
 const accountsRetrieve = vi.fn(async () => ({
+  type: 'standard',
   details_submitted: true,
   requirements: { currently_due: [] },
   charges_enabled: true,
@@ -185,7 +191,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
 
   it('rejects a catalog-valid country that is not in the currently-enabled onboarding allowlist, before ever calling Stripe', async () => {
     // Spain is a real, catalog-valid EU country (frontend/lib/onboardingCountries.ts)
-    // but is not in this file's 'CZ,DE,NO,PE' STRIPE_CONNECT_ENABLED_COUNTRIES —
+    // but is not in this file's 'CZ,DE,NO,AU' STRIPE_CONNECT_ENABLED_COUNTRIES —
     // the platform-enablement gate must reject it independently of catalog validity.
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'ES' }), { params: { id: OWN_AGENT_ID } })
@@ -230,7 +236,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({ country: 'NO' }))
   })
 
-  it('accepts an EU member and requests the Direct Charge card and SEPA capabilities, paired with the required transfers capability', async () => {
+  it('creates a Standard account for an EU member with card and SEPA capabilities, without the Express-only transfers pairing', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'DE' }), { params: { id: OWN_AGENT_ID } })
 
@@ -240,23 +246,21 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
       capabilities: {
         card_payments: { requested: true },
         sepa_debit_payments: { requested: true },
-        transfers: { requested: true },
       },
     }))
   })
 
-  it('accepts a documented non-EEA Stripe Connect country without requesting the EU-only SEPA capability, but still requests transfers', async () => {
+  it('creates a Standard account in a card-only country without SEPA or transfers', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
-    const response = await POST(requestWithBody(token, { country: 'PE' }), { params: { id: OWN_AGENT_ID } })
+    const response = await POST(requestWithBody(token, { country: 'AU' }), { params: { id: OWN_AGENT_ID } })
     const body = await response.json()
 
     expect(response.status).toBe(200)
     expect(body.supported_payment_methods).toEqual(['card'])
     expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({
-      country: 'PE',
+      country: 'AU',
       capabilities: {
         card_payments: { requested: true },
-        transfers: { requested: true },
       },
     }))
     expect((accountsCreate as any).mock.calls[0][0].capabilities).not.toHaveProperty('sepa_debit_payments')
@@ -287,7 +291,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(accountsCreate).not.toHaveBeenCalled()
   })
 
-  it('requests card, SEPA, and transfers together for Direct Charges — Stripe rejects card_payments without transfers on an Express account', async () => {
+  it('does not request the Express transfers capability for the default Standard account', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
 
@@ -296,11 +300,11 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(createArgs.capabilities).toEqual({
       card_payments: { requested: true },
       sepa_debit_payments: { requested: true },
-      transfers: { requested: true },
     })
+    expect(createArgs.type).toBe('standard')
   })
 
-  it('requests SEPA for the United Kingdom because Stripe lists GB as a supported SEPA business location, alongside the required transfers capability', async () => {
+  it('requests card and SEPA for a United Kingdom Standard account', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'GB' }), { params: { id: OWN_AGENT_ID } })
 
@@ -309,7 +313,6 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(createArgs.capabilities).toEqual({
       card_payments: { requested: true },
       sepa_debit_payments: { requested: true },
-      transfers: { requested: true },
     })
   })
 })
@@ -331,13 +334,122 @@ describe('GET /api/v1/agents/[id]/stripe-onboard auth', () => {
   })
 })
 
+describe('POST /api/v1/agents/[id]/stripe-onboard — task-scoped legacy Express pilots', () => {
+  beforeEach(() => {
+    taskRow = null
+    agentUpdates.length = 0
+    accountsCreate.mockClear()
+    accountLinksCreate.mockClear()
+    ;(agentRow as any).stripe_account_id = null
+    ;(agentRow as any).stripe_standard_account_id = null
+  })
+
+  afterEach(() => {
+    taskRow = null
+  })
+
+  async function post(body: Record<string, unknown>) {
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    return POST(new NextRequest(`http://localhost/api/v1/agents/${OWN_AGENT_ID}/stripe-onboard`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    }), { params: { id: OWN_AGENT_ID } })
+  }
+
+  it('uses Express with transfers only for an assigned task whose server-side requirement is the legacy pilot mode', async () => {
+    taskRow = {
+      id: PILOT_TASK_ID,
+      assigned_agent_id: OWN_AGENT_ID,
+      stripe_account_requirement: 'legacy_express_platform_liability',
+      archived_at: null,
+    }
+
+    const response = await post({ country: 'CZ', task_id: PILOT_TASK_ID })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'express',
+      capabilities: {
+        card_payments: { requested: true },
+        sepa_debit_payments: { requested: true },
+        transfers: { requested: true },
+      },
+    }))
+    expect(agentUpdates).toContainEqual({ stripe_account_id: 'acct_test123' })
+    expect(body.stripe_account_requirement).toBe('legacy_express_platform_liability')
+    expect(body.stripe_negative_balance_responsibility).toBe('application')
+    expect(body.mercatai_platform_loss_liability).toBe(true)
+  })
+
+  it('ignores a caller-supplied mode string and keeps the no-task default on Standard', async () => {
+    const response = await post({
+      country: 'CZ',
+      stripe_account_requirement: 'legacy_express_platform_liability',
+      stripe_account_type: 'express',
+      type: 'express',
+    })
+
+    expect(response.status).toBe(200)
+    expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({ type: 'standard' }))
+    expect((accountsCreate as any).mock.calls[0][0].capabilities).not.toHaveProperty('transfers')
+  })
+
+  it('rejects task-scoped Express onboarding for an agent who is not assigned to that task', async () => {
+    taskRow = {
+      id: PILOT_TASK_ID,
+      assigned_agent_id: OTHER_AGENT_ID,
+      stripe_account_requirement: 'legacy_express_platform_liability',
+      archived_at: null,
+    }
+
+    const response = await post({ country: 'CZ', task_id: PILOT_TASK_ID })
+
+    expect(response.status).toBe(403)
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it('does not let an admin use a pilot task to create Express for an unrelated agent', async () => {
+    taskRow = {
+      id: PILOT_TASK_ID,
+      assigned_agent_id: OTHER_AGENT_ID,
+      stripe_account_requirement: 'legacy_express_platform_liability',
+      archived_at: null,
+    }
+    const adminToken = await signToken({ tier: 'admin' }, '12h')
+    const response = await POST(new NextRequest(`http://localhost/api/v1/agents/${OWN_AGENT_ID}/stripe-onboard`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ country: 'CZ', task_id: PILOT_TASK_ID }),
+    }), { params: { id: OWN_AGENT_ID } })
+
+    expect(response.status).toBe(403)
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+
+  it('rejects Express even when a non-pilot database row is misconfigured to request it', async () => {
+    taskRow = {
+      id: '11111111-1111-1111-1111-111111111111',
+      assigned_agent_id: OWN_AGENT_ID,
+      stripe_account_requirement: 'legacy_express_platform_liability',
+      archived_at: null,
+    }
+
+    const response = await post({ country: 'CZ', task_id: taskRow.id })
+
+    expect(response.status).toBe(409)
+    expect(accountsCreate).not.toHaveBeenCalled()
+  })
+})
+
 describe('GET /api/v1/agents/[id]/stripe-onboard — onboarding completeness derived live from Stripe', () => {
   beforeEach(() => {
     agentUpdates.length = 0
     accountsRetrieve.mockClear()
     auditLog.mockClear()
     dbAgentUpdateError = null
-    ;(agentRow as any).stripe_account_id = 'acct_existing'
+    ;(agentRow as any).stripe_standard_account_id = 'acct_existing'
   })
 
   async function getStatus() {
@@ -349,8 +461,9 @@ describe('GET /api/v1/agents/[id]/stripe-onboard — onboarding completeness der
   }
 
   it('sets onboarding_completed=true and reports per-method readiness when identity, payouts/transfers, and a payment method are all ready', async () => {
-    ;(agentRow as any).stripe_onboarding_completed = false
+    ;(agentRow as any).stripe_standard_onboarding_completed = false
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       details_submitted: true,
       requirements: { currently_due: [] },
       charges_enabled: true,
@@ -366,12 +479,13 @@ describe('GET /api/v1/agents/[id]/stripe-onboard — onboarding completeness der
     expect(body.payout_ready).toBe(true)
     expect(body.card_ready).toBe(true)
     expect(body.sepa_debit_ready).toBe(true)
-    expect(agentUpdates).toContainEqual({ stripe_onboarding_completed: true })
+    expect(agentUpdates).toContainEqual({ stripe_standard_onboarding_completed: true })
   })
 
-  it('resets a historically-true stripe_onboarding_completed back to false once Stripe reports no usable payment method — a stored true must not survive a later restriction', async () => {
-    ;(agentRow as any).stripe_onboarding_completed = true
+  it('resets a historically-true Standard onboarding flag once Stripe reports no usable payment method', async () => {
+    ;(agentRow as any).stripe_standard_onboarding_completed = true
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       details_submitted: true,
       requirements: { currently_due: [] },
       charges_enabled: true,
@@ -386,12 +500,13 @@ describe('GET /api/v1/agents/[id]/stripe-onboard — onboarding completeness der
     expect(body.onboarding_completed).toBe(false)
     expect(body.card_ready).toBe(false)
     expect(body.sepa_debit_ready).toBe(false)
-    expect(agentUpdates).toContainEqual({ stripe_onboarding_completed: false })
+    expect(agentUpdates).toContainEqual({ stripe_standard_onboarding_completed: false })
   })
 
-  it('resets a historically-true stripe_onboarding_completed back to false once payouts_enabled turns false, even with active capabilities', async () => {
-    ;(agentRow as any).stripe_onboarding_completed = true
+  it('resets a historically-true Standard onboarding flag once payouts_enabled turns false', async () => {
+    ;(agentRow as any).stripe_standard_onboarding_completed = true
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       details_submitted: true,
       requirements: { currently_due: [] },
       charges_enabled: true,
@@ -405,12 +520,13 @@ describe('GET /api/v1/agents/[id]/stripe-onboard — onboarding completeness der
     expect(response.status).toBe(200)
     expect(body.onboarding_completed).toBe(false)
     expect(body.payout_ready).toBe(false)
-    expect(agentUpdates).toContainEqual({ stripe_onboarding_completed: false })
+    expect(agentUpdates).toContainEqual({ stripe_standard_onboarding_completed: false })
   })
 
   it('does not write to the database when the computed status already matches the stored one', async () => {
-    ;(agentRow as any).stripe_onboarding_completed = true
+    ;(agentRow as any).stripe_standard_onboarding_completed = true
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       details_submitted: true,
       requirements: { currently_due: [] },
       charges_enabled: true,
@@ -424,8 +540,9 @@ describe('GET /api/v1/agents/[id]/stripe-onboard — onboarding completeness der
   })
 
   it('fails closed — never audit-logs a completion/restriction claim when the database write itself fails', async () => {
-    ;(agentRow as any).stripe_onboarding_completed = false
+    ;(agentRow as any).stripe_standard_onboarding_completed = false
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       details_submitted: true,
       requirements: { currently_due: [] },
       charges_enabled: true,
@@ -449,7 +566,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
     accountsUpdate.mockClear()
     accountLinksCreate.mockClear()
     accountsRetrieve.mockClear()
-    ;(agentRow as any).stripe_account_id = 'acct_existing'
+    ;(agentRow as any).stripe_standard_account_id = 'acct_existing'
   })
 
   function requestWithBody(bearer: string, body: Record<string, unknown>) {
@@ -462,6 +579,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
 
   it("rejects with 409 when the request country does not match the existing account's country — does not create a second account", async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: true,
       requirements: { currently_due: [] },
@@ -481,6 +599,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
 
   it('requests missing capabilities on an existing account created before card_payments was added, then issues a fresh onboarding link', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: true,
       requirements: { currently_due: [] },
@@ -506,6 +625,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
 
   it('returns "already completed" without calling accounts.update when every capability is already active', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: true,
       requirements: { currently_due: [] },
@@ -525,7 +645,8 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
 
   it('does not demand SEPA from a completed non-EEA account whose country profile is card-only', async () => {
     accountsRetrieve.mockResolvedValueOnce({
-      country: 'PE',
+      type: 'standard',
+      country: 'AU',
       details_submitted: true,
       requirements: { currently_due: [] },
       charges_enabled: true,
@@ -533,7 +654,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
       capabilities: { card_payments: 'active', transfers: 'active' },
     } as any)
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
-    const response = await POST(requestWithBody(token, { country: 'PE' }), { params: { id: OWN_AGENT_ID } })
+    const response = await POST(requestWithBody(token, { country: 'AU' }), { params: { id: OWN_AGENT_ID } })
     const body = await response.json()
 
     expect(response.status).toBe(200)
@@ -544,6 +665,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
 
   it('does not report "already completed" when payouts_enabled is false, even with every capability active — and does not call accounts.update with nothing to request', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: true,
       requirements: { currently_due: [] },
@@ -564,6 +686,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
 
   it('does not report "already completed" when details_submitted is false, even with every capability active', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: false,
       requirements: { currently_due: ['individual.id_number'] },
@@ -585,7 +708,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
 
 describe('POST /api/v1/agents/[id]/stripe-onboard — FR/ES/GB pair transfers with card_payments (the Sept 2026 pilot regression)', () => {
   // FR and ES are not in this file's top-level STRIPE_CONNECT_ENABLED_COUNTRIES
-  // ('CZ,DE,NO,PE,GB') by design (see the file-header comment) — enable all
+  // ('CZ,DE,NO,AU,GB') by design (see the file-header comment) — enable all
   // three here and restore afterward so this block doesn't affect the
   // dedicated allowlist tests above, which rely on ES being disabled.
   const originalEnabledCountries = process.env.STRIPE_CONNECT_ENABLED_COUNTRIES
@@ -612,11 +735,8 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — FR/ES/GB pair transfers wi
     })
   }
 
-  // FR and ES both currently have supportsSepaDebit: true in the country
-  // catalog (lib/onboardingCountries.ts), same as GB — all three request
-  // card + SEPA + transfers, not just card + transfers.
-  it.each(['FR', 'ES', 'GB'])('creating a new %s account requests card_payments, sepa_debit_payments, and transfers together', async (country) => {
-    ;(agentRow as any).stripe_account_id = null
+  it.each(['FR', 'ES', 'GB'])('creating a new %s Standard account requests card and SEPA, but not transfers', async (country) => {
+    ;(agentRow as any).stripe_standard_account_id = null
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country }), { params: { id: OWN_AGENT_ID } })
 
@@ -626,18 +746,14 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — FR/ES/GB pair transfers wi
     expect(createArgs.capabilities).toEqual({
       card_payments: { requested: true },
       sepa_debit_payments: { requested: true },
-      transfers: { requested: true },
     })
+    expect(createArgs.type).toBe('standard')
   })
 
-  // Mirrors the real failure this fix addresses: an existing connected
-  // account (e.g. created by the pre-fix code, or by Stripe's own hosted
-  // onboarding) that has card_payments active but was never granted
-  // transfers — accounts.update() must now request it explicitly, the same
-  // pairing accounts.create() requires for a brand-new account above.
-  it.each(['FR', 'ES', 'GB'])('remediating an existing %s account missing only transfers requests it via accounts.update, then still issues a fresh link', async (country) => {
-    ;(agentRow as any).stripe_account_id = 'acct_existing'
+  it.each(['FR', 'ES', 'GB'])('does not require transfers on an otherwise-ready existing %s Standard account', async (country) => {
+    ;(agentRow as any).stripe_standard_account_id = 'acct_existing'
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country,
       details_submitted: true,
       requirements: { currently_due: [] },
@@ -650,16 +766,15 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — FR/ES/GB pair transfers wi
     const body = await response.json()
 
     expect(response.status).toBe(200)
-    expect(body.onboarding_url).toBeTruthy()
-    expect(accountsUpdate).toHaveBeenCalledWith('acct_existing', {
-      capabilities: { transfers: { requested: true } },
-    })
+    expect(body.message).toMatch(/already completed/i)
+    expect(accountsUpdate).not.toHaveBeenCalled()
     expect(accountsCreate).not.toHaveBeenCalled()
   })
 
-  it.each(['FR', 'ES', 'GB'])('does not re-request transfers for an existing %s account where it is already active', async (country) => {
-    ;(agentRow as any).stripe_account_id = 'acct_existing'
+  it.each(['FR', 'ES', 'GB'])('ignores an already-active transfers capability on an existing %s Standard account', async (country) => {
+    ;(agentRow as any).stripe_standard_account_id = 'acct_existing'
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country,
       details_submitted: true,
       requirements: { currently_due: [] },
@@ -689,7 +804,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — disabled_reason classifica
     accountsUpdate.mockClear()
     accountLinksCreate.mockClear()
     accountsRetrieve.mockClear()
-    ;(agentRow as any).stripe_account_id = 'acct_existing'
+    ;(agentRow as any).stripe_standard_account_id = 'acct_existing'
   })
 
   function requestWithBody(bearer: string, body: Record<string, unknown>) {
@@ -702,6 +817,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — disabled_reason classifica
 
   it('requirements.past_due is a normal, self-service state — issues a fresh link, never blocks with 409', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: false,
       requirements: { disabled_reason: 'requirements.past_due', currently_due: ['individual.address.line1'] },
@@ -720,6 +836,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — disabled_reason classifica
 
   it('action_required.requested_capabilities requests the missing capability, then still issues a fresh link', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: true,
       requirements: { disabled_reason: 'action_required.requested_capabilities', currently_due: [] },
@@ -741,6 +858,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — disabled_reason classifica
 
   it('requirements.pending_verification waits for Stripe — 409, no new link, no claim the user must act', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: true,
       requirements: { disabled_reason: 'requirements.pending_verification', currently_due: [] },
@@ -761,6 +879,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — disabled_reason classifica
 
   it('under_review waits for Stripe — 409, no new link', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: true,
       requirements: { disabled_reason: 'under_review', currently_due: [] },
@@ -779,6 +898,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — disabled_reason classifica
 
   it('rejected.fraud is genuinely blocked — 409 manual_stripe_dashboard_review, no new link', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: true,
       requirements: { disabled_reason: 'rejected.fraud', currently_due: [] },
@@ -797,6 +917,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — disabled_reason classifica
 
   it('listed is genuinely blocked — 409 manual_stripe_dashboard_review, no new link', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: true,
       requirements: { disabled_reason: 'listed', currently_due: [] },
@@ -815,6 +936,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — disabled_reason classifica
 
   it('an unrecognized disabled_reason fails toward manual review rather than silently proceeding', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: true,
       requirements: { disabled_reason: 'some_future_stripe_value_not_yet_handled', currently_due: [] },
@@ -833,6 +955,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — disabled_reason classifica
 
   it('returns a safe 502 (not the raw Stripe exception) when accountLinks.create fails', async () => {
     accountsRetrieve.mockResolvedValueOnce({
+      type: 'standard',
       country: 'CZ',
       details_submitted: true,
       requirements: { disabled_reason: null, currently_due: [] },
@@ -859,7 +982,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — orphaned account on DB wri
     agentUpdates.length = 0
     accountsCreate.mockClear()
     accountLinksCreate.mockClear()
-    ;(agentRow as any).stripe_account_id = null
+    ;(agentRow as any).stripe_standard_account_id = null
   })
 
   function requestWithBody(bearer: string, body: Record<string, unknown>) {

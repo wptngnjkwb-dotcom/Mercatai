@@ -13,6 +13,7 @@ export type TaskCategory =
  * status is not proof of funding; check this field instead.
  */
 export type FundingStatus = 'unfunded' | 'funding_pending' | 'funded' | 'released' | 'refunded'
+export type StripeAccountRequirement = 'standard_agent_liability' | 'legacy_express_platform_liability'
 
 /**
  * Server-derived answer to "may THIS caller start substantive work on this
@@ -52,6 +53,8 @@ export interface Task {
   /** True only when this specific authenticated caller may start substantive work now. Never true for is_demo tasks. */
   execution_authorized: boolean
   next_action: NextAction
+  /** Standard is the default for every task; the legacy Express value is limited to three named pilot tasks. */
+  stripe_account_requirement: StripeAccountRequirement
 }
 
 export interface Agent {
@@ -269,16 +272,16 @@ export interface PaymentIntentResponse {
   stripe_fee_eur: number
   /**
    * Mercatai's payment-processing deduction: 0.8% of gross_amount_eur,
-   * capped at €5. Set by Mercatai, not an itemized Stripe invoice. For new
-   * Direct Charges, Stripe can separately debit its own processing, FX,
-   * dispute, refund or payout fees from the connected account. The
-   * canonical public field; same value as the deprecated stripe_fee_eur.
+   * capped at €5. Set by Mercatai, not an itemized Stripe invoice. On the
+   * default Standard account, Stripe can separately debit its own processing,
+   * FX, dispute, refund or payout fees from the connected account. The three
+   * labelled Express pilots use the task-disclosed platform-liability model.
    */
   payment_processing_deduction_eur: number
   /**
-   * Amount remaining after Mercatai deductions. With Direct Charges this
-   * is not a guaranteed bank payout: Stripe/account-specific fees can be
-   * deducted separately from the connected account.
+   * Amount remaining after Mercatai deductions. This is not a guaranteed
+   * bank payout; the task's stripe_account_requirement explains which Stripe
+   * responsibility model applies.
    */
   agent_payout_eur: number
   free_task: boolean
@@ -295,6 +298,13 @@ export interface PaymentIntentResponse {
   stripe_connected_account_id: string | null
   /** Existing in-flight destination charges remain supported during rollout. */
   charge_model: 'destination' | 'direct'
+  stripe_account_requirement: StripeAccountRequirement
+  stripe_account_type: 'standard' | 'express'
+  stripe_dashboard: 'full' | 'express'
+  stripe_fee_payer: 'agent_connected_account' | 'mercatai_platform'
+  stripe_negative_balance_responsibility: 'stripe' | 'application'
+  agent_operator_manages_refunds_and_disputes: boolean
+  mercatai_platform_loss_liability: boolean
 }
 
 export interface QualityIssueMessage {

@@ -13,6 +13,12 @@ import {
   classifyDisabledReason,
   disabledReasonBlockingResponse,
 } from '@/lib/server/stripeAccountReadiness'
+import {
+  publicPaymentResponsibility,
+  resolveOnboardingRequirement,
+  stripeAccountFields,
+  stripeAccountMatchesRequirement,
+} from '@/lib/server/stripeAccountRequirement'
 
 // Stripe's legal-entity structures for a connected account. Left unset by
 // default so Stripe's hosted onboarding asks the account holder directly —
@@ -23,7 +29,9 @@ import {
 const ALLOWED_BUSINESS_TYPES = new Set(['individual', 'company', 'non_profit', 'government_entity'])
 
 // POST /api/v1/agents/:id/stripe-onboard
-// Creates or retrieves a Stripe Connect Express account for the agent,
+// Creates or retrieves the Stripe account required by the task. Standard is
+// the fail-closed default; only the three explicitly migrated pilot tasks can
+// resolve to the legacy Express/platform-liability account.
 // then returns an onboarding URL for the agent to complete identity
 // verification (KYC) directly with Stripe.
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
@@ -38,6 +46,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   }
 
   const body = await request.json().catch(() => ({}))
+  const taskId = typeof body.task_id === 'string' && body.task_id.trim() ? body.task_id.trim() : null
 
   // country: ISO 3166-1 alpha-2, e.g. 'CZ', 'NO', or 'PE'. Required — no default. A
   // connected account's country is difficult to change after creation, so
@@ -54,27 +63,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   const countryConfig = getOnboardingCountry(rawCountry)
   if (!countryConfig) {
     return NextResponse.json({
-      error: `'${rawCountry}' is not currently supported for onboarding by Mercatai. Country availability depends on Stripe Connect Express, not merely on whether customers in that country can pay by card.`,
-    }, { status: 400 })
-  }
-  // Being in the full Stripe-documented catalog above is necessary but not
-  // sufficient — this platform's own Stripe Connect account must also have
-  // the country turned on (Dashboard → Settings → Connect → Onboarding
-  // options → Countries). See frontend/lib/server/stripeConnectCountries.ts:
-  // accounts.create() itself rejects an unenabled country with "<country>
-  // is not currently supported by Stripe", but that check must never be the
-  // first line of defense — it would mean Mercatai publicly offered a
-  // country it silently can't actually onboard.
-  if (!isOnboardingCountryEnabled(rawCountry)) {
-    return NextResponse.json({
-      error: `'${rawCountry}' is documented by Stripe but not currently enabled for onboarding on this Mercatai platform account.`,
+      error: `'${rawCountry}' is not currently supported for onboarding by Mercatai. Connected-account availability depends on Stripe Connect and the selected account model, not merely on whether customers in that country can pay by card.`,
     }, { status: 400 })
   }
   const country = rawCountry
-  const requiredCapabilities = requiredCapabilitiesForCountry(country)
-  if (!requiredCapabilities) {
-    return NextResponse.json({ error: `'${country}' has no Mercatai capability profile.` }, { status: 400 })
-  }
 
   // business_type: the connected account's legal form, e.g. 'individual' for
   // a sole proprietor or 'company' for an incorporated business. Optional —
@@ -90,11 +82,34 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
   const { data: agent } = await db
     .from('agents')
-    .select('id, agent_id, owner_email, stripe_account_id, stripe_onboarding_completed')
+    .select('id, agent_id, owner_email, stripe_account_id, stripe_onboarding_completed, stripe_standard_account_id, stripe_standard_onboarding_completed')
     .eq('id', params.id)
     .single()
 
   if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
+
+  const resolved = await resolveOnboardingRequirement(db, taskId, agent.id)
+  if ('error' in resolved) {
+    return NextResponse.json({ error: resolved.error }, { status: resolved.status })
+  }
+  const accountRequirement = resolved.requirement
+  const accountFields = stripeAccountFields(accountRequirement)
+  const responsibility = publicPaymentResponsibility(accountRequirement)
+
+  // Availability differs by account model: Standard adds HR/LI but excludes
+  // IS, while the three legacy Express pilots use Stripe's older Express
+  // catalog. Resolve the server-owned task requirement first, then validate
+  // the country against that exact model. The request body cannot choose it.
+  if (!isOnboardingCountryEnabled(country, accountFields.stripeType)) {
+    return NextResponse.json({
+      error: `'${country}' is not currently enabled for Stripe ${accountFields.stripeType === 'standard' ? 'Standard/full-dashboard' : 'Express'} onboarding on Mercatai.`,
+      ...responsibility,
+    }, { status: 400 })
+  }
+  const requiredCapabilities = requiredCapabilitiesForCountry(country, accountFields.stripeType)
+  if (!requiredCapabilities) {
+    return NextResponse.json({ error: `'${country}' has no Mercatai capability profile.` }, { status: 400 })
+  }
 
   // Registration has required and stored owner_email since this was added,
   // and the migration backfills it for pre-existing agents wherever their
@@ -114,7 +129,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://mercatai.eu'
 
-  let stripeAccountId = agent.stripe_account_id
+  let stripeAccountId = agent[accountFields.accountId]
+  const storedOnboardingCompleted = agent[accountFields.onboardingCompleted]
 
   if (stripeAccountId) {
     // An account already exists — verify its LIVE state rather than
@@ -128,6 +144,14 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     } catch (stripeErr) {
       const message = stripeErr instanceof Error ? stripeErr.message : 'Could not retrieve the existing Stripe account'
       return NextResponse.json({ error: message, stripe_account_id: stripeAccountId }, { status: 502 })
+    }
+
+    if (!stripeAccountMatchesRequirement(account, accountRequirement)) {
+      return NextResponse.json({
+        error: `The stored Stripe account does not match this task's required ${accountFields.stripeType} responsibility model. Contact support; Mercatai will not silently reuse or convert it.`,
+        stripe_account_id: stripeAccountId,
+        ...responsibility,
+      }, { status: 409 })
     }
 
     // A connected account's country is essentially fixed after creation —
@@ -145,7 +169,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
 
     const readiness = computeStripeAccountReadiness(account)
-    await syncOnboardingCompletedFlag(db, agent.id, agent.stripe_onboarding_completed, readiness.onboardingComplete)
+    await syncOnboardingCompletedFlag(
+      db,
+      agent.id,
+      storedOnboardingCompleted,
+      readiness.onboardingComplete,
+      accountFields.onboardingCompleted
+    )
 
     // Some disabled_reason values (requirements.past_due,
     // action_required.requested_capabilities) are normal, self-service
@@ -193,6 +223,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         stripe_account_id: stripeAccountId,
         country,
         supported_payment_methods: countryConfig.supportsSepaDebit ? ['card', 'sepa_debit'] : ['card'],
+        task_id: resolved.taskId,
+        ...responsibility,
       })
     }
 
@@ -216,13 +248,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   } else {
     try {
       const account = await stripe.accounts.create({
-        type: 'express',
+        type: accountFields.stripeType,
         country,
         email: agent.owner_email,
-        // requiredCapabilities always pairs `transfers` with `card_payments`
-        // (Stripe rejects one without the other on Express accounts) — see
-        // RequiredStripeCapabilities in onboardingCountries.ts for why this
-        // is unrelated to Direct Charges never needing `transfers` active.
+        // Express pilot accounts pair `transfers` with `card_payments`
+        // because Stripe rejects the Express request without it. Standard
+        // accounts deliberately omit `transfers`; their own Dashboard and
+        // Stripe responsibility model govern settlement and payouts.
         // SEPA is requested only where Stripe documents the connected
         // account's country as a supported business location.
         capabilities: requiredCapabilities,
@@ -230,6 +262,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         metadata: {
           mercatai_agent_id: agent.agent_id,
           mercatai_db_id: agent.id,
+          mercatai_account_requirement: accountRequirement,
+          ...(resolved.taskId ? { mercatai_task_id: resolved.taskId } : {}),
         },
       })
       stripeAccountId = account.id
@@ -240,7 +274,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
 
     const { error: linkError } = await db.from('agents')
-      .update({ stripe_account_id: stripeAccountId })
+      .update({ [accountFields.accountId]: stripeAccountId })
       .eq('id', params.id)
 
     if (linkError) {
@@ -258,7 +292,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         action: 'stripe_account_orphaned',
         resource_type: 'agent',
         resource_id: params.id,
-        details: { stripe_account_id: stripeAccountId, db_error: linkError.message },
+        details: { stripe_account_id: stripeAccountId, account_requirement: accountRequirement, db_error: linkError.message },
       })
       return NextResponse.json({
         error: `Your Stripe account was created but could not be saved. Contact support with this reference: ${stripeAccountId}`,
@@ -270,11 +304,21 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   // Short-lived, single-use — Stripe sends the agent back to refresh_url
   // (handled by the sibling refresh/route.ts) if it expires or is reused.
   let accountLink
+  const refreshUrl = new URL('/agent/stripe-onboard', baseUrl)
+  refreshUrl.searchParams.set('refresh', '1')
+  refreshUrl.searchParams.set('agent_db_id', params.id)
+  const returnUrl = new URL('/agent/stripe-onboard', baseUrl)
+  returnUrl.searchParams.set('success', '1')
+  returnUrl.searchParams.set('agent_db_id', params.id)
+  if (resolved.taskId) {
+    refreshUrl.searchParams.set('task_id', resolved.taskId)
+    returnUrl.searchParams.set('task_id', resolved.taskId)
+  }
   try {
     accountLink = await stripe.accountLinks.create({
       account: stripeAccountId,
-      refresh_url: `${baseUrl}/agent/stripe-onboard?refresh=1&agent_db_id=${params.id}`,
-      return_url: `${baseUrl}/agent/stripe-onboard?success=1&agent_db_id=${params.id}`,
+      refresh_url: refreshUrl.toString(),
+      return_url: returnUrl.toString(),
       type: 'account_onboarding',
     })
   } catch (linkErr) {
@@ -288,7 +332,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     action: 'stripe_connect_onboard_initiated',
     resource_type: 'agent',
     resource_id: params.id,
-    details: { stripe_account_id: stripeAccountId },
+    details: { stripe_account_id: stripeAccountId, account_requirement: accountRequirement, task_id: resolved.taskId },
   })
 
   return NextResponse.json({
@@ -297,6 +341,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     country,
     supported_payment_methods: countryConfig.supportsSepaDebit ? ['card', 'sepa_debit'] : ['card'],
     expires_at: new Date(accountLink.expires_at * 1000).toISOString(),
+    task_id: resolved.taskId,
+    ...responsibility,
   })
 }
 
@@ -315,20 +361,43 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
   const db = getSupabase()
 
+  const taskId = request.nextUrl.searchParams.get('task_id')
+
   const { data: agent } = await db
     .from('agents')
-    .select('id, stripe_account_id, stripe_onboarding_completed')
+    .select('id, stripe_account_id, stripe_onboarding_completed, stripe_standard_account_id, stripe_standard_onboarding_completed')
     .eq('id', params.id)
     .single()
 
   if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
-  if (!agent.stripe_account_id) {
-    return NextResponse.json({ onboarding_completed: false, stripe_account_id: null })
+  const resolved = await resolveOnboardingRequirement(db, taskId, agent.id)
+  if ('error' in resolved) {
+    return NextResponse.json({ error: resolved.error }, { status: resolved.status })
+  }
+  const accountRequirement = resolved.requirement
+  const accountFields = stripeAccountFields(accountRequirement)
+  const responsibility = publicPaymentResponsibility(accountRequirement)
+  const stripeAccountId = agent[accountFields.accountId]
+  const storedOnboardingCompleted = agent[accountFields.onboardingCompleted]
+  if (!stripeAccountId) {
+    return NextResponse.json({
+      onboarding_completed: false,
+      stripe_account_id: null,
+      task_id: resolved.taskId,
+      ...responsibility,
+    })
   }
 
   const Stripe = (await import('stripe')).default
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-  const account = await stripe.accounts.retrieve(agent.stripe_account_id)
+  const account = await stripe.accounts.retrieve(stripeAccountId)
+  if (!stripeAccountMatchesRequirement(account, accountRequirement)) {
+    return NextResponse.json({
+      error: `The stored Stripe account does not match the required ${accountFields.stripeType} responsibility model.`,
+      stripe_account_id: stripeAccountId,
+      ...responsibility,
+    }, { status: 409 })
+  }
 
   const readiness = computeStripeAccountReadiness(account)
   const completed = readiness.onboardingComplete
@@ -339,13 +408,13 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   // (details_submitted && no currently_due items) only ever moved this flag
   // from false to true and never looked at capabilities, payouts_enabled,
   // or a later restriction at all.
-  await syncOnboardingCompletedFlag(db, agent.id, agent.stripe_onboarding_completed, completed)
+  await syncOnboardingCompletedFlag(db, agent.id, storedOnboardingCompleted, completed, accountFields.onboardingCompleted)
 
   const accountCountry = typeof account.country === 'string' ? account.country.toUpperCase() : null
 
   return NextResponse.json({
     onboarding_completed: completed,
-    stripe_account_id: agent.stripe_account_id,
+    stripe_account_id: stripeAccountId,
     payout_ready: readiness.payoutReady,
     card_ready: readiness.cardReady,
     sepa_debit_ready: readiness.sepaDebitReady,
@@ -362,6 +431,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     // A verified, fully-ready account can still be payment_enabled=false
     // if Mercatai hasn't turned on live payments for its country yet —
     // the UI must not claim otherwise once onboarding completes.
-    payment_enabled: accountCountry ? isPaymentCountryEnabled(accountCountry) : false,
+    payment_enabled: accountCountry ? isPaymentCountryEnabled(accountCountry, accountFields.stripeType) : false,
+    task_id: resolved.taskId,
+    ...responsibility,
   })
 }
