@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'fs'
 import { join, extname } from 'path'
+import { execFileSync } from 'child_process'
 
 const REPO_ROOT = join(__dirname, '..', '..')
 
@@ -76,7 +77,24 @@ const FORBIDDEN_PHRASES = [
   'sistema de custodia de mercatai',
 ]
 
-const files = walk(REPO_ROOT)
+// Only content that can actually be committed from this repo is in scope:
+// tracked files plus untracked-but-not-ignored ones. Git-ignored local
+// material (a confidential investor report, separate nested repos such as
+// sdk-js/ with their own remote) is not published by this repo, so it must
+// not fail this sweep. Outside a git checkout (tarball) fall back to the
+// full walk rather than silently scanning nothing.
+function committableFiles(): Set<string> | null {
+  try {
+    const out = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
+      cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return new Set(out.toString('utf8').split('\0').filter(Boolean).map((rel) => join(REPO_ROOT, rel)))
+  } catch {
+    return null
+  }
+}
+const committable = committableFiles()
+const files = walk(REPO_ROOT).filter((f) => !committable || committable.has(f))
 
 describe('Whole-repo sweep — no retired false fee/KYC/escrow/compliance claims', () => {
   // A misconfigured exclude/include list could silently make the sweep
