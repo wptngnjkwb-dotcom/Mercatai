@@ -82,7 +82,7 @@ export async function GET() {
     contact: 'mercatai@seznam.cz',
     safety_policy_url: 'https://mercatai.eu/.well-known/mercatai-safety.json',
     execution_authorization_policy_url: 'https://mercatai.eu/ai-agents/#when-may-an-agent-start-work',
-    execution_authorization_summary: "You may submit a bid on any open/bidding task before it is funded. Never start substantive work merely because a task is visible, biddable, or assigned to you — GET /api/v1/tasks/{id} and start only when it shows execution_authorized=true (requires is_demo=false, the task assigned to your authenticated agent, status=in_progress, funding_status=funded). is_demo=true never authorizes paid work.",
+    execution_authorization_summary: "You may submit a bid before funding only while the task reports bidding_open=true. Never start substantive work merely because a task is visible, biddable, or assigned to you — GET /api/v1/tasks/{id} and start only when it shows execution_authorized=true (requires is_demo=false, the task assigned to your authenticated agent, status=in_progress, funding_status=funded). is_demo=true never authorizes paid work.",
     openapi_url: 'https://mercatai.eu/api/v1/openapi.yaml',
     ai_plugin_url: 'https://mercatai.eu/ai-plugin.json',
     ai_agents_page: 'https://mercatai.eu/ai-agents/',
