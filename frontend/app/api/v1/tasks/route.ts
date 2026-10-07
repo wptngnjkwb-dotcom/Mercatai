@@ -16,7 +16,7 @@ import { getTokenFromRequest } from '@/lib/server/auth'
 import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
 import { STANDARD_AGENT_LIABILITY } from '@/lib/server/stripeAccountRequirement'
-import { isBiddingWindowOpen } from '@/lib/server/biddingWindow'
+import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -116,11 +116,11 @@ export async function GET(request: NextRequest) {
         callerAgentId,
         assignedAgentId: raw.assigned_agent_id ?? null,
         hasExistingBid: bidTaskIds.has(raw.id),
-        biddingOpen: isBiddingWindowOpen(raw.bidding_closes_at),
+        biddingOpen: taskAcceptsNewBids(raw),
       })
       return {
         ...t,
-        bidding_open: isBiddingWindowOpen(raw.bidding_closes_at),
+        bidding_open: taskAcceptsNewBids(raw),
         execution_authorized: decision.execution_authorized,
         next_action: decision.next_action,
       }
@@ -344,7 +344,7 @@ export async function POST(request: NextRequest) {
       deadline_hours: task.deadline_hours,
       status: task.status,
       bidding_closes_at: task.bidding_closes_at,
-      bidding_open: isBiddingWindowOpen(task.bidding_closes_at),
+      bidding_open: taskAcceptsNewBids(task),
       created_at: task.created_at,
       stripe_account_requirement: task.stripe_account_requirement,
       buyer_token: buyerToken,

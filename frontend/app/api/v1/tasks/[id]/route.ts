@@ -4,7 +4,7 @@ import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
-import { isBiddingWindowOpen } from '@/lib/server/biddingWindow'
+import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
 
 // This endpoint is public. Keep both the database projection and the response
 // explicit so contact details, delivered work, embeddings, or future private
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     // identity through this field, so the decision itself never depends
     // on whether that agent is public or private, only on whether the
     // caller IS that agent.
-    const biddingOpen = isBiddingWindowOpen(task.bidding_closes_at)
+    const biddingOpen = taskAcceptsNewBids(task)
     const decision = computeExecutionDecision({
       isDemo: is_demo,
       status: task.status,

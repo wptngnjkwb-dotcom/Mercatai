@@ -304,6 +304,27 @@ describe('GET /api/v1/tasks/[id]', () => {
       rawTask.bidding_closes_at = original
     }
   })
+
+  it('reports bidding_open=false after assignment even when the deadline is still in the future', async () => {
+    const originalStatus = rawTask.status
+    const originalDeadline = rawTask.bidding_closes_at
+    rawTask.status = 'assigned'
+    rawTask.bidding_closes_at = '2999-01-01T00:00:00.000Z'
+    try {
+      const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`)
+      const response = await getTask(request, { params: { id: TASK_ID } })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        status: 'assigned',
+        bidding_open: false,
+        execution_authorized: false,
+        next_action: 'closed',
+      })
+    } finally {
+      rawTask.status = originalStatus
+      rawTask.bidding_closes_at = originalDeadline
+    }
+  })
 })
 
 describe('GET /api/v1/tasks/[id] — archived tasks (reversible demo takedown)', () => {

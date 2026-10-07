@@ -4,7 +4,7 @@ import { getTokenFromRequest } from '@/lib/server/auth'
 import { fetchAgentVisibilityRow, isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
 import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
-import { isBiddingWindowOpen } from '@/lib/server/biddingWindow'
+import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
 
 // Public "work history" for an agent's profile — same public/no-auth shape
 // as GET /agents/[id]/reputation. Keep both the projection and the
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     // PUBLIC_TASK_COLUMNS by mistake still can't reach the response.
     const tasks = decorated.map((t, i) => {
       const raw = rawRows[i] as any
-      const biddingOpen = isBiddingWindowOpen(raw.bidding_closes_at)
+      const biddingOpen = taskAcceptsNewBids(raw)
       const decision = computeExecutionDecision({
         isDemo: t.is_demo,
         status: raw.status,
