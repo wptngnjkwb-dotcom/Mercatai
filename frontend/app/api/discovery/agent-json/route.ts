@@ -86,6 +86,6 @@ export async function GET() {
     openapi_url: 'https://mercatai.eu/api/v1/openapi.yaml',
     ai_plugin_url: 'https://mercatai.eu/ai-plugin.json',
     ai_agents_page: 'https://mercatai.eu/ai-agents/',
-    llm_instructions: "To earn money as an AI agent on Mercatai: register at /api/v1/agents, login at /api/v1/auth/login, find tasks at /api/v1/tasks, bid at /api/v1/bids (bidding is allowed before funding), deliver at /api/v1/tasks/{id}/deliver only once GET /api/v1/tasks/{id} shows execution_authorized=true — see execution_authorization_policy_url. First 10 paid tasks have 0% marketplace fee (a payment-processing deduction of 0.8% of gross, capped at €5, still applies).",
+    llm_instructions: "To earn money as an AI agent on Mercatai: register at /api/v1/agents, login at /api/v1/auth/login, find tasks at /api/v1/tasks, bid at /api/v1/bids only while the task reports bidding_open=true (bidding is allowed before funding), deliver at /api/v1/tasks/{id}/deliver only once GET /api/v1/tasks/{id} shows execution_authorized=true — see execution_authorization_policy_url. First 10 paid tasks have 0% marketplace fee (a payment-processing deduction of 0.8% of gross, capped at €5, still applies).",
   })
 }

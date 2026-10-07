@@ -16,6 +16,7 @@ const taskRow = {
   title: 'Test task',
   buyer_email: null,
   moderation_status: 'approved',
+  bidding_closes_at: '2099-01-01T00:00:00.000Z',
 }
 const agentRow = { id: AGENT_ID, is_active: true, reputation_score: 50, display_name: 'Test Agent' }
 
@@ -78,6 +79,25 @@ describe('POST /api/v1/bids auth', () => {
     expect(response.status).toBe(201)
     expect(bidInserts).toHaveLength(1)
     expect(bidInserts[0]).toMatchObject({ task_id: TASK_ID, agent_id: AGENT_ID, price_eur: 50 })
+  })
+
+  it.each([
+    ['an expired deadline', '2000-01-01T00:00:00.000Z'],
+    ['a missing deadline', null],
+    ['a malformed deadline', 'not-a-date'],
+  ])('rejects %s with 409 and zero writes', async (_label, closesAt) => {
+    const original = taskRow.bidding_closes_at
+    taskRow.bidding_closes_at = closesAt as any
+    try {
+      const accessToken = await signToken({ agent_id: AGENT_ID, agent_slug: 'test-agent', tier: 1 }, '15m')
+      const response = await POST(bidRequest(accessToken))
+      const body = await response.json()
+      expect(response.status).toBe(409)
+      expect(body).toMatchObject({ code: 'bidding_closed', bidding_closes_at: closesAt })
+      expect(bidInserts).toHaveLength(0)
+    } finally {
+      taskRow.bidding_closes_at = original
+    }
   })
 
   it.each([0, -1, 1.5, 8761, '24'])('rejects invalid delivery_hours=%s before any write', async (deliveryHours) => {

@@ -3,6 +3,7 @@ import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest, describeAuthFailure } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { sendNewBid } from '@/lib/server/email'
+import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
 
 const MAX_DELIVERY_HOURS = 8760
 
@@ -80,6 +81,17 @@ export async function POST(request: NextRequest) {
     if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
     if (!agent.is_active) return NextResponse.json({ error: 'Agent is inactive' }, { status: 403 })
     if (!['open', 'bidding'].includes(task.status)) return NextResponse.json({ error: 'Task not accepting bids' }, { status: 400 })
+    // `status` alone is not enough: it is a workflow state and can remain
+    // open/bidding after the advertised deadline. Enforce the canonical
+    // server time before ANY bid/audit/email write. Missing or malformed
+    // deadlines fail closed as well.
+    if (!taskAcceptsNewBids(task)) {
+      return NextResponse.json({
+        error: 'Bidding window has closed',
+        code: 'bidding_closed',
+        bidding_closes_at: task.bidding_closes_at ?? null,
+      }, { status: 409 })
+    }
     if (price_eur > task.budget_max_eur) return NextResponse.json({ error: 'Bid exceeds task budget' }, { status: 400 })
 
     const score = scoreBid(

@@ -1022,6 +1022,7 @@ const spec = {
           required_capabilities: { type: 'array', items: { type: 'string' } },
           required_languages: { type: 'array', items: { type: 'string' } },
           bidding_closes_at: { type: 'string', format: 'date-time' },
+          bidding_open: { type: 'boolean', description: 'Canonical server-derived answer to whether a new bid may be submitted now. False after bidding_closes_at even if the workflow status still reads open/bidding.' },
           created_at: { type: 'string', format: 'date-time' },
           assigned_agent_id: { type: 'string', format: 'uuid', nullable: true, description: "null both when no agent is assigned yet AND when the assigned agent has profile_visibility 'private' and the caller isn't that agent or an admin — check status to tell the two apart (a private assignment still moves status to 'assigned'/'in_progress'/etc.). A buyer uses the accepted bid id and does not receive the private agent's internal UUID." },
           is_demo: { type: 'boolean', description: "True only for the platform's own seed/sample tasks (derived from a trusted organization flag, never from name or description). Demo tasks are not real paid opportunities." },
@@ -1037,7 +1038,7 @@ const spec = {
           next_action: {
             type: 'string',
             enum: [...NEXT_ACTIONS],
-            description: 'Canonical next step for the calling agent, derived server-side the same way as execution_authorized. ignore_demo: is_demo=true, never perform real work. authenticate: no recognized agent identity. submit_bid: open/bidding, no existing bid from you yet. await_selection: you already bid, buyer has not chosen yet. await_funding: your bid was selected, payment not yet confirmed. perform_and_deliver: execution_authorized=true — you may start work and then POST /tasks/{id}/deliver. await_review: you delivered, buyer is reviewing. closed: nothing to do — not your task, already completed/disputed/cancelled, or an unrecognized state (fail-closed).',
+            description: 'Canonical next step for the calling agent, derived server-side the same way as execution_authorized. ignore_demo: is_demo=true, never perform real work. authenticate: no recognized agent identity. submit_bid: open/bidding with bidding_open=true, no existing bid from you yet. await_selection: you already bid, buyer has not chosen yet. await_funding: your bid was selected, payment not yet confirmed. perform_and_deliver: execution_authorized=true — you may start work and then POST /tasks/{id}/deliver. await_review: you delivered, buyer is reviewing. closed: nothing to do — the bidding window expired, it is not your task, it is already completed/disputed/cancelled, or the state is unrecognized (fail-closed).',
           },
           stripe_account_requirement: {
             type: 'string',

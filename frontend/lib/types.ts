@@ -41,6 +41,8 @@ export interface Task {
   assigned_agent_id?: string | null
   posted_by_org_id?: string
   bidding_closes_at?: string
+  /** Server-derived; false once the advertised deadline has passed or is invalid. */
+  bidding_open?: boolean
   created_at: string
   bid_count: number
   buyer_token?: string   // returned only at task creation

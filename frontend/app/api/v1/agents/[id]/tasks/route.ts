@@ -4,6 +4,7 @@ import { getTokenFromRequest } from '@/lib/server/auth'
 import { fetchAgentVisibilityRow, isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
 import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
+import { isBiddingWindowOpen } from '@/lib/server/biddingWindow'
 
 // Public "work history" for an agent's profile — same public/no-auth shape
 // as GET /agents/[id]/reputation. Keep both the projection and the
@@ -12,7 +13,7 @@ import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds 
 // matter what the tasks table grows in the future. posted_by_org_id is
 // selected only to derive is_demo below (see attachPublicTaskFields) — it
 // must never itself appear in the returned JSON.
-const PUBLIC_TASK_COLUMNS = 'id,title,description,category,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,created_at,assigned_at,delivery_deadline_at,posted_by_org_id,archived_at'
+const PUBLIC_TASK_COLUMNS = 'id,title,description,category,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,posted_by_org_id,archived_at'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
@@ -55,6 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     // PUBLIC_TASK_COLUMNS by mistake still can't reach the response.
     const tasks = decorated.map((t, i) => {
       const raw = rawRows[i] as any
+      const biddingOpen = isBiddingWindowOpen(raw.bidding_closes_at)
       const decision = computeExecutionDecision({
         isDemo: t.is_demo,
         status: raw.status,
@@ -62,6 +64,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         callerAgentId,
         assignedAgentId: raw.assigned_agent_id ?? null,
         hasExistingBid: bidTaskIds.has(raw.id),
+        biddingOpen,
       })
       return {
         id: raw.id,
@@ -72,6 +75,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         budget_max_eur: raw.budget_max_eur,
         deadline_hours: raw.deadline_hours,
         status: raw.status,
+        bidding_closes_at: raw.bidding_closes_at,
+        bidding_open: biddingOpen,
         // Every row here is already filtered to assigned_agent_id ===
         // params.id, and the caller already passed isAgentVisibleTo for
         // that same agent above — so this is never a new disclosure.

@@ -24,7 +24,7 @@ let cannedTask: Record<string, unknown> = {
   required_languages: ['en'],
   posted_by_org_id: 'org-1',
   assigned_agent_id: null,
-  bidding_closes_at: null,
+  bidding_closes_at: '2099-01-01T00:00:00.000Z',
   created_at: '2026-08-20T00:00:00.000Z',
   assigned_at: null,
   delivery_deadline_at: null,
@@ -74,6 +74,7 @@ vi.mock('@/lib/server/supabase', () => ({
       // .eq('moderation_status', 'approved') filter, not because the mock
       // assumed it would.
       const eqFilters: [string, unknown][] = []
+      const gtFilters: [string, unknown][] = []
       const isFilters: [string, unknown][] = []
       const notFilters: [string, string, unknown][] = []
       let insertedRow: Record<string, unknown> | null = null
@@ -94,6 +95,7 @@ vi.mock('@/lib/server/supabase', () => ({
       const builder: Record<string, any> = {
         select: (columns?: string) => { if (columns) selectedColumns = columns; return builder },
         eq: (field: string, value: unknown) => { eqFilters.push([field, value]); return builder },
+        gt: (field: string, value: unknown) => { gtFilters.push([field, value]); return builder },
         is: (field: string, value: unknown) => { isFilters.push([field, value]); return builder },
         not: (field: string, operator: string, value: unknown) => { notFilters.push([field, operator, value]); return builder },
         in: (_field: string, ids: unknown[]) => { inFilterIds = ids as string[]; return builder },
@@ -134,6 +136,7 @@ vi.mock('@/lib/server/supabase', () => ({
               return resolve({ data: matched, count: matched.length, error: null })
             }
             const matches = eqFilters.every(([f, v]) => (cannedTask as Record<string, unknown>)[f] === v)
+              && gtFilters.every(([f, v]) => String((cannedTask as Record<string, unknown>)[f] ?? '') > String(v))
               && isFilters.every(([f, v]) => ((cannedTask as Record<string, unknown>)[f] ?? null) === v)
               && notFilters.every(([f, op, v]) => (op === 'is' ? ((cannedTask as Record<string, unknown>)[f] ?? null) !== v : true))
             // Project down to the actually-selected columns, same as a real
@@ -419,6 +422,19 @@ describe('GET /api/v1/tasks — moderation isolation', () => {
     // The mocked query always filters server-side via .eq('moderation_status','approved')
     // before returning — a quarantined task never reaches the response.
     expect(body.tasks).toEqual([])
+  })
+
+  it('excludes a task whose bidding deadline has passed even when its workflow status is still open', async () => {
+    const original = cannedTask.bidding_closes_at
+    cannedTask = { ...cannedTask, bidding_closes_at: '2000-01-01T00:00:00.000Z' }
+    try {
+      const { GET } = await import('@/app/api/v1/tasks/route')
+      const response = await GET(new NextRequest('http://localhost/api/v1/tasks'))
+      expect(response.status).toBe(200)
+      expect((await response.json()).tasks).toEqual([])
+    } finally {
+      cannedTask = { ...cannedTask, bidding_closes_at: original }
+    }
   })
 })
 

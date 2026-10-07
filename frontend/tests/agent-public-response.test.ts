@@ -76,7 +76,7 @@ const rawTask = {
   status: 'open',
   assigned_agent_id: null as string | null,
   posted_by_org_id: 'organization-private',
-  bidding_closes_at: '2026-08-14T12:00:00.000Z',
+  bidding_closes_at: '2099-01-01T00:00:00.000Z',
   created_at: '2026-08-13T12:00:00.000Z',
   assigned_at: null,
   delivery_deadline_at: null,
@@ -239,6 +239,7 @@ describe('GET /api/v1/tasks/[id]', () => {
       id: TASK_ID,
       title: 'Analyse a B2B dataset',
       status: 'open',
+      bidding_open: true,
       delivery_deadline_at: null,
       is_demo: false,
       funding_status: 'unfunded',
@@ -282,6 +283,25 @@ describe('GET /api/v1/tasks/[id]', () => {
       expect(body).toEqual({ error: 'Task not found' })
     } finally {
       rawTask.moderation_status = originalStatus
+    }
+  })
+
+  it('reports bidding_open=false and next_action=closed after the deadline even if status stayed open', async () => {
+    const original = rawTask.bidding_closes_at
+    rawTask.bidding_closes_at = '2000-01-01T00:00:00.000Z'
+    try {
+      const agentToken = await signToken({ agent_id: OTHER_AGENT_ID, tier: 1 }, '15m')
+      const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, { headers: { authorization: `Bearer ${agentToken}` } })
+      const response = await getTask(request, { params: { id: TASK_ID } })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        status: 'open',
+        bidding_open: false,
+        execution_authorized: false,
+        next_action: 'closed',
+      })
+    } finally {
+      rawTask.bidding_closes_at = original
     }
   })
 })

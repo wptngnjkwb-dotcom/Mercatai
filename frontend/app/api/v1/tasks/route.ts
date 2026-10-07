@@ -16,6 +16,7 @@ import { getTokenFromRequest } from '@/lib/server/auth'
 import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
 import { STANDARD_AGENT_LIABILITY } from '@/lib/server/stripeAccountRequirement'
+import { isBiddingWindowOpen } from '@/lib/server/biddingWindow'
 
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
@@ -75,6 +76,12 @@ export async function GET(request: NextRequest) {
       // liquidity an open marketplace depends on. Explicit ?status= still
       // filters to one state, e.g. for buyers checking 'completed' work.
       query = explicitStatus ? query.eq('status', explicitStatus) : query.in('status', ['open', 'bidding'])
+      // Public open/bidding listings mean "may receive a bid now", not only
+      // a stale workflow label. Filter before order/limit so expired rows can
+      // never crowd a still-live task out of the page.
+      if (!explicitStatus || explicitStatus === 'open' || explicitStatus === 'bidding') {
+        query = query.gt('bidding_closes_at', new Date().toISOString())
+      }
     }
     if (category) query = query.eq('category', category)
 
@@ -109,8 +116,14 @@ export async function GET(request: NextRequest) {
         callerAgentId,
         assignedAgentId: raw.assigned_agent_id ?? null,
         hasExistingBid: bidTaskIds.has(raw.id),
+        biddingOpen: isBiddingWindowOpen(raw.bidding_closes_at),
       })
-      return { ...t, execution_authorized: decision.execution_authorized, next_action: decision.next_action }
+      return {
+        ...t,
+        bidding_open: isBiddingWindowOpen(raw.bidding_closes_at),
+        execution_authorized: decision.execution_authorized,
+        next_action: decision.next_action,
+      }
     })
     // assigned_agent_id, execution_authorized and next_action can all
     // differ by caller — never cacheable across callers.
@@ -331,6 +344,7 @@ export async function POST(request: NextRequest) {
       deadline_hours: task.deadline_hours,
       status: task.status,
       bidding_closes_at: task.bidding_closes_at,
+      bidding_open: isBiddingWindowOpen(task.bidding_closes_at),
       created_at: task.created_at,
       stripe_account_requirement: task.stripe_account_requirement,
       buyer_token: buyerToken,

@@ -64,8 +64,10 @@ export function computeExecutionDecision(input: {
   callerAgentId: string | null
   assignedAgentId: string | null
   hasExistingBid: boolean
+  /** Server-derived deadline check. Omitted only by non-bidding legacy callers/tests. */
+  biddingOpen?: boolean
 }): ExecutionDecision {
-  const { isDemo, status, fundingStatus, callerAgentId, assignedAgentId, hasExistingBid } = input
+  const { isDemo, status, fundingStatus, callerAgentId, assignedAgentId, hasExistingBid, biddingOpen = true } = input
 
   if (isDemo) return { execution_authorized: false, next_action: 'ignore_demo' }
   if (fundingStatus === 'released' || fundingStatus === 'refunded') return CLOSED
@@ -81,6 +83,7 @@ export function computeExecutionDecision(input: {
       // A funded/pending payment while a task is still open is an
       // inconsistent state and must never invite another bid.
       if (fundingStatus !== 'unfunded') return CLOSED
+      if (!biddingOpen) return CLOSED
       if (!callerAgentId) return { execution_authorized: false, next_action: 'authenticate' }
       return hasExistingBid
         ? { execution_authorized: false, next_action: 'await_selection' }

@@ -4,6 +4,7 @@ import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
+import { isBiddingWindowOpen } from '@/lib/server/biddingWindow'
 
 // This endpoint is public. Keep both the database projection and the response
 // explicit so contact details, delivered work, embeddings, or future private
@@ -49,6 +50,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     // identity through this field, so the decision itself never depends
     // on whether that agent is public or private, only on whether the
     // caller IS that agent.
+    const biddingOpen = isBiddingWindowOpen(task.bidding_closes_at)
     const decision = computeExecutionDecision({
       isDemo: is_demo,
       status: task.status,
@@ -56,6 +58,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       callerAgentId,
       assignedAgentId: task.assigned_agent_id ?? null,
       hasExistingBid: bidTaskIds.has(task.id),
+      biddingOpen,
     })
 
     return withPrivateCacheHeaders(NextResponse.json({
@@ -74,6 +77,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       // bid but never needs this UUID. Deliberately NOT task.assigned_agent_id.
       assigned_agent_id,
       bidding_closes_at: task.bidding_closes_at,
+      bidding_open: biddingOpen,
       created_at: task.created_at,
       assigned_at: task.assigned_at,
       delivery_deadline_at: task.delivery_deadline_at,
