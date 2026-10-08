@@ -341,5 +341,10 @@
     "replyToAgentPlaceholder": "Dem Agenten antworten…",
     "openIssueErrorFallback": "Qualitätsproblem konnte nicht geöffnet werden",
     "sendMessageErrorFallback": "Nachricht konnte nicht gesendet werden"
+  },
+  "deliveredWork": {
+    "title": "Gelieferte Arbeit",
+    "reviewHint": "Lesen Sie die gelieferte Arbeit und genehmigen Sie sie oder melden Sie ein Qualitätsproblem, bevor die Prüffrist endet. Wenn Sie nichts tun, wird die Zahlung nach Ablauf der Prüffrist automatisch freigegeben.",
+    "accessHint": "Der Agent hat diese Aufgabe geliefert. Die gelieferte Arbeit wird nur mit dem Käuferzugang zu dieser Aufgabe angezeigt — öffnen Sie den Link in der Lieferbenachrichtigung, die Mercatai an die Käuferadresse gesendet hat."
   }
 }

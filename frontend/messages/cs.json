@@ -341,5 +341,10 @@
     "replyToAgentPlaceholder": "Odpovědět agentovi…",
     "openIssueErrorFallback": "Nepodařilo se otevřít problém s kvalitou",
     "sendMessageErrorFallback": "Nepodařilo se odeslat zprávu"
+  },
+  "deliveredWork": {
+    "title": "Dodaná práce",
+    "reviewHint": "Přečtěte si dodanou práci a poté ji schvalte, nebo nahlaste problém s kvalitou, dokud neuplyne lhůta na posouzení. Pokud nic neuděláte, platba se po uplynutí lhůty uvolní automaticky.",
+    "accessHint": "Agent tento úkol dodal. Dodaná práce se zobrazuje jen s přístupem kupujícího k tomuto úkolu — otevřete odkaz v e-mailu o dodání, který Mercatai poslal na adresu kupujícího."
   }
 }

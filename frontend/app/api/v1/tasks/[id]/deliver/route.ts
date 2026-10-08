@@ -1,13 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
-import { getTokenFromRequest } from '@/lib/server/auth'
+import { getTokenFromRequest, signToken } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
 import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
 import { computeExecutionDecision } from '@/lib/server/executionAuthorization'
+import { sendTaskDelivered } from '@/lib/server/email'
 
 const DELIVERY_NOTE_MAX_LENGTH = 50_000
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/**
+ * Tells the task's buyer that work was delivered, with a link to the buyer
+ * review page and the review deadline. Called only after the atomic delivery
+ * RPC confirmed a fresh in_progress -> review transition, so a duplicate or
+ * no-op delivery (which the RPC rejects) never emails twice. Non-critical:
+ * any failure (lookup, token signing, provider) is logged and swallowed so it
+ * can never fail or roll back an already-recorded delivery. The link carries
+ * a fresh task-scoped buyer token — the same credential and payload as
+ * buyer-access recovery — sent only to the address already stored on the task.
+ */
+async function notifyBuyerOfDelivery(
+  db: ReturnType<typeof getSupabase>,
+  taskId: string,
+  reviewDeadlineAt: string,
+) {
+  try {
+    const { data: task, error } = await db
+      .from('tasks')
+      .select('id,title,buyer_email,posted_by_org_id')
+      .eq('id', taskId)
+      .maybeSingle()
+    if (error) throw error
+    const buyerEmail = typeof task?.buyer_email === 'string' ? task.buyer_email.trim().toLowerCase() : ''
+    if (!task || !EMAIL_RE.test(buyerEmail)) return
+    const buyerToken = await signToken({
+      role: 'buyer',
+      task_id: task.id,
+      org_id: task.posted_by_org_id,
+      buyer_email: buyerEmail,
+    }, '30d')
+    await sendTaskDelivered({
+      to: buyerEmail,
+      taskTitle: typeof task.title === 'string' ? task.title : 'your task',
+      taskId: task.id,
+      buyerToken,
+      reviewDeadlineAt,
+    })
+  } catch (err) {
+    console.error('[deliver] buyer delivery notification failed', err)
+  }
+}
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const token = await getTokenFromRequest(request)
@@ -99,6 +143,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     // Third-party developer webhooks never learn a private agent's identity
     // — see frontend/lib/server/agentVisibility.ts.
     void fireWebhooks('task.delivered', { task_id: params.id, ...(await agentIdentityForWebhook(db, task.assigned_agent_id)) })
+    if (result.task_status === 'review' && typeof result.review_deadline_at === 'string') {
+      await notifyBuyerOfDelivery(db, params.id, result.review_deadline_at)
+    }
     return NextResponse.json({
       id: result.task_id,
       status: result.task_status,

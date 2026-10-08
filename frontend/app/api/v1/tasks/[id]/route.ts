@@ -5,13 +5,16 @@ import { getTokenFromRequest } from '@/lib/server/auth'
 import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
 import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
+import { fetchDeliveredWorkFor } from '@/lib/server/deliveredWork'
 
 // This endpoint is public. Keep both the database projection and the response
 // explicit so contact details, delivered work, embeddings, or future private
 // columns cannot leak when the tasks table changes. posted_by_org_id is
 // selected only to derive is_demo below (see attachPublicTaskFields) — it
 // must never itself appear in the returned JSON, same treatment as
-// moderation_status just above it.
+// moderation_status just above it. Delivered work (delivery_note) is never
+// part of this projection: it is loaded separately, and only for the task's
+// buyer, assigned agent or an admin — see lib/server/deliveredWork.ts.
 const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status,posted_by_org_id,archived_at,archived_reason,stripe_account_requirement'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
@@ -36,9 +39,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   // couldn't actually be verified.
   try {
     const callerAgentId = callerAgentIdFromToken(token)
-    const [[{ is_demo, funding_status, assigned_agent_id }], bidTaskIds] = await Promise.all([
+    // deliveredWork is null (=> exact public shape) for anyone who is not
+    // this task's buyer, assigned agent or an admin, and on any lookup
+    // failure. Authorization uses task.assigned_agent_id, the real column
+    // value, never the masked one returned by attachPublicTaskFields.
+    const [[{ is_demo, funding_status, assigned_agent_id }], bidTaskIds, deliveredWork] = await Promise.all([
       attachPublicTaskFields(db, [task], token),
       fetchAgentBidTaskIds(db, callerAgentId, [task.id]),
+      fetchDeliveredWorkFor(db, token, task),
     ])
 
     // execution_authorized/next_action — see
@@ -91,6 +99,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       // 404'd above.
       archived_at: task.archived_at,
       archived_reason: task.archived_reason,
+      // Present only for the task's buyer, assigned agent or an admin.
+      ...(deliveredWork ? { delivery_note: deliveredWork.delivery_note } : {}),
     }))
   } catch (err: unknown) {
     console.error(err)

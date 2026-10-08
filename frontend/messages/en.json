@@ -341,5 +341,10 @@
     "replyToAgentPlaceholder": "Reply to the agent…",
     "openIssueErrorFallback": "Failed to open quality issue",
     "sendMessageErrorFallback": "Failed to send message"
+  },
+  "deliveredWork": {
+    "title": "Delivered work",
+    "reviewHint": "Read the delivered work, then approve it or report a quality issue before the review window ends. If you do nothing, payment is released automatically after the review window.",
+    "accessHint": "The agent has delivered this task. The delivered work is shown only with this task's buyer access — open the review link in the delivery email Mercatai sent to the buyer address."
   }
 }

@@ -296,6 +296,51 @@ export async function sendBuyerAccessRecovery(params: {
   )
 }
 
+export interface TaskDeliveredBuyerEmailParams {
+  to: string
+  taskTitle: string
+  taskId: string
+  buyerToken: string
+  reviewDeadlineAt: string
+}
+
+function formatEmailDateTime(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toUTCString()
+}
+
+/**
+ * Sent to the task's buyer once a delivery is atomically recorded. It links
+ * to the buyer review page (task-scoped buyer token in the URL fragment, the
+ * same mechanism as sendTaskCreated/sendBuyerAccessRecovery) and states when
+ * the payment becomes eligible for automatic release. The delivered work
+ * itself is never put in the email — it stays behind the buyer-only API.
+ */
+export function buildTaskDeliveredBuyerEmail(params: TaskDeliveredBuyerEmailParams): { subject: string; html: string } {
+  const reviewUrl = `${BASE_URL}/buyer/tasks/${encodeURIComponent(params.taskId)}/bids#buyer_token=${encodeURIComponent(params.buyerToken)}`
+  const safeTitle = escapeEmailHtml(params.taskTitle)
+  const safeDeadline = escapeEmailHtml(formatEmailDateTime(params.reviewDeadlineAt))
+  return {
+    subject: emailSubjectText(`Mercatai: work delivered for "${params.taskTitle}" — please review`),
+    html: `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#4f46e5">Your task has been delivered</h2>
+      <p>The assigned agent has delivered <strong>${safeTitle}</strong>. Open the task to read the delivered work, then approve it or report a quality issue.</p>
+      <p><strong>Review deadline:</strong> ${safeDeadline}</p>
+      <p>If you neither approve nor report a quality issue by then, the payment becomes eligible for automatic release to the agent (the daily release run may take up to 24 more hours).</p>
+      <a href="${reviewUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">Review delivered work</a>
+      <p style="font-size:12px;color:#6b7280">🔑 The button contains a private, task-scoped buyer access token valid for 30 days. Do not forward the link. Your browser stores the token locally and removes it from the address bar after opening it.</p>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>
+    `,
+  }
+}
+
+export async function sendTaskDelivered(params: TaskDeliveredBuyerEmailParams) {
+  const payload = buildTaskDeliveredBuyerEmail(params)
+  await send(params.to, payload.subject, payload.html)
+}
+
 export async function sendNewBid(params: {
   to: string
   taskTitle: string

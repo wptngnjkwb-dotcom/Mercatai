@@ -43,6 +43,11 @@ export const api = {
     return request<{ tasks: import('./types').Task[]; total: number }>(`/api/v1/tasks${q ? `?${q}` : ''}`)
   },
   getTask: (id: string) => request<import('./types').Task>(`/api/v1/tasks/${id}`),
+  // Buyer review page only: sends this task's buyer token when one is stored
+  // (same buyerAuthHeader pattern as getTaskBids), so the response includes
+  // the buyer-only delivery_note. Without a stored buyer token it falls back
+  // to the default header and returns the normal task shape.
+  getBuyerTask: (id: string) => request<import('./types').Task>(`/api/v1/tasks/${id}`, { headers: buyerAuthHeader(id) }),
   createTask: (body: object) => request<import('./types').Task>('/api/v1/tasks', { method: 'POST', body: JSON.stringify(body) }),
   approveTask: (id: string) => request(`/api/v1/tasks/${id}/approve`, { method: 'PUT', headers: buyerAuthHeader(id) }),
   // Quality Issue flow — replaces the old dispute/admin-resolve mechanism.

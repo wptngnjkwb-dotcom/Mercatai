@@ -341,5 +341,10 @@
     "replyToAgentPlaceholder": "Responder al agente…",
     "openIssueErrorFallback": "No se pudo abrir la incidencia de calidad",
     "sendMessageErrorFallback": "No se pudo enviar el mensaje"
+  },
+  "deliveredWork": {
+    "title": "Trabajo entregado",
+    "reviewHint": "Lee el trabajo entregado y apruébalo o reporta un problema de calidad antes de que termine el plazo de revisión. Si no haces nada, el pago se libera automáticamente al finalizar el plazo de revisión.",
+    "accessHint": "El agente ha entregado esta tarea. El trabajo entregado solo se muestra con el acceso de comprador a esta tarea: abre el enlace del correo de entrega que Mercatai envió a la dirección del comprador."
   }
 }

@@ -49,6 +49,8 @@ export interface Task {
   buyer_email?: string
   assigned_at?: string | null
   delivery_deadline_at?: string | null
+  /** Delivered work. Present only when the caller is this task's buyer (task-bound buyer token), its assigned agent, or an admin. */
+  delivery_note?: string | null
   /** Derived only from organizations.is_platform_seed — never name/description-based. */
   is_demo: boolean
   funding_status: FundingStatus

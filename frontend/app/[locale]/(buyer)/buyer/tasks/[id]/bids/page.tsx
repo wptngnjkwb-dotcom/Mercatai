@@ -22,6 +22,7 @@ export default function TaskBidsPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const t = useTranslations('qualityIssue')
+  const tDelivered = useTranslations('deliveredWork')
   const [task, setTask] = useState<Task | null>(null)
   const [bids, setBids] = useState<Bid[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,7 +54,21 @@ export default function TaskBidsPage() {
   const [reviewError, setReviewError] = useState('')
 
   useEffect(() => {
-    Promise.all([api.getTask(id), api.getTaskBids(id)])
+    // Recovery and delivery-notification links carry the token in the URL
+    // fragment, which never reaches the server. Consume it once, persist it
+    // locally and remove it from the visible address bar immediately — before
+    // the task/bids requests below, so they already send it.
+    const fragment = new URLSearchParams(window.location.hash.slice(1))
+    const recovered = fragment.get('buyer_token')
+    if (recovered) {
+      localStorage.setItem(`buyer_token_${id}`, recovered)
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+    }
+    // Pre-fill buyer_token from localStorage if saved at task creation.
+    const saved = recovered ?? localStorage.getItem(`buyer_token_${id}`)
+    if (saved) setBuyerToken(saved)
+
+    Promise.all([api.getBuyerTask(id), api.getTaskBids(id)])
       .then(([t, b]) => {
         setTask(t)
         setBids(b.bids)
@@ -74,19 +89,6 @@ export default function TaskBidsPage() {
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-    // Recovery links carry the token in the URL fragment, which never
-    // reaches the server. Consume it once, persist it locally and remove it
-    // from the visible address bar immediately.
-    const fragment = new URLSearchParams(window.location.hash.slice(1))
-    const recovered = fragment.get('buyer_token')
-    if (recovered) {
-      localStorage.setItem(`buyer_token_${id}`, recovered)
-      setBuyerToken(recovered)
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
-    }
-    // Pre-fill buyer_token from localStorage if saved at task creation.
-    const saved = recovered ?? localStorage.getItem(`buyer_token_${id}`)
-    if (saved) setBuyerToken(saved)
   }, [id])
 
   const handleBuyerAccessRecovery = async () => {
@@ -364,6 +366,19 @@ export default function TaskBidsPage() {
               {task.status.replace('_', ' ')}
             </span>
           </div>
+
+          {typeof task.delivery_note === 'string' && task.delivery_note.trim() !== '' ? (
+            <section className="mt-4 border border-gray-200 rounded-lg p-4" aria-labelledby="delivered-work-title">
+              <h2 id="delivered-work-title" className="text-sm font-semibold text-gray-900 mb-1">{tDelivered('title')}</h2>
+              {task.status === 'review' && <p className="text-xs text-gray-500 mb-2">{tDelivered('reviewHint')}</p>}
+              {/* Plain text only: React escapes it, whitespace-pre-wrap keeps the agent's newlines. */}
+              <div className="text-sm text-gray-800 whitespace-pre-wrap break-words max-h-96 overflow-y-auto bg-gray-50 rounded p-3">
+                {task.delivery_note}
+              </div>
+            </section>
+          ) : task.status === 'review' && (
+            <p className="mt-4 text-sm text-gray-600 border border-gray-200 rounded-lg p-3">{tDelivered('accessHint')}</p>
+          )}
 
           {task.status === 'review' && (
             <div className="mt-4 flex gap-3">
