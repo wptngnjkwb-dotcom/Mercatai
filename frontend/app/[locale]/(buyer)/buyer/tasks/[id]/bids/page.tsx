@@ -40,6 +40,10 @@ export default function TaskBidsPage() {
   // Payment step after bid acceptance
   const [pendingPayment, setPendingPayment] = useState<{ bidId: string; priceEur: number; agentName: string } | null>(null)
   const [buyerToken, setBuyerToken] = useState('')
+  const [showBuyerToken, setShowBuyerToken] = useState(false)
+  const [recoveryEmail, setRecoveryEmail] = useState('')
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
+  const [recoveryMessage, setRecoveryMessage] = useState('')
 
   // Review step after task approval
   const [pendingReview, setPendingReview] = useState<{ agentName: string } | null>(null)
@@ -70,10 +74,40 @@ export default function TaskBidsPage() {
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-    // Pre-fill buyer_token from localStorage if saved at task creation
-    const saved = localStorage.getItem(`buyer_token_${id}`)
+    // Recovery links carry the token in the URL fragment, which never
+    // reaches the server. Consume it once, persist it locally and remove it
+    // from the visible address bar immediately.
+    const fragment = new URLSearchParams(window.location.hash.slice(1))
+    const recovered = fragment.get('buyer_token')
+    if (recovered) {
+      localStorage.setItem(`buyer_token_${id}`, recovered)
+      setBuyerToken(recovered)
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+    }
+    // Pre-fill buyer_token from localStorage if saved at task creation.
+    const saved = recovered ?? localStorage.getItem(`buyer_token_${id}`)
     if (saved) setBuyerToken(saved)
   }, [id])
+
+  const handleBuyerAccessRecovery = async () => {
+    if (!recoveryEmail.trim()) return
+    setRecoveryBusy(true)
+    setRecoveryMessage('')
+    try {
+      const response = await fetch(`/api/v1/tasks/${encodeURIComponent(id)}/buyer-access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: recoveryEmail.trim() }),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || 'Could not request buyer access')
+      setRecoveryMessage(body.message)
+    } catch (e) {
+      setRecoveryMessage(e instanceof Error ? e.message : 'Could not request buyer access')
+    } finally {
+      setRecoveryBusy(false)
+    }
+  }
 
   const openIssue = issues.find(i => i.status === 'open')
 
@@ -275,13 +309,30 @@ export default function TaskBidsPage() {
 
         <div className="space-y-2">
           <label className="block text-sm font-medium text-gray-700">Your buyer token</label>
-          <textarea
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500 h-20 resize-none"
+          <div className="flex gap-2">
+          <input
+            type={showBuyerToken ? 'text' : 'password'}
+            autoComplete="off"
+            className="min-w-0 flex-1 border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500"
             placeholder="Paste your buyer token (eyJ...)"
             value={buyerToken}
             onChange={e => setBuyerToken(e.target.value)}
           />
+          <button type="button" className="btn-secondary" onClick={() => setShowBuyerToken(value => !value)}>{showBuyerToken ? 'Hide' : 'Show'}</button>
+          </div>
           <p className="text-xs text-gray-400">You received this token when you posted the task. Check your email or the task creation page.</p>
+          {!buyerToken && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+              <p className="text-xs text-gray-600">Lost the token? Enter the same email used when posting this task.</p>
+              <div className="flex gap-2">
+                <input type="email" className="input min-w-0 flex-1" placeholder="you@company.com" value={recoveryEmail} onChange={e => setRecoveryEmail(e.target.value)} />
+                <button type="button" className="btn-secondary whitespace-nowrap" disabled={recoveryBusy || !recoveryEmail.trim()} onClick={handleBuyerAccessRecovery}>
+                  {recoveryBusy ? 'Sending…' : 'Email access link'}
+                </button>
+              </div>
+              {recoveryMessage && <p className="text-xs text-gray-600">{recoveryMessage}</p>}
+            </div>
+          )}
         </div>
 
         <PaymentCheckout

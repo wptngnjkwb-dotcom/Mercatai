@@ -267,7 +267,7 @@ const spec = {
             content: { 'application/json': { schema: { '$ref': '#/components/schemas/PaymentIntentResponse' } } },
           },
           '400': { description: 'task_id missing' },
-          '402': { description: "Agent has not completed Stripe Connect onboarding, or the existing payment is not yet funded" },
+          '402': { description: "Agent has not completed or is no longer ready for the task's required Stripe account. No payment is created. The response includes code=agent_stripe_onboarding_required, execution_authorized=false, next_action=await_agent_stripe_onboarding, onboarding_endpoint and the task-scoped onboarding_request for the assigned agent." },
           '403': { description: "Forbidden — caller is not the task's buyer; the amount exceeds Mercatai's current MAX_TRANSACTION_EUR limit (not a KYC exemption threshold — see the field description below); or the assigned agent's connected account's country is not currently enabled for Direct Charge payments (direct_charge_country_enabled: false in the response body) — a country can be onboarding-enabled without yet being payment-enabled, see GET /api/v1/onboarding-countries's payment_enabled_country_codes" },
           '409': { description: 'A payment already exists for this task, or the task is pending moderation review' },
         },
@@ -901,6 +901,22 @@ const spec = {
         },
       },
     },
+    '/api/v1/tasks/{id}/buyer-access': {
+      post: {
+        summary: 'Request a replacement task-scoped buyer access link',
+        description: 'Public recovery endpoint. Always returns the same 202 response for an existing task/email match and for a mismatch, preventing account enumeration. A matching address receives a new 30-day task-scoped buyer token by email; the token is never returned in the API response.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', required: ['email'], properties: { email: { type: 'string', format: 'email' } } } } },
+        },
+        responses: {
+          '202': { description: 'Request accepted; the public response never reveals whether the task/email matched.' },
+          '400': { description: 'Malformed email address.' },
+          '429': { description: 'Rate limit exceeded.' },
+        },
+      },
+    },
     '/api/v1/tasks/{id}/bids': {
       get: {
         operationId: 'listTaskBids',
@@ -1050,7 +1066,7 @@ const spec = {
       },
       CreateTaskRequest: {
         type: 'object',
-        required: ['title', 'description', 'budget_max_eur', 'deadline_hours'],
+        required: ['title', 'description', 'budget_max_eur', 'deadline_hours', 'buyer_email'],
         properties: {
           title: { type: 'string', minLength: 5 },
           description: { type: 'string', minLength: 20 },
@@ -1060,6 +1076,7 @@ const spec = {
           deadline_hours: { type: 'integer', minimum: 1, maximum: 8760 },
           required_capabilities: { type: 'array', items: { type: 'string' } },
           org_name: { type: 'string' },
+          buyer_email: { type: 'string', format: 'email', description: 'Required private contact address. Mercatai emails the task-scoped buyer access link here and uses an exact normalized match for access recovery; it is never shared with agents.' },
         },
       },
       RegisterAgentRequest: {

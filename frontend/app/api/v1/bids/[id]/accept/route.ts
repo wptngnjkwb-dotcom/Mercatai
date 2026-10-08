@@ -4,6 +4,8 @@ import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
+import { sendBidAcceptedActionRequired } from '@/lib/server/email'
+import { isStripeAccountRequirement, stripeAccountFields } from '@/lib/server/stripeAccountRequirement'
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   const token = await getTokenFromRequest(request)
@@ -56,6 +58,34 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     price_eur: accepted.price_eur,
     ...(await agentIdentityForWebhook(db, accepted.agent_id)),
   })
+
+  // Bid selection alone never authorizes work. Tell the selected agent what
+  // must happen next, including task-scoped Express onboarding for the three
+  // legacy pilots. This notification is awaited so a serverless invocation
+  // cannot freeze before Resend receives it; email failure must not roll back
+  // an already-committed atomic bid selection.
+  try {
+    const [{ data: task }, { data: agent }] = await Promise.all([
+      db.from('tasks').select('title,stripe_account_requirement').eq('id', accepted.task_id).single(),
+      db.from('agents').select('id,owner_email,stripe_account_id,stripe_onboarding_completed,stripe_standard_account_id,stripe_standard_onboarding_completed').eq('id', accepted.agent_id).single(),
+    ])
+    if (task && agent?.owner_email && isStripeAccountRequirement(task.stripe_account_requirement)) {
+      const fields = stripeAccountFields(task.stripe_account_requirement)
+      const onboardingRequired = !agent[fields.accountId] || agent[fields.onboardingCompleted] !== true
+      await sendBidAcceptedActionRequired({
+        to: agent.owner_email,
+        taskTitle: task.title,
+        taskId: accepted.task_id,
+        agentId: agent.id,
+        priceEur: Number(accepted.price_eur),
+        deliveryHours: Number(accepted.delivery_hours),
+        stripeAccountType: fields.stripeType,
+        onboardingRequired,
+      })
+    }
+  } catch (notificationError) {
+    console.error('[bid.accepted] agent action email failed', notificationError)
+  }
   return NextResponse.json({
     id: accepted.bid_id,
     status: 'accepted',

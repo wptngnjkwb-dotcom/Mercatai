@@ -18,6 +18,8 @@ import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds 
 import { STANDARD_AGENT_LIABILITY } from '@/lib/server/stripeAccountRequirement'
 import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
 
+const BUYER_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 // Run in Supabase:
 // ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
 
@@ -152,8 +154,15 @@ export async function POST(request: NextRequest) {
       org_name, buyer_email,
     } = body
 
+    const normalizedBuyerEmail = typeof buyer_email === 'string' ? buyer_email.trim().toLowerCase() : ''
+
     if (!title || !description || !budget_max_eur || !deadline_hours) {
       return NextResponse.json({ error: 'title, description, budget_max_eur and deadline_hours are required' }, { status: 400 })
+    }
+    if (!normalizedBuyerEmail || !BUYER_EMAIL_RE.test(normalizedBuyerEmail)) {
+      return NextResponse.json({
+        error: 'buyer_email is required and must be valid — Mercatai uses it to deliver and safely restore the task-scoped buyer access token.',
+      }, { status: 400 })
     }
     if (typeof budget_max_eur !== 'number' || budget_max_eur < 1) {
       return NextResponse.json({ error: 'budget_max_eur must be at least €1' }, { status: 400 })
@@ -244,7 +253,7 @@ export async function POST(request: NextRequest) {
         stripe_account_requirement: STANDARD_AGENT_LIABILITY,
         bidding_closes_at: biddingClosesAt,
         ...(apiClient ? { referred_by_client_id: apiClient.id } : {}),
-        ...(buyer_email ? { buyer_email } : {}),
+        buyer_email: normalizedBuyerEmail,
         moderation_status: dbModerationStatus,
         moderation_risk_score: moderation.riskScore,
         moderation_reason_codes: moderation.reasonCodes,
@@ -281,7 +290,7 @@ export async function POST(request: NextRequest) {
         role: 'buyer',
         task_id: task.id,
         org_id: orgId,
-        ...(buyer_email ? { buyer_email } : {}),
+        buyer_email: normalizedBuyerEmail,
       },
       '30d'  // 30 days — long enough to cover task lifecycle
     )
@@ -318,14 +327,14 @@ export async function POST(request: NextRequest) {
     })
 
     // Send confirmation email if buyer provided their email (fire-and-forget)
-    if (buyer_email && typeof buyer_email === 'string' && buyer_email.includes('@')) {
-      sendTaskCreated({
-        to: buyer_email,
+    if (normalizedBuyerEmail) {
+      await sendTaskCreated({
+        to: normalizedBuyerEmail,
         taskTitle: title,
         taskId: task.id,
         buyerToken,
         budgetMax: budget_max_eur,
-      }).catch(console.error)
+      })
     }
 
     // Built explicitly, not spread from the raw row — that row also carries

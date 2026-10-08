@@ -37,7 +37,8 @@ async function send(to: string, subject: string, html: string) {
     return
   }
   try {
-    await resend.emails.send({ from: FROM, to, subject, html })
+    const result = await resend.emails.send({ from: FROM, to, subject, html })
+    if (result?.error) throw new Error(`Resend rejected the email: ${result.error.message}`)
   } catch (err) {
     console.error('[email] send failed:', err)
   }
@@ -177,31 +178,121 @@ export async function sendTaskCreated(params: {
   taskId: string
   buyerToken: string
   budgetMax: number
+  kind?: 'marketplace_task' | 'store_hire'
+  assignedAgentName?: string
 }) {
+  const buyerAccessUrl = `${BASE_URL}/buyer/tasks/${encodeURIComponent(params.taskId)}/bids#buyer_token=${encodeURIComponent(params.buyerToken)}`
+  const safeTitle = escapeEmailHtml(params.taskTitle)
+  const isStoreHire = params.kind === 'store_hire'
+  const safeAgentName = params.assignedAgentName ? escapeEmailHtml(params.assignedAgentName) : 'the selected agent'
   await send(
     params.to,
-    `✅ Your task "${params.taskTitle}" is live on Mercatai`,
+    emailSubjectText(isStoreHire
+      ? `✅ Your Mercatai hire "${params.taskTitle}" is ready for payment`
+      : `✅ Your task "${params.taskTitle}" is live on Mercatai`),
     `
     <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
-      <h2 style="color:#4f46e5">Your task is live!</h2>
-      <p>AI agents are now reviewing <strong>${params.taskTitle}</strong> and will submit bids within the next 4 hours.</p>
+      <h2 style="color:#4f46e5">${isStoreHire ? 'Your direct hire is ready' : 'Your task is live!'}</h2>
+      <p>${isStoreHire
+        ? `<strong>${safeAgentName}</strong> has been selected for <strong>${safeTitle}</strong>. Payment must be confirmed before work may begin.`
+        : `AI agents are now reviewing <strong>${safeTitle}</strong> and may submit bids during the published bidding window.`}</p>
       <p><strong>Budget:</strong> up to €${params.budgetMax}</p>
-      <a href="${BASE_URL}/buyer/tasks/${params.taskId}/bids"
+      <a href="${buyerAccessUrl}"
          style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">
-        View bids
+        Open buyer dashboard
       </a>
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0"/>
-      <p style="font-size:12px;color:#6b7280">
-        🔑 <strong>Save your buyer token</strong> — you'll need it to approve delivery or report a quality issue:
-      </p>
-      <code style="display:block;background:#f3f4f6;padding:10px;border-radius:6px;font-size:11px;word-break:break-all">
-        ${params.buyerToken}
-      </code>
+      <p style="font-size:12px;color:#6b7280">🔑 The button contains a private, task-scoped buyer access token. Do not forward the link. Your browser stores the token locally and removes it from the address bar after opening it.</p>
       <p style="font-size:11px;color:#9ca3af;margin-top:24px">
         Mercatai · mercatai.eu · <a href="${BASE_URL}/terms" style="color:#9ca3af">Terms</a>
       </p>
     </div>
     `
+  )
+}
+
+export interface BidAcceptedActionEmailParams {
+  to: string
+  taskTitle: string
+  taskId: string
+  agentId: string
+  priceEur: number
+  deliveryHours: number
+  stripeAccountType: 'standard' | 'express'
+  onboardingRequired: boolean
+}
+
+export function buildBidAcceptedActionEmail(params: BidAcceptedActionEmailParams): { subject: string; html: string } {
+  const taskUrl = `${BASE_URL}/marketplace/${encodeURIComponent(params.taskId)}`
+  const onboardingBody = params.stripeAccountType === 'express'
+    ? `{"country":"<account-holder country>","task_id":"${params.taskId}"}`
+    : '{"country":"<account-holder country>"}'
+  const onboardingStep = params.onboardingRequired
+    ? `
+      <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:14px;margin:16px 0">
+        <strong>Action required before the buyer can fund this task</strong>
+        <p>Authenticate as your agent, then call:</p>
+        <code style="display:block;background:#fff;padding:10px;border-radius:6px;font-size:11px;word-break:break-all">POST /api/v1/agents/${escapeEmailHtml(params.agentId)}/stripe-onboard</code>
+        <p>JSON body:</p>
+        <code style="display:block;background:#fff;padding:10px;border-radius:6px;font-size:11px;word-break:break-all">${escapeEmailHtml(onboardingBody)}</code>
+        <p>The country must be the real country of the human or business that owns the payout account. The human account holder must open the returned <code>onboarding_url</code> and complete Stripe-hosted identity, business and bank-account verification.</p>
+        <p>Do not email credentials or identity documents to Mercatai.</p>
+      </div>
+    `
+    : '<p>Your required Stripe account is already recorded. The buyer can now attempt funding; Stripe readiness is checked live before any payment is created.</p>'
+
+  return {
+    subject: emailSubjectText(`Mercatai: your bid was accepted — ${params.taskTitle}`),
+    html: `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#111">
+      <h2 style="color:#4f46e5">Your bid was accepted</h2>
+      <table style="width:100%;border-collapse:collapse;margin:12px 0">
+        <tr><td style="padding:6px;color:#6b7280">Task</td><td style="padding:6px;font-weight:600">${escapeEmailHtml(params.taskTitle)}</td></tr>
+        <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Task ID</td><td style="padding:6px;font-family:monospace">${escapeEmailHtml(params.taskId)}</td></tr>
+        <tr><td style="padding:6px;color:#6b7280">Accepted price</td><td style="padding:6px">€${Number(params.priceEur).toFixed(2)}</td></tr>
+        <tr style="background:#f9fafb"><td style="padding:6px;color:#6b7280">Delivery time</td><td style="padding:6px">${params.deliveryHours} hours after funding is confirmed</td></tr>
+      </table>
+      <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:14px;margin:16px 0">
+        <strong>Do not start work yet.</strong>
+        <p>The bid selection does not authorize execution. Start only when the authenticated task API reports <code>status: in_progress</code>, <code>funding_status: funded</code> and <code>execution_authorized: true</code>.</p>
+      </div>
+      ${onboardingStep}
+      <p>Check onboarding status with <code>GET /api/v1/agents/${escapeEmailHtml(params.agentId)}/stripe-onboard${params.stripeAccountType === 'express' ? `?task_id=${encodeURIComponent(params.taskId)}` : ''}</code>. After onboarding is complete, the buyer can authorize payment. Mercatai will send a separate execution-authorized notice only after Stripe confirms funding.</p>
+      <a href="${taskUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">View task</a>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>
+    `,
+  }
+}
+
+export async function sendBidAcceptedActionRequired(params: BidAcceptedActionEmailParams) {
+  const payload = buildBidAcceptedActionEmail(params)
+  await send(params.to, payload.subject, payload.html)
+}
+
+export async function sendBuyerAccessRecovery(params: {
+  to: string
+  taskTitle: string
+  taskId: string
+  buyerToken: string
+}) {
+  // The token lives in the URL fragment, which browsers do not send to the
+  // web server or include in ordinary request logs. The buyer page consumes
+  // it into localStorage and immediately removes it from the address bar.
+  const accessUrl = `${BASE_URL}/buyer/tasks/${encodeURIComponent(params.taskId)}/bids#buyer_token=${encodeURIComponent(params.buyerToken)}`
+  const safeTitle = escapeEmailHtml(params.taskTitle)
+  await send(
+    params.to,
+    emailSubjectText(`Mercatai: restore buyer access to ${params.taskTitle}`),
+    `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#4f46e5">Restore buyer access</h2>
+      <p>A buyer-access link was requested for <strong>${safeTitle}</strong>.</p>
+      <a href="${accessUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">Restore access</a>
+      <p style="font-size:12px;color:#6b7280">This link grants task-scoped buyer access for 30 days. Do not forward it. If you did not request it, you can ignore this email.</p>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>
+    `,
   )
 }
 

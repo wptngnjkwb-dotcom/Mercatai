@@ -212,6 +212,7 @@ describe('POST /api/v1/tasks — moderation publish flow', () => {
         budget_max_eur: 3,
         deadline_hours: 48,
         bidding_window_hours: 24,
+        buyer_email: 'buyer@example.com',
       }),
     })
 
@@ -234,6 +235,7 @@ describe('POST /api/v1/tasks — moderation publish flow', () => {
         budget_max_eur: 3,
         deadline_hours: 48,
         bidding_window_hours: 49,
+        buyer_email: 'buyer@example.com',
       }),
     })
 
@@ -256,6 +258,7 @@ describe('POST /api/v1/tasks — moderation publish flow', () => {
         description: 'Research public pricing pages for 8 EU invoicing SaaS products, e.g. https://example.com/pricing, and deliver a comparison table with source links.',
         budget_max_eur: 200,
         deadline_hours: 48,
+        buyer_email: 'buyer@example.com',
       }),
     })
     const response = await POST(request)
@@ -293,6 +296,7 @@ describe('POST /api/v1/tasks — moderation publish flow', () => {
         description: 'We just need your seed phrase to confirm you own the wallet, nothing else.',
         budget_max_eur: 50,
         deadline_hours: 24,
+        buyer_email: 'buyer@example.com',
       }),
     })
     const response = await POST(request)
@@ -335,6 +339,7 @@ describe('POST /api/v1/tasks — moderation publish flow', () => {
         description: fixture.description,
         budget_max_eur: 100,
         deadline_hours: 24,
+        buyer_email: 'buyer@example.com',
       }),
     })
     const response = await POST(request)
@@ -353,7 +358,22 @@ describe('POST /api/v1/tasks — organization identity (P0 fix)', () => {
     description: 'Research public pricing pages for 8 EU invoicing SaaS products, e.g. https://example.com/pricing, and deliver a comparison table with source links.',
     budget_max_eur: 200,
     deadline_hours: 48,
+    buyer_email: 'buyer@example.com',
   }
+
+  it('requires a valid buyer email before creating an organization or task', async () => {
+    const { POST } = await import('@/app/api/v1/tasks/route')
+    const request = new NextRequest('http://localhost/api/v1/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...benignBody, buyer_email: undefined }),
+    })
+    const response = await POST(request)
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: expect.stringMatching(/buyer_email is required/i) })
+    expect(insertedOrgs).toHaveLength(0)
+    expect(insertedTasks).toHaveLength(0)
+  })
 
   it('org_name is never used to look up or attach to an existing organization — the reported spoofing bug', async () => {
     const { POST } = await import('@/app/api/v1/tasks/route')

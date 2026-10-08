@@ -152,7 +152,15 @@ vi.mock('@/lib/server/supabase', () => ({
           // The insert(...).select().single() at the end of a successful
           // create-intent call reaches here for 'transactions'.
           if (table === 'transactions') return { data: { id: 'tx-fake-1' }, error: null }
-          if (table === 'agents') return { data: { id: 'agent-1', profile_visibility: acceptedBidAgentVisibility }, error: null }
+          if (table === 'agents') return { data: {
+            id: 'agent-1',
+            owner_email: 'operator@example.com',
+            profile_visibility: acceptedBidAgentVisibility,
+            stripe_account_id: null,
+            stripe_onboarding_completed: false,
+            stripe_standard_account_id: null,
+            stripe_standard_onboarding_completed: false,
+          }, error: null }
           return { data: null, error: null }
         },
         update: (values: Record<string, unknown>) => {
@@ -171,6 +179,8 @@ vi.mock('@/lib/server/supabase', () => ({
 vi.mock('@/lib/server/audit', () => ({ auditLog: vi.fn(async () => {}) }))
 const { fireWebhooks } = vi.hoisted(() => ({ fireWebhooks: vi.fn(async (_event: string, _payload: Record<string, unknown>) => {}) }))
 vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks }))
+const { sendBidAcceptedActionRequired } = vi.hoisted(() => ({ sendBidAcceptedActionRequired: vi.fn(async () => {}) }))
+vi.mock('@/lib/server/email', () => ({ sendBidAcceptedActionRequired }))
 vi.mock('@/lib/server/fees', () => ({ calculateFees: vi.fn(() => ({ stripe_fee_eur: 1, platform_fee_eur: 2.5, agent_payout_eur: 46.5 })) }))
 vi.mock('@/lib/server/settings', () => ({ getPlatformFeePercent: vi.fn(async () => 5), MAX_TRANSACTION_EUR: 10_000 }))
 vi.mock('@/lib/server/paymentState', () => ({ reconcilePaymentIntent: vi.fn(async () => 'requires_action') }))
@@ -201,6 +211,7 @@ beforeEach(() => {
   stripePaymentIntentsRetrieve.mockClear()
   stripePaymentIntentsCancel.mockClear()
   fireWebhooks.mockClear()
+  sendBidAcceptedActionRequired.mockClear()
 })
 
 describe('PUT /api/v1/bids/[id]/accept — moderation guard', () => {
@@ -230,6 +241,12 @@ describe('PUT /api/v1/bids/[id]/accept — moderation guard', () => {
     expect(response.status).toBe(200)
     expect(taskUpdates.length).toBeGreaterThan(0)
     expect(taskUpdates[0]).toMatchObject({ status: 'assigned', assigned_at: expect.any(String), delivery_deadline_at: null })
+    expect(sendBidAcceptedActionRequired).toHaveBeenCalledWith(expect.objectContaining({
+      to: 'operator@example.com',
+      taskId: TASK_ID,
+      agentId: 'agent-1',
+      onboardingRequired: true,
+    }))
   })
 
   it('includes the real agent_id in the public bid.accepted webhook payload for a public agent', async () => {
@@ -301,6 +318,15 @@ describe('POST /api/v1/payments/create-intent — live Stripe capability re-chec
 
     expect(response.status).toBe(402)
     expect(body.card_ready).toBe(false)
+    expect(body).toMatchObject({
+      code: 'agent_stripe_onboarding_required',
+      agent_action_required: true,
+      execution_authorized: false,
+      next_action: 'await_agent_stripe_onboarding',
+      onboarding_endpoint: '/api/v1/agents/agent-1/stripe-onboard',
+    })
+    expect(body.onboarding_request).toEqual({ country: '<account-holder country>' })
+    expect(body.buyer_message).toMatch(/No payment was created/i)
     expect(stripeAccountsRetrieve).toHaveBeenCalled()
     expect(stripePaymentIntentsCreate).not.toHaveBeenCalled()
   })

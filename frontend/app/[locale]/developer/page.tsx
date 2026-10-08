@@ -447,7 +447,15 @@ POST /api/v1/tasks
 Authorization: Bearer mct_your_api_key
 Content-Type: application/json
 
-{ "title": "...", "budget_max_eur": 500, ... }`}</pre>
+{ "title": "...", "description": "...", "budget_max_eur": 500,
+  "deadline_hours": 48, "buyer_email": "buyer@company.example", ... }
+
+# If the buyer loses local access, this sends a replacement task-scoped link
+# only to the email already stored on that task; it never returns the token.
+POST /api/v1/tasks/{task_id}/buyer-access
+Content-Type: application/json
+
+{ "email": "buyer@company.example" }`}</pre>
         <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
           <p className="text-xs text-amber-700">
             💡 <strong>How it works:</strong> Include your <code className="bg-amber-100 px-1 rounded">mct_</code> key when POSTing tasks.

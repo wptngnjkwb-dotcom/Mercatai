@@ -18,7 +18,11 @@ const listingRow = {
   hires_count: 0,
   agent_id: 'agent-1',
   is_active: true,
-  agents: { id: 'agent-1', display_name: 'Translator Bot', is_active: true, profile_visibility: 'public' },
+  agents: {
+    id: 'agent-1', display_name: 'Translator Bot', is_active: true, profile_visibility: 'public',
+    owner_email: 'operator@example.com', stripe_standard_account_id: null,
+    stripe_standard_onboarding_completed: false,
+  },
 }
 
 vi.mock('@/lib/server/supabase', () => ({
@@ -64,7 +68,11 @@ vi.mock('@/lib/server/supabase', () => ({
 }))
 
 vi.mock('@/lib/server/audit', () => ({ auditLog: vi.fn(async () => {}) }))
-vi.mock('@/lib/server/email', () => ({ sendTaskCreated: vi.fn(async () => {}) }))
+const { sendTaskCreated, sendBidAcceptedActionRequired } = vi.hoisted(() => ({
+  sendTaskCreated: vi.fn(async () => {}),
+  sendBidAcceptedActionRequired: vi.fn(async () => {}),
+}))
+vi.mock('@/lib/server/email', () => ({ sendTaskCreated, sendBidAcceptedActionRequired }))
 vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks: vi.fn(async () => {}) }))
 
 beforeEach(() => {
@@ -72,6 +80,8 @@ beforeEach(() => {
   insertedBids.length = 0
   insertedOrgs.length = 0
   rpcCalls.length = 0
+  sendTaskCreated.mockClear()
+  sendBidAcceptedActionRequired.mockClear()
 })
 
 describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
@@ -80,7 +90,7 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
     })
     const response = await POST(request, { params: { listingId: 'listing-1' } })
     const body = await response.json()
@@ -97,6 +107,9 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     expect(insertedBids).toHaveLength(0)
     expect(body).toHaveProperty('task_id')
     expect(body.delivery_deadline_at).toBeNull()
+    expect(sendBidAcceptedActionRequired).toHaveBeenCalledWith(expect.objectContaining({
+      to: 'operator@example.com', taskId: 'task-1', agentId: 'agent-1', onboardingRequired: true,
+    }))
   })
 
   it('blocks a listing whose content fails moderation, creating nothing', async () => {
@@ -110,7 +123,7 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
       const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
       })
       const response = await POST(request, { params: { listingId: 'listing-1' } })
       expect(response.status).toBe(422)
@@ -126,7 +139,7 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ org_name: 'Mercatai Sample Briefs' }),
+      body: JSON.stringify({ org_name: 'Mercatai Sample Briefs', buyer_email: 'buyer@example.com' }),
     })
     const response = await POST(request, { params: { listingId: 'listing-1' } })
     expect(response.status).toBe(201)
@@ -144,7 +157,7 @@ describe('POST /api/v1/store/[listingId]/hire — private-agent listing', () => 
       const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
       })
       const response = await POST(request, { params: { listingId: 'listing-1' } })
 
@@ -164,7 +177,7 @@ describe('POST /api/v1/store/[listingId]/hire — private-agent listing', () => 
       const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
       })
       const response = await POST(request, { params: { listingId: 'listing-1' } })
       expect(response.status).toBe(404)

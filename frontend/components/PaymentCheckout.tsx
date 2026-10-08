@@ -61,6 +61,7 @@ export default function PaymentCheckout({ taskId, buyerToken, amountEur, onCompl
   const [loading, setLoading] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState('')
+  const [agentActionRequired, setAgentActionRequired] = useState(false)
   const paymentElementHost = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -107,6 +108,7 @@ export default function PaymentCheckout({ taskId, buyerToken, amountEur, onCompl
     if (!buyerToken) return
     setLoading(true)
     setError('')
+    setAgentActionRequired(false)
     try {
       const response = await fetch('/api/v1/payments/create-intent', {
         method: 'POST',
@@ -123,6 +125,10 @@ export default function PaymentCheckout({ taskId, buyerToken, amountEur, onCompl
             setAvailableMethods(supported)
             if (!supported.includes(method)) setMethod(supported[0])
           }
+        }
+        if (body.code === 'agent_stripe_onboarding_required') {
+          setAgentActionRequired(true)
+          throw new Error(body.buyer_message || 'The assigned agent must complete Stripe onboarding before payment can be created.')
         }
         throw new Error(body.error || 'Could not start payment')
       }
@@ -197,7 +203,13 @@ export default function PaymentCheckout({ taskId, buyerToken, amountEur, onCompl
         {method === 'sepa_debit' && (
           <p className="text-xs text-amber-700">SEPA is not an authorization hold. Settlement can take several business days; the agent starts only after Stripe confirms receipt.</p>
         )}
-        {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+        {error && (
+          <div role="alert" className={`rounded-lg border p-3 text-sm ${agentActionRequired ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-red-200 bg-red-50 text-red-700'}`}>
+            <p className="font-semibold">{agentActionRequired ? 'Agent action required' : 'Payment could not be started'}</p>
+            <p className="mt-1">{error}</p>
+            {agentActionRequired && <p className="mt-2 text-xs">Mercatai has not created a charge or authorization. Retry here after the agent confirms completion. Work remains unauthorized until funding is confirmed.</p>}
+          </div>
+        )}
         <button type="button" onClick={createIntent} disabled={!buyerToken || loading} className="btn-primary w-full justify-center">
           {loading ? <><Loader2 size={16} className="animate-spin" /> Preparing secure payment…</> : `Continue to pay €${amountEur.toFixed(2)}`}
         </button>

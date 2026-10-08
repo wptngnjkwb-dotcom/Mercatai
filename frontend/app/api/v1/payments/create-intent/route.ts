@@ -19,12 +19,42 @@ import {
   isStripeAccountRequirement,
   isLegacyExpressPilotTask,
   LEGACY_EXPRESS_PLATFORM_LIABILITY,
+  STANDARD_AGENT_LIABILITY,
   publicPaymentResponsibility,
   stripeAccountFields,
   stripeAccountMatchesRequirement,
 } from '@/lib/server/stripeAccountRequirement'
 
 const MIN_AMOUNT = 1
+
+function onboardingRequiredResponse(params: {
+  taskId: string
+  agentId: string
+  accountRequirement: typeof STANDARD_AGENT_LIABILITY | typeof LEGACY_EXPRESS_PLATFORM_LIABILITY
+  error: string
+  details?: Record<string, unknown>
+}) {
+  const accountFields = stripeAccountFields(params.accountRequirement)
+  return {
+    error: params.error,
+    code: 'agent_stripe_onboarding_required',
+    stripe_onboarding_required: true,
+    agent_action_required: true,
+    execution_authorized: false,
+    next_action: 'await_agent_stripe_onboarding',
+    onboarding_task_id: params.taskId,
+    onboarding_endpoint: `/api/v1/agents/${encodeURIComponent(params.agentId)}/stripe-onboard`,
+    onboarding_request: params.accountRequirement === LEGACY_EXPRESS_PLATFORM_LIABILITY
+      ? { country: '<account-holder country>', task_id: params.taskId }
+      : { country: '<account-holder country>' },
+    stripe_onboarding_path: params.accountRequirement === LEGACY_EXPRESS_PLATFORM_LIABILITY
+      ? `/agent/stripe-onboard?task_id=${encodeURIComponent(params.taskId)}`
+      : '/agent/stripe-onboard',
+    buyer_message: `No payment was created. The assigned agent must complete Stripe ${accountFields.stripeType === 'standard' ? 'Standard/full-dashboard' : 'Express'} onboarding before you can retry. Do not ask the agent to start work yet.`,
+    ...publicPaymentResponsibility(params.accountRequirement),
+    ...(params.details ?? {}),
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -167,15 +197,12 @@ export async function POST(request: NextRequest) {
     const agentStripeAccount = (task.agents as any)?.[accountFields.accountId]
     const agentOnboardingDone = (task.agents as any)?.[accountFields.onboardingCompleted]
     if (!agentStripeAccount) {
-      return NextResponse.json({
+      return NextResponse.json(onboardingRequiredResponse({
+        taskId: task_id,
+        agentId: task.assigned_agent_id,
+        accountRequirement,
         error: `Agent has not completed the required Stripe ${accountFields.stripeType === 'standard' ? 'Standard/full-dashboard' : 'Express'} onboarding for this task.`,
-        stripe_onboarding_required: true,
-        onboarding_task_id: task_id,
-        stripe_onboarding_path: accountRequirement === LEGACY_EXPRESS_PLATFORM_LIABILITY
-          ? `/agent/stripe-onboard?task_id=${encodeURIComponent(task_id)}`
-          : '/agent/stripe-onboard',
-        ...responsibility,
-      }, { status: 402 })
+      }), { status: 402 })
     }
 
     // Check whether the agent still has a fee-free introductory task.
@@ -351,15 +378,17 @@ export async function POST(request: NextRequest) {
       accountFields.onboardingCompleted
     )
     if (!isMethodReady(readiness, paymentMethod)) {
-      return NextResponse.json({
+      return NextResponse.json(onboardingRequiredResponse({
+        taskId: task_id,
+        agentId: task.assigned_agent_id,
+        accountRequirement,
         error: `Agent's Stripe account is not currently ready to accept ${paymentMethod === 'card' ? 'card' : 'SEPA Direct Debit'} payments.`,
-        stripe_onboarding_required: true,
-        payout_ready: readiness.payoutReady,
-        card_ready: readiness.cardReady,
-        sepa_debit_ready: readiness.sepaDebitReady,
-        onboarding_task_id: task_id,
-        ...responsibility,
-      }, { status: 402 })
+        details: {
+          payout_ready: readiness.payoutReady,
+          card_ready: readiness.cardReady,
+          sepa_debit_ready: readiness.sepaDebitReady,
+        },
+      }), { status: 402 })
     }
 
     if (existingPaymentIntentId?.startsWith('pi_')) {

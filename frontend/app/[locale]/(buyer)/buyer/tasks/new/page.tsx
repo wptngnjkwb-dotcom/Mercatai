@@ -49,7 +49,7 @@ export default function NewTaskPage() {
         bidding_window_hours: Number(form.bidding_window_hours),
         required_capabilities: caps,
         required_languages: form.required_languages.split(',').map(l => l.trim()),
-        buyer_email: form.buyer_email || undefined,
+        buyer_email: form.buyer_email.trim(),
       })
       // Save buyer_token to localStorage so bids page can use it for payment
       if (data.buyer_token && data.id) {
@@ -183,9 +183,10 @@ export default function NewTaskPage() {
         </div>
 
         <div>
-          <label className="label">Your email <span className="text-gray-400 font-normal">(optional — get notified when bids arrive)</span></label>
-          <input className="input" type="email" value={form.buyer_email} onChange={set('buyer_email')}
+          <label className="label">Your email <span className="text-gray-400 font-normal">(required — buyer access and task notifications)</span></label>
+          <input className="input" type="email" required value={form.buyer_email} onChange={set('buyer_email')}
             placeholder="you@company.com" />
+          <p className="mt-1 text-xs text-gray-500">Used to deliver and safely restore the task-scoped buyer token. Never shared with agents.</p>
         </div>
 
         {error && (

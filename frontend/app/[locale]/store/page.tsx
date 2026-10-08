@@ -197,9 +197,10 @@ export default function StorePage() {
                     onChange={e => setForm(f => ({ ...f, org_name: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="label">Email (for updates & your buyer token)</label>
-                  <input className="input" type="email" value={form.buyer_email}
+                  <label className="label">Email (required for buyer access &amp; updates)</label>
+                  <input className="input" type="email" required value={form.buyer_email}
                     onChange={e => setForm(f => ({ ...f, buyer_email: e.target.value }))} />
+                  <p className="mt-1 text-xs text-gray-500">Never shared with the agent. Used to deliver and restore your task-scoped buyer access.</p>
                 </div>
                 {error && <p className="text-sm text-red-600">{error}</p>}
                 <button className="btn-primary" disabled={submitting}>

@@ -3,10 +3,10 @@ import { getSupabase } from '@/lib/server/supabase'
 import { signToken } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { fireWebhooks } from '@/lib/server/webhooks'
-import { sendTaskCreated } from '@/lib/server/email'
+import { sendBidAcceptedActionRequired, sendTaskCreated } from '@/lib/server/email'
 import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
 import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
-import { STANDARD_AGENT_LIABILITY, publicPaymentResponsibility } from '@/lib/server/stripeAccountRequirement'
+import { STANDARD_AGENT_LIABILITY, publicPaymentResponsibility, stripeAccountFields } from '@/lib/server/stripeAccountRequirement'
 
 /**
  * Instant hire — the second entry point into the marketplace.
@@ -36,16 +36,16 @@ export async function POST(request: NextRequest, { params }: { params: { listing
     if (org_name !== undefined && (typeof org_name !== 'string' || org_name.trim().length > 200)) {
       return NextResponse.json({ error: 'org_name must be text up to 200 characters' }, { status: 400 })
     }
-    const normalizedBuyerEmail = typeof buyer_email === 'string' ? buyer_email.trim().toLowerCase() : null
-    if (buyer_email !== undefined && (!normalizedBuyerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedBuyerEmail))) {
-      return NextResponse.json({ error: 'buyer_email must be a valid email address' }, { status: 400 })
+    const normalizedBuyerEmail = typeof buyer_email === 'string' ? buyer_email.trim().toLowerCase() : ''
+    if (!normalizedBuyerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedBuyerEmail)) {
+      return NextResponse.json({ error: 'buyer_email is required and must be valid — it is needed to deliver and restore buyer access.' }, { status: 400 })
     }
 
     const db = getSupabase()
 
     const { data: listing } = await db
       .from('agent_listings')
-      .select('*, agents!inner(id,display_name,is_active,profile_visibility)')
+      .select('*, agents!inner(id,display_name,is_active,profile_visibility,owner_email,stripe_standard_account_id,stripe_standard_onboarding_completed)')
       .eq('id', params.listingId)
       .eq('is_active', true)
       .single()
@@ -125,14 +125,31 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       price_eur: listing.price_eur,
     })
 
+    const listingAgent = listing.agents as any
+    if (listingAgent?.owner_email) {
+      const fields = stripeAccountFields(STANDARD_AGENT_LIABILITY)
+      await sendBidAcceptedActionRequired({
+        to: listingAgent.owner_email,
+        taskTitle: task.task_title,
+        taskId: task.task_id,
+        agentId: listing.agent_id,
+        priceEur: Number(listing.price_eur),
+        deliveryHours: Number(listing.delivery_hours),
+        stripeAccountType: fields.stripeType,
+        onboardingRequired: !listingAgent[fields.accountId] || listingAgent[fields.onboardingCompleted] !== true,
+      })
+    }
+
     if (normalizedBuyerEmail) {
-      sendTaskCreated({
+      await sendTaskCreated({
         to: normalizedBuyerEmail,
         taskTitle: task.task_title,
         taskId: task.task_id,
         buyerToken,
         budgetMax: listing.price_eur,
-      }).catch(console.error)
+        kind: 'store_hire',
+        assignedAgentName: task.agent_display_name,
+      })
     }
 
     return NextResponse.json({
