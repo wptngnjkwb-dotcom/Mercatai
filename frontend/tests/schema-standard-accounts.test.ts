@@ -4,6 +4,7 @@ import { join } from 'path'
 import {
   LEGACY_EXPRESS_PILOT_TASK_IDS,
   isLegacyExpressPilotTask,
+  stripeAccountMatchesRequirement,
   stripeAccountFields,
 } from '@/lib/server/stripeAccountRequirement'
 
@@ -49,6 +50,55 @@ describe('migration 24 — Standard by default, exactly three Express pilots', (
       feePayer: 'application',
       lossesCollector: 'application',
     })
+  })
+
+  it('accepts the real Stripe v1 controller values for Express and Standard accounts', () => {
+    expect(stripeAccountMatchesRequirement({
+      type: 'express',
+      controller: {
+        type: 'application',
+        fees: { payer: 'application_express' },
+        losses: { payments: 'application' },
+      },
+    } as any, 'legacy_express_platform_liability')).toBe(true)
+
+    expect(stripeAccountMatchesRequirement({
+      type: 'standard',
+      controller: {
+        type: 'account',
+        fees: { payer: 'account' },
+        losses: { payments: 'stripe' },
+      },
+    } as any, 'standard_agent_liability')).toBe(true)
+  })
+
+  it('still rejects controller values that would change who bears fees or losses', () => {
+    expect(stripeAccountMatchesRequirement({
+      type: 'express',
+      controller: {
+        type: 'application',
+        fees: { payer: 'account' },
+        losses: { payments: 'application' },
+      },
+    } as any, 'legacy_express_platform_liability')).toBe(false)
+
+    expect(stripeAccountMatchesRequirement({
+      type: 'standard',
+      controller: {
+        type: 'application',
+        fees: { payer: 'application' },
+        losses: { payments: 'stripe' },
+      },
+    } as any, 'standard_agent_liability')).toBe(false)
+
+    expect(stripeAccountMatchesRequirement({
+      type: 'standard',
+      controller: {
+        type: 'account',
+        fees: { payer: 'account' },
+        losses: { payments: 'application' },
+      },
+    } as any, 'standard_agent_liability')).toBe(false)
   })
 
   it('freezes the responsibility model through a service-role-only RPC', () => {

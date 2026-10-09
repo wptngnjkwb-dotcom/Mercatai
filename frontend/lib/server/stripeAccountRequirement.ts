@@ -118,7 +118,23 @@ export function stripeAccountMatchesRequirement(
 
   const feePayer = account.controller?.fees?.payer
   const lossesCollector = account.controller?.losses?.payments
-  if (feePayer && feePayer !== expected.feePayer) return false
+  // Stripe's legacy `type` shorthand uses more specific v1 fee-payer
+  // values than the responsibility names exposed by Accounts v2:
+  //
+  //   type=express  -> application_express (or application)
+  //   type=standard -> account
+  //
+  // Treat those as aliases of the same financial responsibility, not as a
+  // mismatch. In particular, `application_express` still means Mercatai is
+  // charged Stripe fees; `account` means the Standard connected account is.
+  // Keep this fail-closed for every other value so Custom/platform-paid
+  // configurations cannot silently enter the Standard agent-liability flow.
+  if (feePayer) {
+    const feePayerMatches = requirement === LEGACY_EXPRESS_PLATFORM_LIABILITY
+      ? feePayer === 'application' || feePayer === 'application_express'
+      : feePayer === 'account' || (feePayer as string) === 'stripe'
+    if (!feePayerMatches) return false
+  }
   if (lossesCollector && lossesCollector !== expected.lossesCollector) return false
   return true
 }
