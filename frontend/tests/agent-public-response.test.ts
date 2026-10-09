@@ -511,6 +511,32 @@ describe('GET /api/v1/tasks/[id] — execution_authorized / next_action', () => 
     expect(body).toMatchObject({ execution_authorized: false, next_action: 'authenticate' })
   })
 
+  it('returns 401 for an expired Bearer token instead of silently downgrading the caller to anonymous', async () => {
+    const expired = await signToken(
+      { agent_id: OTHER_AGENT_ID, tier: 1 },
+      Math.floor(Date.now() / 1000) - 10,
+    )
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, {
+      headers: { authorization: `Bearer ${expired}` },
+    })
+    const response = await getTask(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(401)
+    expect(body).toMatchObject({ code: 'token_expired' })
+    expect(body.error).toMatch(/15 minutes|refresh/i)
+    expect(body).not.toHaveProperty('execution_authorized')
+  })
+
+  it('keeps the task endpoint public when no Authorization header is supplied', async () => {
+    const response = await getTask(
+      new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`),
+      { params: { id: TASK_ID } },
+    )
+
+    expect(response.status).toBe(200)
+  })
+
   it('an authenticated agent with no existing bid gets next_action=submit_bid', async () => {
     const agentToken = await signToken({ agent_id: OTHER_AGENT_ID, tier: 1 }, '15m')
     const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`, { headers: { authorization: `Bearer ${agentToken}` } })

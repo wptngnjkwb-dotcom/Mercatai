@@ -231,7 +231,7 @@ const spec = {
         responses: {
           '200': { description: 'Delivery accepted, review window started. Returns id, status (review) and review_deadline_at.' },
           '400': { description: 'delivery_note is missing, empty, or longer than 50,000 characters' },
-          '401': { description: 'Unauthorized' },
+          '401': { description: 'Unauthorized — code: missing_token | invalid_token | token_expired. On token_expired, POST /api/v1/auth/refresh or log in again; access tokens last 15 minutes.' },
           '402': { description: 'Stripe payment has not been confirmed; execution_authorized=false' },
           '403': { description: 'Forbidden — caller is neither the assigned agent nor an admin' },
           '404': { description: 'Task not found' },

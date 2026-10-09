@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
-import { getTokenFromRequest, signToken } from '@/lib/server/auth'
+import { describeAuthFailure, getTokenFromRequest, signToken } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { fireWebhooks } from '@/lib/server/webhooks'
 import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
@@ -55,7 +55,19 @@ async function notifyBuyerOfDelivery(
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   const token = await getTokenFromRequest(request)
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!token) {
+    const code = await describeAuthFailure(request)
+    const error =
+      code === 'token_expired' ? 'Access token expired — POST /api/v1/auth/refresh or log in again (access tokens last 15 minutes)'
+      : code === 'missing_token' ? 'Unauthorized — missing Bearer access token'
+      : 'Unauthorized — invalid access token'
+    return NextResponse.json({
+      error,
+      code,
+      execution_authorized: false,
+      next_action: code === 'token_expired' ? 'refresh_access_token' : 'authenticate',
+    }, { status: 401 })
+  }
 
   const body = await request.json().catch(() => null)
   const deliveryNote = typeof body?.delivery_note === 'string' ? body.delivery_note.trim() : ''

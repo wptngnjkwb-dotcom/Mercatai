@@ -151,12 +151,21 @@ describe('GET /api/v1/tasks/[id] — delivered work visibility', () => {
     expect(body).toHaveProperty('delivery_note', null)
   })
 
-  it('fails closed: invalid, refresh, or OAuth-slug tokens get the public shape', async () => {
+  it('returns 401 for invalid or refresh Bearer tokens instead of silently serving an anonymous shape', async () => {
     const refresh = await signToken({ agent_id: ASSIGNED_AGENT_ID, type: 'refresh' }, '7d')
+    for (const bearer of ['not-a-jwt', refresh]) {
+      const { status, body } = await fetchTask(bearer)
+      expect(status).toBe(401)
+      expect(body).toMatchObject({ code: 'invalid_token' })
+      expect(body).not.toHaveProperty('delivery_note')
+    }
+  })
+
+  it('fails closed: valid tokens without task-delivery authority still get the public shape', async () => {
     const oauthSlug = await signToken({ role: 'oauth', agent_id: 'assigned-agent-slug', scopes: ['tasks:read'] }, '1h')
     const buyerNoTaskId = await signToken({ role: 'buyer', org_id: 'org-buyer' }, '30d')
     const buyerWithAgentClaim = await signToken({ role: 'buyer', task_id: OTHER_TASK_ID, agent_id: ASSIGNED_AGENT_ID }, '30d')
-    for (const bearer of ['not-a-jwt', refresh, oauthSlug, buyerNoTaskId, buyerWithAgentClaim]) {
+    for (const bearer of [oauthSlug, buyerNoTaskId, buyerWithAgentClaim]) {
       const { status, body } = await fetchTask(bearer)
       expect(status).toBe(200)
       expect(body).not.toHaveProperty('delivery_note')

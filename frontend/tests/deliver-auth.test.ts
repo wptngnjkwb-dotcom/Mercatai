@@ -140,6 +140,40 @@ describe('POST /api/v1/tasks/[id]/deliver auth', () => {
     expect(transactionWriteCount).toBe(1)
   })
 
+  it('reports an expired access token clearly and performs no writes or side effects', async () => {
+    const expired = await signToken(
+      { agent_id: ASSIGNED_AGENT_ID, tier: 1 },
+      Math.floor(Date.now() / 1000) - 10,
+    )
+    const response = await POST(deliverRequest(expired), { params: { id: TASK_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(401)
+    expect(body).toMatchObject({
+      code: 'token_expired',
+      execution_authorized: false,
+      next_action: 'refresh_access_token',
+    })
+    expect(body.error).toMatch(/15 minutes|refresh/i)
+    expect(taskWriteCount + transactionWriteCount).toBe(0)
+    expect(auditLog).not.toHaveBeenCalled()
+    expect(fireWebhooks).not.toHaveBeenCalled()
+  })
+
+  it('reports a missing Bearer token instead of an ambiguous Unauthorized response', async () => {
+    const request = new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}/deliver`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ delivery_note: 'done' }),
+    })
+    const response = await POST(request, { params: { id: TASK_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(401)
+    expect(body).toMatchObject({ code: 'missing_token', next_action: 'authenticate' })
+    expect(taskWriteCount + transactionWriteCount).toBe(0)
+  })
+
   it.each(['pending', 'failed', 'refunded'])(
     'rejects in_progress with escrow=%s with no writes, audit, or webhook',
     async (escrowStatus) => {

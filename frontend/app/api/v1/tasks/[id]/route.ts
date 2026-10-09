@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { attachPublicTaskFields } from '@/lib/server/publicTaskFields'
-import { getTokenFromRequest } from '@/lib/server/auth'
+import { describeAuthFailure, getTokenFromRequest } from '@/lib/server/auth'
 import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
 import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
@@ -20,6 +20,19 @@ const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
   const token = await getTokenFromRequest(request)
+  // This route remains public when no credentials are supplied. But a
+  // caller that explicitly supplied an invalid/expired Bearer token must not
+  // be silently treated as anonymous: execution_authorized is identity-
+  // dependent, so doing that turns an authentication failure into a
+  // misleading 200 response with next_action=closed.
+  if (request.headers.has('authorization') && !token) {
+    const code = await describeAuthFailure(request)
+    const error =
+      code === 'token_expired' ? 'Access token expired — POST /api/v1/auth/refresh or log in again (access tokens last 15 minutes)'
+      : code === 'missing_token' ? 'Unauthorized — expected a Bearer access token'
+      : 'Unauthorized — invalid access token'
+    return NextResponse.json({ error, code }, { status: 401 })
+  }
   const isAdmin = token?.tier === 'admin'
   const { data: task, error } = await db.from('tasks').select(PUBLIC_TASK_COLUMNS).eq('id', params.id).single()
   // Trust & Safety: a quarantined/rejected/pending task doesn't exist from
