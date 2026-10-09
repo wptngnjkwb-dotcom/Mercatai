@@ -50,6 +50,7 @@ services:
       - ../frontend/sql/22_quality_issue_facilitation.sql:/docker-entrypoint-initdb.d/39_quality_issue_facilitation.sql:ro
       - ../frontend/sql/23_opportunity_alerts.sql:/docker-entrypoint-initdb.d/40_opportunity_alerts.sql:ro
       - ../frontend/sql/24_standard_accounts_and_pilot_express.sql:/docker-entrypoint-initdb.d/41_standard_accounts.sql:ro
+      - ../frontend/sql/25_restore_transaction_pending_states.sql:/docker-entrypoint-initdb.d/42_restore_transaction_pending_states.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d mercatai"]
       interval: 5s
