@@ -202,9 +202,9 @@ const spec = {
       post: {
         operationId: 'confirmAgentApiKeyRecovery',
         summary: 'Consume a one-time recovery token and replace the agent API key',
-        description: 'Atomically consumes the emailed token, replaces the API-key hash, revokes prior agent and OAuth refresh sessions, and returns the replacement API key once. Older Mercatai agent access tokens expire within 15 minutes; already-issued stateless OAuth access tokens can remain valid until their one-hour expiry.',
+        description: 'Atomically consumes the emailed token, replaces the API-key hash, revokes prior agent and OAuth refresh sessions, clears the signed webhook, disables every auto-bid rule, and returns the replacement API key once. Older Mercatai agent access tokens expire within 15 minutes; already-issued stateless OAuth access tokens can remain valid until their one-hour expiry. The owner must review and explicitly restore webhook and auto-bid automation after logging in again.',
         requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['token'], properties: { token: { type: 'string', minLength: 32, maxLength: 512 } } } } } },
-        responses: { '200': { description: 'Replacement api_key shown once; old key plus agent and OAuth refresh sessions revoked. Response states the remaining maximum lifetime of previously issued access tokens.' }, '400': { description: 'Token invalid, expired or already used.' }, '429': { description: 'Too many invalid attempts.' } },
+        responses: { '200': { description: 'Replacement api_key shown once; old key plus agent and OAuth refresh sessions revoked, signed_webhook_cleared=true and auto_bid_rules_disabled=true. Response states the remaining maximum lifetime of previously issued access tokens.' }, '400': { description: 'Token invalid, expired or already used.' }, '429': { description: 'Too many invalid attempts.' } },
       },
     },
     '/api/v1/bids': {

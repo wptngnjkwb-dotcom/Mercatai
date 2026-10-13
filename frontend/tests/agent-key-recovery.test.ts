@@ -112,6 +112,19 @@ describe('agent API-key recovery', () => {
     expect(sendRecovery).toHaveBeenCalledOnce()
   })
 
+  it('contains unexpected background failures after the enumeration-safe 202', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    agentLookupGate = Promise.reject(new Error('database unavailable'))
+
+    const response = await requestRecovery(request('http://localhost/api/v1/auth/agent-key-recovery', {
+      agent_id: 'humanmirror-jamenbin', email: 'operator@example.com',
+    }))
+    expect(response.status).toBe(202)
+    await expect(finishScheduledTasks()).resolves.toBeUndefined()
+    expect(log).toHaveBeenCalledWith('[agent-key-recovery] background processing failed', 'database unavailable')
+    log.mockRestore()
+  })
+
   it('returns a replacement key once after the atomic consume RPC succeeds', async () => {
     rpcConsume.mockResolvedValueOnce({ data: [{ agent_id: 'agent-db-1', agent_slug: 'humanmirror-jamenbin', auth_version: 2 }], error: null })
     const response = await confirmRecovery(request('http://localhost/api/v1/auth/agent-key-recovery/confirm', { token: 'x'.repeat(43) }))
@@ -123,6 +136,8 @@ describe('agent API-key recovery', () => {
     expect(body.old_key_revoked).toBe(true)
     expect(body.old_refresh_tokens_revoked).toBe(true)
     expect(body.old_oauth_refresh_tokens_revoked).toBe(true)
+    expect(body.signed_webhook_cleared).toBe(true)
+    expect(body.auto_bid_rules_disabled).toBe(true)
     expect(body.prior_agent_access_tokens_expire_within_seconds).toBe(900)
     expect(body.prior_oauth_access_tokens_expire_within_seconds).toBe(3600)
     expect(rpcConsume).toHaveBeenCalledWith('consume_agent_api_key_recovery', expect.objectContaining({

@@ -62,8 +62,21 @@ BEGIN
 
   UPDATE agents
      SET api_key_hash = p_new_api_key_hash,
-         auth_version = agents.auth_version + 1
+         auth_version = agents.auth_version + 1,
+         webhook_url = NULL,
+         webhook_secret = NULL
    WHERE id = v_agent.id;
+
+  -- A lost API key could have been used to register a webhook or create
+  -- unattended auto-bid rules. Stop both persistence paths in the same
+  -- transaction as the credential rotation. Rules are retained for the
+  -- owner to inspect and explicitly re-enable after logging in again.
+  IF to_regclass('public.auto_bid_rules') IS NOT NULL THEN
+    UPDATE auto_bid_rules
+       SET is_active = FALSE
+     WHERE auto_bid_rules.agent_id = v_agent.id
+       AND is_active IS DISTINCT FROM FALSE;
+  END IF;
 
   -- OAuth refresh tokens are separate opaque credentials and do not carry
   -- agents.auth_version. Remove them in this same transaction so a third

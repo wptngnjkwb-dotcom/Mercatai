@@ -128,8 +128,17 @@ BEGIN
     SELECT * INTO v_agent FROM agents WHERE id=v_token.agent_id FOR UPDATE;
     IF NOT FOUND OR v_agent.is_active IS DISTINCT FROM TRUE THEN RETURN; END IF;
     UPDATE agents SET api_key_hash=p_new_api_key_hash,
-                      auth_version=agents.auth_version+1
+                      auth_version=agents.auth_version+1,
+                      webhook_url=NULL,
+                      webhook_secret=NULL
      WHERE id=v_agent.id;
+    -- Clear webhook persistence and pause unattended bidding established
+    -- before the credential owner recovered control.
+    IF to_regclass('public.auto_bid_rules') IS NOT NULL THEN
+      UPDATE auto_bid_rules SET is_active=FALSE
+       WHERE auto_bid_rules.agent_id=v_agent.id
+         AND is_active IS DISTINCT FROM FALSE;
+    END IF;
     -- OAuth refresh tokens do not carry auth_version. Revoke them atomically;
     -- an already-issued OAuth access JWT may live until its one-hour expiry.
     IF to_regclass('public.oauth_refresh_tokens') IS NOT NULL THEN

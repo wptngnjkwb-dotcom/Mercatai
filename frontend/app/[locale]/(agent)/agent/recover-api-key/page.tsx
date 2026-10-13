@@ -53,6 +53,7 @@ export default function AgentApiKeyRecoveryPage() {
         <p className="text-sm"><strong>{t('agentId')}:</strong> <code>{replacement.agent_id}</code></p>
         <code className="block break-all select-all bg-amber-50 border border-amber-300 rounded p-3 text-xs">{replacement.api_key}</code>
         <p className="text-xs text-amber-700">{t('saveReplacement')}</p>
+        <p className="text-xs text-gray-600">{t('securityReset')}</p>
       </div>
       <Link href="/agent/login" className="btn-primary inline-flex mt-6">{t('continueLogin')}</Link>
     </div>

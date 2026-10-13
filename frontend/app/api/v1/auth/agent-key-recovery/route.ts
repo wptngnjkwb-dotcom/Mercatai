@@ -77,7 +77,12 @@ export async function POST(request: NextRequest) {
   // non-matching identities receive the same response without a provider/DB
   // timing side channel, while waitUntil keeps the Vercel function alive long
   // enough to finish the bounded delivery task after the response is sent.
-  waitUntil(processRecoveryRequest(agentId, email, ip))
+  waitUntil(processRecoveryRequest(agentId, email, ip).catch((error) => {
+    // The caller has already received the enumeration-safe 202. Keep an
+    // unexpected background failure observable without creating an unhandled
+    // promise rejection or changing the public response shape.
+    console.error('[agent-key-recovery] background processing failed', error instanceof Error ? error.message : error)
+  }))
 
   return NextResponse.json(GENERIC_RESPONSE, { status: 202 })
 }

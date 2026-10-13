@@ -33,8 +33,9 @@ surface must explain the next action consistently.
   are never stored or logged.
 - Confirmation atomically consumes the token, replaces `api_key_hash`, bumps
   `auth_version`, invalidates every other recovery token, deletes OAuth refresh
-  tokens and pending authorization codes, and returns the new API key exactly
-  once.
+  tokens and pending authorization codes, clears the signed webhook, disables
+  every auto-bid rule, and returns the new API key exactly once. The owner must
+  review and explicitly restore those automations after signing in again.
 - Old API keys stop working immediately. Existing Mercatai agent access JWTs
   remain live for at most their remaining 15 minutes. Old agent and OAuth
   refresh tokens stop working after recovery; an already-issued stateless

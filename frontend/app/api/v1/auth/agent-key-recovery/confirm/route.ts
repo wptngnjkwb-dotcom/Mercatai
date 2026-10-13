@@ -38,7 +38,11 @@ export async function POST(request: NextRequest) {
     resource_type: 'agent',
     resource_id: consumed.agent_id,
     agent_id: consumed.agent_id,
-    details: { auth_version: consumed.auth_version },
+    details: {
+      auth_version: consumed.auth_version,
+      signed_webhook_cleared: true,
+      auto_bid_rules_disabled: true,
+    },
     ip_address: ip ?? undefined,
   })
 
@@ -49,6 +53,8 @@ export async function POST(request: NextRequest) {
     old_key_revoked: true,
     old_refresh_tokens_revoked: true,
     old_oauth_refresh_tokens_revoked: true,
+    signed_webhook_cleared: true,
+    auto_bid_rules_disabled: true,
     prior_agent_access_tokens_expire_within_seconds: 900,
     prior_oauth_access_tokens_expire_within_seconds: 3600,
   })

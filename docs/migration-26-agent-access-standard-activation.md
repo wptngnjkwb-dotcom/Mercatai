@@ -14,9 +14,10 @@ payment. The three legacy Express pilots remain unchanged.
   single-use state. Raw recovery tokens and raw API keys never enter Postgres.
 - `consume_agent_api_key_recovery` atomically consumes one valid token, replaces
   the API-key hash, increments `auth_version`, deletes the agent's OAuth refresh
-  tokens and pending OAuth authorization codes, and invalidates every other
-  outstanding recovery token for that agent. Already-issued stateless OAuth
-  access JWTs can remain valid until their one-hour expiry.
+  tokens and pending OAuth authorization codes, clears its signed webhook,
+  disables its auto-bid rules, and invalidates every other outstanding recovery
+  token for that agent. Already-issued stateless OAuth access JWTs can remain
+  valid until their one-hour expiry.
 
 ## Required order
 
@@ -40,6 +41,20 @@ selected project name once more, then run the complete contents of:
 
 The SQL is idempotent, but it changes authentication behavior and therefore
 still requires the backup and verification steps.
+
+Before applying it, confirm the production OAuth foreign-key column types. A
+legacy installation with `text` here would require the RPC predicates to cast
+`v_agent.id::text`; `uuid` (the Mercatai production result verified on
+2026-10-13) or no rows is safe for the migration as written:
+
+```sql
+select table_schema, table_name, data_type
+from information_schema.columns
+where table_schema = 'public'
+  and table_name in ('oauth_refresh_tokens', 'oauth_auth_codes')
+  and column_name = 'agent_id'
+order by table_name;
+```
 
 ## Read-only verification
 
@@ -87,13 +102,15 @@ Expected:
    An old OAuth refresh token can no longer mint a new access token. A
    previously issued OAuth access JWT may continue to work for at most one
    hour, as disclosed by the recovery UI, email and API response.
-6. A new login returns `agent_db_id`, `agent_id`, access token and refresh token.
-7. Ordinary `/agent/stripe-onboard` creates/continues Standard onboarding.
-8. Each legacy pilot still requires its task-scoped Express account and no
+6. The agent's signed webhook is empty and all its auto-bid rules are inactive;
+   the owner is told to review and restore them only after signing in again.
+7. A new login returns `agent_db_id`, `agent_id`, access token and refresh token.
+8. Ordinary `/agent/stripe-onboard` creates/continues Standard onboarding.
+9. Each legacy pilot still requires its task-scoped Express account and no
    fourth task can request Express onboarding.
-9. A non-ready Standard agent receives structured `402
+10. A non-ready Standard agent receives structured `402
    agent_payment_setup_required` before a bid, acceptance or Store hire write.
-10. A ready Standard agent can bid normally.
+11. A ready Standard agent can bid normally.
 
 ## Activation campaign
 
@@ -125,6 +142,16 @@ ALTER TABLE agents
   DROP COLUMN IF EXISTS standard_onboarding_notice_sent_at,
   DROP COLUMN IF EXISTS auth_version;
 ```
+
+The function's `REVOKE`/`GRANT` ACL entries are attached to that function and
+are removed automatically by `DROP FUNCTION`. If the function is recreated,
+repeat the migration's explicit `REVOKE` and service-role-only `GRANT`; never
+rely on PostgreSQL's default `PUBLIC` execution privilege.
+
+A rollback cannot restore a raw API key, deleted refresh token, OAuth code or
+webhook secret after a recovery was actually consumed. That is intentional:
+those credentials may have been compromised. Disabled auto-bid rows remain in
+the database and can be reviewed and re-enabled by the verified owner.
 
 Do not run the database rollback while any deployed route still selects
 `auth_version` or calls `consume_agent_api_key_recovery`.
