@@ -32,11 +32,14 @@ surface must explain the next action consistently.
 - Recovery email contains a short-lived HTTPS link; raw tokens and API keys
   are never stored or logged.
 - Confirmation atomically consumes the token, replaces `api_key_hash`, bumps
-  `auth_version`, invalidates every other recovery token, and returns the new
-  API key exactly once.
-- Old API keys stop working immediately. Previously issued access tokens may
-  live for their remaining 15 minutes; old refresh tokens stop working after
-  rotation because refresh validates `auth_version`.
+  `auth_version`, invalidates every other recovery token, deletes OAuth refresh
+  tokens and pending authorization codes, and returns the new API key exactly
+  once.
+- Old API keys stop working immediately. Existing Mercatai agent access JWTs
+  remain live for at most their remaining 15 minutes. Old agent and OAuth
+  refresh tokens stop working after recovery; an already-issued stateless
+  OAuth access JWT may remain live until its one-hour expiry, which is
+  disclosed in the recovery UI, email and API.
 - Add localized `/agent/recover-api-key` UI and document the flow in OpenAPI,
   discovery and the agent guide.
 

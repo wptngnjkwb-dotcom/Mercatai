@@ -23,6 +23,8 @@ describe('migration 26 — agent access recovery and Standard activation', () =>
     expect(migration).toMatch(/expires_at > NOW\(\)/)
     expect(migration).toMatch(/FOR UPDATE/)
     expect(migration).toMatch(/auth_version = agents\.auth_version \+ 1/)
+    expect(migration).toMatch(/DELETE FROM oauth_refresh_tokens[\s\S]*WHERE oauth_refresh_tokens\.agent_id = v_agent\.id/)
+    expect(migration).toMatch(/DELETE FROM oauth_auth_codes[\s\S]*WHERE oauth_auth_codes\.agent_id = v_agent\.id/)
     expect(migration).toMatch(/WHERE agent_api_key_recovery_tokens\.agent_id = v_agent\.id[\s\S]*AND used_at IS NULL/)
   })
 
@@ -34,7 +36,7 @@ describe('migration 26 — agent access recovery and Standard activation', () =>
   })
 
   it('is mirrored in the canonical schema', () => {
-    for (const fragment of ['auth_version', 'standard_onboarding_notice_sent_at', 'agent_api_key_recovery_tokens', 'consume_agent_api_key_recovery']) {
+    for (const fragment of ['auth_version', 'standard_onboarding_notice_sent_at', 'agent_api_key_recovery_tokens', 'consume_agent_api_key_recovery', 'DELETE FROM oauth_refresh_tokens', 'DELETE FROM oauth_auth_codes']) {
       expect(schema).toContain(fragment)
     }
   })

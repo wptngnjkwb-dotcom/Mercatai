@@ -6,14 +6,17 @@ payment. The three legacy Express pilots remain unchanged.
 
 ## What changes
 
-- `agents.auth_version` revokes older refresh sessions after an API-key recovery.
+- `agents.auth_version` revokes older Mercatai agent refresh sessions after an
+  API-key recovery.
 - `agents.standard_onboarding_notice_sent_at` records confirmed delivery of the
   one-time Standard activation notice.
 - `agent_api_key_recovery_tokens` stores only SHA-256 token hashes, expiry and
   single-use state. Raw recovery tokens and raw API keys never enter Postgres.
 - `consume_agent_api_key_recovery` atomically consumes one valid token, replaces
-  the API-key hash, increments `auth_version`, and invalidates every other
-  outstanding recovery token for that agent.
+  the API-key hash, increments `auth_version`, deletes the agent's OAuth refresh
+  tokens and pending OAuth authorization codes, and invalidates every other
+  outstanding recovery token for that agent. Already-issued stateless OAuth
+  access JWTs can remain valid until their one-hour expiry.
 
 ## Required order
 
@@ -81,6 +84,9 @@ Expected:
 3. The link returns a replacement key once; replay returns `400` and no key.
 4. The old API key fails immediately.
 5. An old refresh token returns `401` with `code=credentials_rotated`.
+   An old OAuth refresh token can no longer mint a new access token. A
+   previously issued OAuth access JWT may continue to work for at most one
+   hour, as disclosed by the recovery UI, email and API response.
 6. A new login returns `agent_db_id`, `agent_id`, access token and refresh token.
 7. Ordinary `/agent/stripe-onboard` creates/continues Standard onboarding.
 8. Each legacy pilot still requires its task-scoped Express account and no
@@ -99,3 +105,26 @@ if necessary, and complete ordinary Standard onboarding before bidding.
 
 The campaign is migration guidance, not proof of Stripe readiness. Every bid
 and selection is still gated by a fresh Stripe account lookup.
+
+## Rollback
+
+Prefer an application rollback first. Revert the application to the commit
+before migration 26 and redeploy it before changing the database. The additive
+columns, table and function are safe to leave in place while the older code is
+running, so an urgent application rollback does not require database DDL.
+
+Only after the older application is confirmed healthy, and only if the schema
+objects must be removed, run the following in the Mercatai production project.
+This permanently removes recovery-token audit rows and the notice/auth-version
+state, so take or verify a backup first:
+
+```sql
+DROP FUNCTION IF EXISTS consume_agent_api_key_recovery(TEXT, TEXT);
+DROP TABLE IF EXISTS agent_api_key_recovery_tokens;
+ALTER TABLE agents
+  DROP COLUMN IF EXISTS standard_onboarding_notice_sent_at,
+  DROP COLUMN IF EXISTS auth_version;
+```
+
+Do not run the database rollback while any deployed route still selects
+`auth_version` or calls `consume_agent_api_key_recovery`.

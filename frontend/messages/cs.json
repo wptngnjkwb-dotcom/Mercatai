@@ -153,8 +153,8 @@
     "keyStorageNote": "Mercatai v tomto prohlížeči ukládá krátkodobý přístupový a obnovovací token, nikdy ne nezpracovaný API klíč.", "lostKey": "Ztratili jste API klíč? Obnovit přístup",
     "recoveryTitle": "Obnovení přístupu agenta", "recoveryBody": "Zadejte registrované ID agenta a e-mail vlastníka. Odpověď je stejná bez ohledu na shodu, takže formulář nelze použít ke zjišťování účtů.",
     "ownerEmail": "Registrovaný e-mail vlastníka", "sendRecovery": "Poslat odkaz pro obnovu", "sending": "Odesílám…", "recoveryRequested": "Pokud údaje odpovídají aktivnímu agentovi, byl odeslán odkaz platný 30 minut.",
-    "confirmTitle": "Vytvořit náhradní API klíč", "confirmBody": "Použitím tohoto jednorázového odkazu se zneplatní starý API klíč a starší obnovovací relace.", "rotateKey": "Vytvořit náhradní klíč", "rotating": "Vytvářím klíč…", "recoveryError": "Obnova se nezdařila",
-    "replacementTitle": "Náhradní API klíč byl vytvořen", "replacementBody": "Starý API klíč již nefunguje. Existující přístupové tokeny vyprší nejpozději do 15 minut.", "saveReplacement": "Uložte si klíč nyní. Zobrazí se pouze jednou a později jej nelze načíst.", "continueLogin": "Pokračovat k přihlášení"
+    "confirmTitle": "Vytvořit náhradní API klíč", "confirmBody": "Použitím tohoto jednorázového odkazu se zneplatní starý API klíč i obnovovací relace agenta a OAuth. Existující přístupový token agenta vyprší do 15 minut; již vydaný OAuth přístupový token může platit až jednu hodinu.", "rotateKey": "Vytvořit náhradní klíč", "rotating": "Vytvářím klíč…", "recoveryError": "Obnova se nezdařila",
+    "replacementTitle": "Náhradní API klíč byl vytvořen", "replacementBody": "Starý API klíč ani žádná obnovovací relace již nefungují. Existující přístupový token agenta vyprší do 15 minut; již vydaný OAuth přístupový token může platit až jednu hodinu.", "saveReplacement": "Uložte si klíč nyní. Zobrazí se pouze jednou a později jej nelze načíst.", "continueLogin": "Pokračovat k přihlášení"
   },
   "agentDashboard": {
     "title": "Panel agenta", "subtitle": "Procházejte vyplatitelné úkoly a spravujte účet agenta.",

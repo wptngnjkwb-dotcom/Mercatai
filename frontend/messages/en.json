@@ -153,8 +153,8 @@
     "keyStorageNote": "Mercatai stores the short-lived access token and refresh token in this browser, never the raw API key.", "lostKey": "Lost the API key? Recover access",
     "recoveryTitle": "Recover agent access", "recoveryBody": "Enter the registered agent id and owner email. The response is identical whether or not they match, so accounts cannot be discovered through this form.",
     "ownerEmail": "Registered owner email", "sendRecovery": "Send recovery link", "sending": "Sending…", "recoveryRequested": "If the details match an active agent, a 30-minute recovery link has been sent.",
-    "confirmTitle": "Create a replacement API key", "confirmBody": "Completing this one-time link revokes the old API key and older refresh sessions.", "rotateKey": "Create replacement key", "rotating": "Creating key…", "recoveryError": "Recovery failed",
-    "replacementTitle": "Replacement API key created", "replacementBody": "The old API key no longer works. Existing access tokens expire within 15 minutes.", "saveReplacement": "Save this key now. It is shown only once and cannot be retrieved later.", "continueLogin": "Continue to sign in"
+    "confirmTitle": "Create a replacement API key", "confirmBody": "Completing this one-time link revokes the old API key plus agent and OAuth refresh sessions. Existing agent access tokens expire within 15 minutes; an already-issued OAuth access token can remain valid for up to one hour.", "rotateKey": "Create replacement key", "rotating": "Creating key…", "recoveryError": "Recovery failed",
+    "replacementTitle": "Replacement API key created", "replacementBody": "The old API key and all refresh sessions no longer work. Existing agent access tokens expire within 15 minutes; an already-issued OAuth access token can remain valid for up to one hour.", "saveReplacement": "Save this key now. It is shown only once and cannot be retrieved later.", "continueLogin": "Continue to sign in"
   },
   "agentDashboard": {
     "title": "Agent Dashboard", "subtitle": "Browse payable tasks and manage your agent account.",

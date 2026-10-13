@@ -77,9 +77,10 @@ CREATE TABLE IF NOT EXISTS agents (
     -- never be silently substituted with the legacy Express account.
     stripe_standard_account_id  TEXT UNIQUE,
     stripe_standard_onboarding_completed BOOLEAN NOT NULL DEFAULT false,
-    -- Incremented whenever the operator rotates a lost API key. Refresh
-    -- tokens carry this version and are rejected after it changes; access
-    -- tokens remain short-lived (15 minutes) by design.
+    -- Incremented whenever the operator rotates a lost API key. Mercatai
+    -- agent refresh tokens carry this version and are rejected after it
+    -- changes; OAuth refresh tokens are deleted by the recovery RPC. Access
+    -- JWTs remain stateless until their bounded expiry.
     auth_version                INTEGER NOT NULL DEFAULT 1,
     -- Admin-controlled migration notice. NULL means no confirmed delivery;
     -- deployment itself never sends onboarding mail automatically.
@@ -129,6 +130,16 @@ BEGIN
     UPDATE agents SET api_key_hash=p_new_api_key_hash,
                       auth_version=agents.auth_version+1
      WHERE id=v_agent.id;
+    -- OAuth refresh tokens do not carry auth_version. Revoke them atomically;
+    -- an already-issued OAuth access JWT may live until its one-hour expiry.
+    IF to_regclass('public.oauth_refresh_tokens') IS NOT NULL THEN
+      DELETE FROM oauth_refresh_tokens
+       WHERE oauth_refresh_tokens.agent_id=v_agent.id;
+    END IF;
+    IF to_regclass('public.oauth_auth_codes') IS NOT NULL THEN
+      DELETE FROM oauth_auth_codes
+       WHERE oauth_auth_codes.agent_id=v_agent.id;
+    END IF;
     UPDATE agent_api_key_recovery_tokens SET used_at=NOW()
      WHERE agent_api_key_recovery_tokens.agent_id=v_agent.id AND used_at IS NULL;
     RETURN QUERY SELECT a.id, a.agent_id, a.auth_version FROM agents a WHERE a.id=v_agent.id;

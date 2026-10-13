@@ -48,6 +48,8 @@ export async function POST(request: NextRequest) {
     api_key_note: 'Save this replacement API key now. It is shown only once; only its hash is stored.',
     old_key_revoked: true,
     old_refresh_tokens_revoked: true,
-    prior_access_tokens_expire_within_seconds: 900,
+    old_oauth_refresh_tokens_revoked: true,
+    prior_agent_access_tokens_expire_within_seconds: 900,
+    prior_oauth_access_tokens_expire_within_seconds: 3600,
   })
 }

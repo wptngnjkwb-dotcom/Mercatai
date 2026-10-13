@@ -87,7 +87,7 @@ export async function sendAgentApiKeyRecoveryOrThrow(params: {
     <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
       <h2 style="color:#4f46e5">Recover agent access</h2>
       <p>A recovery link was requested for agent <strong>${escapeEmailHtml(params.agentId)}</strong>.</p>
-      <p>The link expires in 30 minutes and can be used once. Completing it replaces the old API key and invalidates older refresh sessions. Existing access tokens expire within 15 minutes.</p>
+      <p>The link expires in 30 minutes and can be used once. Completing it replaces the old API key and invalidates older Mercatai and OAuth refresh sessions. Existing Mercatai agent access tokens expire within 15 minutes; an OAuth access token already issued to a third-party app can remain valid until its one-hour expiry.</p>
       <a href="${url}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">Create replacement API key</a>
       <p style="font-size:12px;color:#6b7280">If you did not request this, ignore the message. Nothing changes until the link is completed. Never send identity documents, Stripe credentials or API keys by email.</p>
       <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
 import { clientIp, isRateLimited, recordAttempt } from '@/lib/server/rateLimit'
@@ -9,22 +10,8 @@ const GENERIC_RESPONSE = {
   accepted: true,
   message: 'If the agent id and contact email match an active account, Mercatai will send a short-lived recovery link.',
 }
-export async function POST(request: NextRequest) {
-  const ip = clientIp(request)
-  if (await isRateLimited({ action: 'agent_key_recovery_requested', ip, windowMinutes: 60, maxEvents: 5 })) {
-    // Keep the same public shape for matching and non-matching identities.
-    return NextResponse.json(GENERIC_RESPONSE, { status: 202 })
-  }
 
-  const body = await request.json().catch(() => ({}))
-  const agentId = typeof body.agent_id === 'string' ? body.agent_id.trim() : ''
-  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
-  await recordAttempt('agent_key_recovery_requested', ip, { valid_shape: !!agentId && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) })
-
-  if (!agentId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return NextResponse.json(GENERIC_RESPONSE, { status: 202 })
-  }
-
+async function processRecoveryRequest(agentId: string, email: string, ip: string | null) {
   const db = getSupabase()
   const { data: agent } = await db
     .from('agents')
@@ -32,9 +19,7 @@ export async function POST(request: NextRequest) {
     .eq('agent_id', agentId)
     .maybeSingle()
 
-  if (!agent || !agent.is_active || agent.owner_email?.trim().toLowerCase() !== email) {
-    return NextResponse.json(GENERIC_RESPONSE, { status: 202 })
-  }
+  if (!agent || !agent.is_active || agent.owner_email?.trim().toLowerCase() !== email) return
 
   const rawToken = randomBytes(32).toString('base64url')
   const tokenHash = createHash('sha256').update(rawToken).digest('hex')
@@ -47,7 +32,7 @@ export async function POST(request: NextRequest) {
 
   if (error || !recovery) {
     console.error('[agent-key-recovery] token creation failed')
-    return NextResponse.json(GENERIC_RESPONSE, { status: 202 })
+    return
   }
 
   try {
@@ -70,6 +55,29 @@ export async function POST(request: NextRequest) {
     await db.from('agent_api_key_recovery_tokens').update({ used_at: new Date().toISOString() }).eq('id', recovery.id)
     console.error('[agent-key-recovery] email delivery failed', error instanceof Error ? error.message : error)
   }
+}
+
+export async function POST(request: NextRequest) {
+  const ip = clientIp(request)
+  if (await isRateLimited({ action: 'agent_key_recovery_requested', ip, windowMinutes: 60, maxEvents: 5 })) {
+    // Keep the same public shape for matching and non-matching identities.
+    return NextResponse.json(GENERIC_RESPONSE, { status: 202 })
+  }
+
+  const body = await request.json().catch(() => ({}))
+  const agentId = typeof body.agent_id === 'string' ? body.agent_id.trim() : ''
+  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
+  await recordAttempt('agent_key_recovery_requested', ip, { valid_shape: !!agentId && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) })
+
+  if (!agentId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return NextResponse.json(GENERIC_RESPONSE, { status: 202 })
+  }
+
+  // Do not await identity lookup, token creation or Resend. Matching and
+  // non-matching identities receive the same response without a provider/DB
+  // timing side channel, while waitUntil keeps the Vercel function alive long
+  // enough to finish the bounded delivery task after the response is sent.
+  waitUntil(processRecoveryRequest(agentId, email, ip))
 
   return NextResponse.json(GENERIC_RESPONSE, { status: 202 })
 }

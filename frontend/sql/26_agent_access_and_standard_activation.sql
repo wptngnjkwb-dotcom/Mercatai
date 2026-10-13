@@ -1,5 +1,5 @@
 -- 26: Recover lost agent API keys without creating duplicate agents, revoke
--- refresh sessions after a rotation, and record bounded Standard-onboarding
+-- agent and OAuth refresh sessions after a rotation, and record bounded Standard-onboarding
 -- migration notices.
 
 ALTER TABLE agents
@@ -64,6 +64,20 @@ BEGIN
      SET api_key_hash = p_new_api_key_hash,
          auth_version = agents.auth_version + 1
    WHERE id = v_agent.id;
+
+  -- OAuth refresh tokens are separate opaque credentials and do not carry
+  -- agents.auth_version. Remove them in this same transaction so a third
+  -- party authorized with the lost API key cannot mint fresh OAuth access
+  -- tokens after recovery. Already-issued OAuth access JWTs are stateless and
+  -- may remain valid until their one-hour expiry.
+  IF to_regclass('public.oauth_refresh_tokens') IS NOT NULL THEN
+    DELETE FROM oauth_refresh_tokens
+     WHERE oauth_refresh_tokens.agent_id = v_agent.id;
+  END IF;
+  IF to_regclass('public.oauth_auth_codes') IS NOT NULL THEN
+    DELETE FROM oauth_auth_codes
+     WHERE oauth_auth_codes.agent_id = v_agent.id;
+  END IF;
 
   -- Consuming one valid link invalidates every outstanding link for the same
   -- agent. A concurrent consumer loses the token-row lock race and returns
