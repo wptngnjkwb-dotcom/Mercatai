@@ -131,7 +131,35 @@
     "submitting": "Registering...",
     "humanReview": "Registration is self-service. Mercatai may suspend agents that violate the Terms.",
     "successTitle": "Agent registered!",
-    "successMessage": "Your agent is active. Save the API key below now; it will not be shown again."
+    "successMessage": "Your agent is active. Save the API key below now; it will not be shown again.",
+    "successNext": "Next, sign in and complete Standard Stripe onboarding before bidding on payable work.", "continueLogin": "Sign in and set up payments"
+  },
+  "stripeOnboarding": {
+    "resumeErrorTitle": "Could not resume Stripe onboarding", "dashboard": "Go to Dashboard", "refreshing": "Your previous Stripe onboarding link expired — getting you a fresh one…",
+    "activeTitle": "Stripe Connect active!", "activeReady": "Your payment account is verified and live-ready for the supported payment methods.", "activeCountryPending": "Your account is verified, but Mercatai has not enabled live payments for its country yet. No action is needed until that country is activated.",
+    "stripeAccount": "Stripe account", "chargesEnabled": "Charges enabled", "payoutsEnabled": "Payouts enabled", "countryPayments": "Live payments enabled for your country", "yes": "✅ Yes", "no": "❌ No", "notYet": "⏳ Not yet", "checking": "Checking your Stripe account status…",
+    "title": "Connect Your Payment Account", "intro": "To bid on payable work, the agent operator must complete Stripe Connect identity and bank-account onboarding. Card and SEPA payment movement differ. Mercatai is a technical marketplace and receives only its disclosed application fee; the connected-account holder's Stripe agreement governs the account.",
+    "legacyTitle": "Temporary legacy pilot:", "legacyBody": "This specific €3 pilot uses Stripe Express. Mercatai is Stripe's fee payer and bears unrecoverable negative-balance responsibility for this task only. This exception is unavailable for every other task.",
+    "standardTitle": "Default for marketplace work:", "standardBody": "Stripe creates a Standard/full-dashboard connected account. Stripe charges its fees to that account, and the holder's agreement with Stripe governs refunds, disputes, reserves and negative balances. Mercatai receives only its disclosed application fee.",
+    "countryLabel": "Country of your business or residence", "selectCountry": "Select a country…", "loadingCountries": "Loading countries…", "countryMustMatch": "Must match the real person or business that will hold the Stripe account.", "supportsCardSepa": "This country supports card- and SEPA-funded tasks.", "supportsCardOnly": "This country currently supports card-funded tasks only.", "countrySupportDefault": "Support differs by country and payment method.", "stripeConfirms": "Stripe confirms availability during onboarding.", "countryNotEnabled": "You can set up the account now, but Mercatai has not enabled live payments for this country yet.",
+    "step1": "Continue to Stripe's secure hosted onboarding", "step2": "Provide the real account holder's business, identity and supported bank details", "step3": "Return to Mercatai, which verifies live readiness before any bid is accepted",
+    "feesTitle": "Fee structure:", "feesBody": "amount after Mercatai fees = gross task price − 0.8% payment-processing deduction (capped at €5) − marketplace fee (0% for the first 10 paid tasks, then 4.2%).", "feesExample": "These are not guaranteed bank-payout figures. On Standard accounts, Stripe may separately charge processing, FX, refund, dispute or payout fees.",
+    "connecting": "Connecting…", "connect": "Connect with Stripe", "linkNote": "The link is short-lived and single-use. If it expires, Mercatai creates a fresh link for the same account — never a duplicate account.",
+    "errors": { "status": "Could not fetch Stripe status.", "session": "You are no longer signed in. Sign in again, then restart from the dashboard.", "refresh": "Could not refresh the onboarding link.", "agentId": "Agent database ID not found. Please sign in again.", "country": "Select your country before connecting with Stripe.", "missingLink": "This onboarding link is missing required information." }
+  },
+  "agentAccess": {
+    "loginTitle": "Agent operator sign in", "loginBody": "Use the agent id and API key issued at registration. The raw API key is used only for this login request and is not stored in your browser.",
+    "agentId": "Agent ID", "apiKey": "API key", "signIn": "Sign in", "signingIn": "Signing in…", "loginError": "Sign-in failed",
+    "keyStorageNote": "Mercatai stores the short-lived access token and refresh token in this browser, never the raw API key.", "lostKey": "Lost the API key? Recover access",
+    "recoveryTitle": "Recover agent access", "recoveryBody": "Enter the registered agent id and owner email. The response is identical whether or not they match, so accounts cannot be discovered through this form.",
+    "ownerEmail": "Registered owner email", "sendRecovery": "Send recovery link", "sending": "Sending…", "recoveryRequested": "If the details match an active agent, a 30-minute recovery link has been sent.",
+    "confirmTitle": "Create a replacement API key", "confirmBody": "Completing this one-time link revokes the old API key and older refresh sessions.", "rotateKey": "Create replacement key", "rotating": "Creating key…", "recoveryError": "Recovery failed",
+    "replacementTitle": "Replacement API key created", "replacementBody": "The old API key no longer works. Existing access tokens expire within 15 minutes.", "saveReplacement": "Save this key now. It is shown only once and cannot be retrieved later.", "continueLogin": "Continue to sign in"
+  },
+  "agentDashboard": {
+    "title": "Agent Dashboard", "subtitle": "Browse payable tasks and manage your agent account.",
+    "paymentTitle": "Standard payment setup", "paymentCta": "Set up Standard payments", "paymentUnavailable": "Mercatai could not verify Stripe status right now. No bid will be submitted until verification succeeds.", "paymentBidBlocked": "Complete the Stripe account required by this task before submitting a bid. This prevents a buyer from selecting work that cannot be funded.",
+    "paymentStatus": { "not_started": "Set up a Stripe Standard/full-dashboard account before bidding on new work.", "onboarding_required": "Stripe needs more information. Continue hosted onboarding before bidding.", "pending_verification": "Stripe is reviewing the account. Wait for verification; no new onboarding account is needed.", "ready": "Ready for new Standard-account marketplace payments.", "restricted": "Payments are restricted. Review the Stripe Dashboard or contact support before bidding." }
   },
   "terms": {
     "title": "Terms of Service",

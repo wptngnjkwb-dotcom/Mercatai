@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { CheckCircle, AlertCircle, Loader2, ExternalLink } from 'lucide-react'
 import { api } from '@/lib/api'
 
@@ -16,6 +17,7 @@ interface OnboardingCountryGroup {
 }
 
 export default function StripeOnboardPage() {
+  const t = useTranslations('stripeOnboarding')
   const searchParams = useSearchParams()
   const success = searchParams.get('success')
   const refresh = searchParams.get('refresh')
@@ -94,7 +96,7 @@ export default function StripeOnboardPage() {
   async function checkStatus() {
     setStatus('loading')
     try {
-      const token = localStorage.getItem('mercatai_token')
+      const token = localStorage.getItem('access_token')
       const taskQuery = taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''
       const res = await fetch(`/api/v1/agents/${agentDbId}/stripe-onboard${taskQuery}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -104,20 +106,20 @@ export default function StripeOnboardPage() {
       setStatus('done')
     } catch {
       setStatus('error')
-      setError('Could not fetch Stripe status.')
+      setError(t('errors.status'))
     }
   }
 
   async function refreshOnboardingLink() {
     setStatus('loading')
     setError('')
-    const token = localStorage.getItem('mercatai_token')
+    const token = localStorage.getItem('access_token')
     if (!token) {
       // A missing/invalid session must end here, in a clear message — never
       // fall through to re-fetching or silently retrying, which could loop
       // between this page and Stripe indefinitely.
       setStatus('error')
-      setError('You are no longer logged in, so Mercatai cannot verify you own this Stripe onboarding session. Log in again, then restart from your dashboard.')
+      setError(t('errors.session'))
       return
     }
     try {
@@ -127,27 +129,27 @@ export default function StripeOnboardPage() {
         body: JSON.stringify(taskId ? { task_id: taskId } : {}),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Could not refresh the onboarding link.')
+      if (!res.ok) throw new Error(data.error || t('errors.refresh'))
       window.location.href = data.onboarding_url
     } catch (e: any) {
       setStatus('error')
-      setError(e.message || 'Could not refresh the onboarding link.')
+      setError(e.message || t('errors.refresh'))
     }
   }
 
   async function startOnboarding() {
-    const agentId = localStorage.getItem('mercatai_agent_db_id')
+    const agentId = localStorage.getItem('agent_id')
     if (!agentId) {
-      setError('Agent DB ID not found. Please log in again.')
+      setError(t('errors.agentId'))
       return
     }
     if (!country) {
-      setError('Please select your country before connecting with Stripe.')
+      setError(t('errors.country'))
       return
     }
     setStatus('loading')
     try {
-      const token = localStorage.getItem('mercatai_token')
+      const token = localStorage.getItem('access_token')
       const res = await fetch(`/api/v1/agents/${agentId}/stripe-onboard`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -171,18 +173,18 @@ export default function StripeOnboardPage() {
           <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-6">
             <AlertCircle size={32} className="text-red-600" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-3">Could not resume Stripe onboarding</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-3">{t('resumeErrorTitle')}</h1>
           <p className="text-gray-500 mb-6">
-            {!agentDbId ? 'This onboarding link is missing required information.' : error}
+            {!agentDbId ? t('errors.missingLink') : error}
           </p>
-          <a href="/agent/dashboard" className="btn-primary inline-flex">Go to Dashboard</a>
+          <a href="/agent/dashboard" className="btn-primary inline-flex">{t('dashboard')}</a>
         </div>
       )
     }
     return (
       <div className="max-w-lg mx-auto px-4 py-20 text-center">
         <Loader2 size={32} className="animate-spin mx-auto text-brand-600 mb-4" />
-        <p className="text-gray-500">Your previous Stripe onboarding link expired — getting you a fresh one...</p>
+        <p className="text-gray-500">{t('refreshing')}</p>
       </div>
     )
   }
@@ -201,19 +203,19 @@ export default function StripeOnboardPage() {
         <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6">
           <CheckCircle size={32} className="text-green-600" />
         </div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-3">Stripe Connect active!</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-3">{t('activeTitle')}</h1>
         <p className="text-gray-500 mb-6">
           {paymentEnabled
-            ? 'Your payout account is verified. You will receive payments directly after task approval.'
-            : 'Your payout account is verified. However, Mercatai has not yet enabled live payments for your account\'s country — you will not be able to receive real payments until it is. We will announce country activations separately; no action is needed from you now.'}
+            ? t('activeReady')
+            : t('activeCountryPending')}
         </p>
         <div className="card p-4 text-left text-sm space-y-2">
-          <div className="flex justify-between"><span className="text-gray-500">Stripe account</span><span className="font-mono text-xs">{stripeStatus.stripe_account_id}</span></div>
-          <div className="flex justify-between"><span className="text-gray-500">Charges enabled</span><span>{stripeStatus.charges_enabled ? '✅ Yes' : '❌ No'}</span></div>
-          <div className="flex justify-between"><span className="text-gray-500">Payouts enabled</span><span>{stripeStatus.payouts_enabled ? '✅ Yes' : '❌ No'}</span></div>
-          <div className="flex justify-between"><span className="text-gray-500">Live payments enabled for your country</span><span>{paymentEnabled ? '✅ Yes' : '⏳ Not yet'}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">{t('stripeAccount')}</span><span className="font-mono text-xs">{stripeStatus.stripe_account_id}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">{t('chargesEnabled')}</span><span>{stripeStatus.charges_enabled ? t('yes') : t('no')}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">{t('payoutsEnabled')}</span><span>{stripeStatus.payouts_enabled ? t('yes') : t('no')}</span></div>
+          <div className="flex justify-between"><span className="text-gray-500">{t('countryPayments')}</span><span>{paymentEnabled ? t('yes') : t('notYet')}</span></div>
         </div>
-        <a href="/agent/dashboard" className="btn-primary mt-6 inline-flex">Go to Dashboard</a>
+        <a href="/agent/dashboard" className="btn-primary mt-6 inline-flex">{t('dashboard')}</a>
       </div>
     )
   }
@@ -222,42 +224,36 @@ export default function StripeOnboardPage() {
     return (
       <div className="max-w-lg mx-auto px-4 py-20 text-center">
         <Loader2 size={32} className="animate-spin mx-auto text-brand-600 mb-4" />
-        <p className="text-gray-500">Checking your Stripe account status...</p>
+        <p className="text-gray-500">{t('checking')}</p>
       </div>
     )
   }
 
   return (
     <div className="max-w-xl mx-auto px-4 py-16">
-      <h1 className="text-3xl font-bold text-gray-900 mb-2">Connect Your Payout Account</h1>
-      <p className="text-gray-500 mb-8">
-        To receive payments for completed tasks, you must link your bank account via Stripe Connect.
-        Stripe verifies your identity during onboarding. Card payments are authorized once the buyer
-        completes the payment step for your accepted bid (not merely by accepting it) and captured only
-        after approval; SEPA Direct Debit payments settle automatically. Mercatai is not a bank and does
-        not itself hold your funds outside of Stripe&apos;s processing.
-      </p>
+      <h1 className="text-3xl font-bold text-gray-900 mb-2">{t('title')}</h1>
+      <p className="text-gray-500 mb-8">{t('intro')}</p>
 
       {accountRequirement === 'legacy_express_platform_liability' ? (
         <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <strong>Temporary legacy pilot:</strong> this specific €3 pilot uses a Stripe Express account. Mercatai is the Stripe fee payer and bears Stripe&apos;s unrecoverable negative-balance responsibility for this task only. This exception does not apply to any other task.
+          <strong>{t('legacyTitle')}</strong> {t('legacyBody')}
         </div>
       ) : (
         <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          <strong>Default for marketplace work:</strong> Stripe creates a Standard/full-dashboard connected account. Stripe charges its fees to that connected account, and the account holder&apos;s agreement with Stripe governs refunds, disputes and negative balances. Mercatai receives only its disclosed application fee.
+          <strong>{t('standardTitle')}</strong> {t('standardBody')}
         </div>
       )}
 
       <div className="card p-6 space-y-5">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Country of your business or residence</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">{t('countryLabel')}</label>
           <select
             className="input w-full"
             value={country}
             onChange={(e) => setCountry(e.target.value)}
             disabled={!countriesLoaded}
           >
-            <option value="">{countriesLoaded ? 'Select a country…' : 'Loading countries…'}</option>
+            <option value="">{countriesLoaded ? t('selectCountry') : t('loadingCountries')}</option>
             {countryGroups.map((group) => (
               <optgroup key={group.label} label={group.label}>
                 {group.countries.map((c) => (
@@ -267,23 +263,21 @@ export default function StripeOnboardPage() {
             ))}
           </select>
           <p className="text-xs text-gray-400 mt-1">
-            Must match the actual country of the person or business that will hold this Stripe payout
-            account.{' '}
+            {t('countryMustMatch')}{' '}
             {(() => {
               const selected = country ? countryGroups.flatMap((g) => g.countries).find((c) => c.code === country) : undefined
               if (selected) {
                 return selected.supportsSepaDebit
-                  ? 'This country supports card and SEPA-funded tasks.'
-                  : 'This country currently supports card-funded tasks only.'
+                  ? t('supportsCardSepa')
+                  : t('supportsCardOnly')
               }
-              return 'Most EU/EEA accounts support card and SEPA-funded tasks; a few of them, and the other listed Stripe Connect countries, currently support card-funded tasks only.'
+              return t('countrySupportDefault')
             })()}
-            {' '}Stripe confirms availability during onboarding.
+            {' '}{t('stripeConfirms')}
           </p>
           {country && countriesLoaded && !paymentEnabledCountryCodes.includes(country) && (
             <p className="text-xs text-amber-600 mt-1">
-              You can complete account setup for this country now, but Mercatai has not yet enabled live
-              payments for it — you will not be able to receive real payments until it does.
+              {t('countryNotEnabled')}
             </p>
           )}
         </div>
@@ -291,24 +285,21 @@ export default function StripeOnboardPage() {
         <div className="space-y-3 text-sm text-gray-600">
           <div className="flex items-start gap-3">
             <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">1</span>
-            <span>Click the button below — you&apos;ll be redirected to Stripe&apos;s secure onboarding</span>
+            <span>{t('step1')}</span>
           </div>
           <div className="flex items-start gap-3">
             <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">2</span>
-            <span>Provide your business details and supported bank account information</span>
+            <span>{t('step2')}</span>
           </div>
           <div className="flex items-start gap-3">
             <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">3</span>
-            <span>Once verified, Stripe can process payments directly in your connected account — see the fee explanation below</span>
+            <span>{t('step3')}</span>
           </div>
         </div>
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-700 space-y-1">
-          <p><strong>Mercatai fee structure:</strong> amount after Mercatai fees = gross task price − payment-processing deduction
-          (0.8% of gross, capped at €5) − marketplace fee (0% on your first 10 paid tasks, 4.2% after that).</p>
-          <p>Example: after Mercatai fees, €100 becomes €99.20 and €1,000 becomes €995.00 during your first
-          10 paid tasks. These are not guaranteed bank-payout figures: Stripe may separately deduct processing,
-          FX, dispute, refund or payout fees from your connected account.</p>
+          <p><strong>{t('feesTitle')}</strong> {t('feesBody')}</p>
+          <p>{t('feesExample')}</p>
         </div>
 
         {error && (
@@ -324,15 +315,14 @@ export default function StripeOnboardPage() {
           className="btn-primary justify-center py-3 w-full"
         >
           {status === 'loading' ? (
-            <><Loader2 size={16} className="animate-spin mr-2" />Connecting...</>
+            <><Loader2 size={16} className="animate-spin mr-2" />{t('connecting')}</>
           ) : (
-            <><ExternalLink size={16} className="mr-2" />Connect with Stripe</>
+            <><ExternalLink size={16} className="mr-2" />{t('connect')}</>
           )}
         </button>
 
         <p className="text-xs text-center text-gray-400">
-          This link is short-lived and single-use. If it expires before you finish, Mercatai automatically
-          generates you a fresh one — no need to restart from scratch.
+          {t('linkNote')}
         </p>
       </div>
     </div>

@@ -4,6 +4,8 @@ import { getTokenFromRequest, describeAuthFailure } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { sendNewBid } from '@/lib/server/email'
 import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
+import { isStripeAccountRequirement } from '@/lib/server/stripeAccountRequirement'
+import { getLiveAgentPaymentSetup, paymentSetupRequiredBody, PaymentSetupLookupError } from '@/lib/server/agentPaymentSetup'
 
 const MAX_DELIVERY_HOURS = 8760
 
@@ -93,6 +95,29 @@ export async function POST(request: NextRequest) {
       }, { status: 409 })
     }
     if (price_eur > task.budget_max_eur) return NextResponse.json({ error: 'Bid exceeds task budget' }, { status: 400 })
+
+    if (!isStripeAccountRequirement(task.stripe_account_requirement)) {
+      return NextResponse.json({ error: 'Task has an invalid payment-account requirement' }, { status: 500 })
+    }
+    // Fail before the bid insert, task-status update, audit or buyer email.
+    // A buyer must never be offered a bid from an agent that cannot receive
+    // this task's payment model.
+    try {
+      const paymentSetup = await getLiveAgentPaymentSetup({
+        db,
+        agent,
+        requirement: task.stripe_account_requirement,
+        taskId: task.id,
+      })
+      if (!paymentSetup.ready) {
+        return NextResponse.json(paymentSetupRequiredBody(paymentSetup), { status: 402 })
+      }
+    } catch (error) {
+      if (error instanceof PaymentSetupLookupError) {
+        return NextResponse.json({ error: 'Agent payment setup could not be verified right now', code: 'payment_setup_unavailable' }, { status: 503 })
+      }
+      throw error
+    }
 
     const score = scoreBid(
       { price_eur, delivery_hours, agent_reputation: agent.reputation_score },

@@ -158,8 +158,8 @@ vi.mock('@/lib/server/supabase', () => ({
             profile_visibility: acceptedBidAgentVisibility,
             stripe_account_id: null,
             stripe_onboarding_completed: false,
-            stripe_standard_account_id: null,
-            stripe_standard_onboarding_completed: false,
+            stripe_standard_account_id: 'acct_1',
+            stripe_standard_onboarding_completed: agentStripeOnboardingCompleted,
           }, error: null }
           return { data: null, error: null }
         },
@@ -229,6 +229,29 @@ describe('PUT /api/v1/bids/[id]/accept — moderation guard', () => {
     expect(taskUpdates).toHaveLength(0)
   })
 
+  it('blocks selecting a payment-unready bidder before the atomic accept RPC', async () => {
+    accountRetrieveResult = {
+      ...accountRetrieveResult,
+      charges_enabled: false,
+      payouts_enabled: false,
+      capabilities: { card_payments: 'inactive', sepa_debit_payments: 'inactive', transfers: 'inactive' },
+      requirements: { currently_due: ['individual.verification.document'] },
+    }
+    const { PUT } = await import('@/app/api/v1/bids/[id]/accept/route')
+    const buyerToken = await signToken({ role: 'buyer', task_id: TASK_ID, org_id: 'org-1' }, '30d')
+    const response = await PUT(new NextRequest(`http://localhost/api/v1/bids/${BID_ID}/accept`, {
+      method: 'PUT', headers: { authorization: `Bearer ${buyerToken}` },
+    }), { params: { id: BID_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(402)
+    expect(body).toMatchObject({ code: 'agent_payment_setup_required', payment_ready: false })
+    expect(rpcCallNames).not.toContain('accept_task_bid')
+    expect(taskUpdates).toHaveLength(0)
+    expect(fireWebhooks).not.toHaveBeenCalled()
+    expect(sendBidAcceptedActionRequired).not.toHaveBeenCalled()
+  })
+
   it('allows accepting a bid on an approved task', async () => {
     const { PUT } = await import('@/app/api/v1/bids/[id]/accept/route')
     const buyerToken = await signToken({ role: 'buyer', task_id: TASK_ID, org_id: 'org-1' }, '30d')
@@ -245,7 +268,7 @@ describe('PUT /api/v1/bids/[id]/accept — moderation guard', () => {
       to: 'operator@example.com',
       taskId: TASK_ID,
       agentId: 'agent-1',
-      onboardingRequired: true,
+      onboardingRequired: false,
     }))
   })
 

@@ -19,6 +19,7 @@ import {
   stripeAccountFields,
   stripeAccountMatchesRequirement,
 } from '@/lib/server/stripeAccountRequirement'
+import { getLiveAgentPaymentSetup, PaymentSetupLookupError } from '@/lib/server/agentPaymentSetup'
 
 // Stripe's legal-entity structures for a connected account. Left unset by
 // default so Stripe's hosted onboarding asks the account holder directly —
@@ -377,44 +378,39 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   const accountRequirement = resolved.requirement
   const accountFields = stripeAccountFields(accountRequirement)
   const responsibility = publicPaymentResponsibility(accountRequirement)
-  const stripeAccountId = agent[accountFields.accountId]
-  const storedOnboardingCompleted = agent[accountFields.onboardingCompleted]
-  if (!stripeAccountId) {
+  let setup
+  try {
+    setup = await getLiveAgentPaymentSetup({ db, agent, requirement: accountRequirement, taskId: resolved.taskId })
+  } catch (error) {
+    if (error instanceof PaymentSetupLookupError) {
+      return NextResponse.json({ error: 'Could not verify Stripe payment setup right now' }, { status: 502 })
+    }
+    throw error
+  }
+  if (!setup.account || !setup.readiness) {
     return NextResponse.json({
       onboarding_completed: false,
       stripe_account_id: null,
+      payment_setup_status: setup.status,
+      payment_ready: false,
+      next_action: setup.nextAction,
+      onboarding_endpoint: setup.onboardingEndpoint,
       task_id: resolved.taskId,
       ...responsibility,
     })
   }
-
-  const Stripe = (await import('stripe')).default
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-  const account = await stripe.accounts.retrieve(stripeAccountId)
-  if (!stripeAccountMatchesRequirement(account, accountRequirement)) {
-    return NextResponse.json({
-      error: `The stored Stripe account does not match the required ${accountFields.stripeType} responsibility model.`,
-      stripe_account_id: stripeAccountId,
-      ...responsibility,
-    }, { status: 409 })
-  }
-
-  const readiness = computeStripeAccountReadiness(account)
+  const account = setup.account
+  const readiness = setup.readiness
   const completed = readiness.onboardingComplete
-
-  // Recomputed from live Stripe data on every call, in both directions — a
-  // capability Stripe later restricts (e.g. after its own compliance
-  // review) must be able to flip this back to false. The old check
-  // (details_submitted && no currently_due items) only ever moved this flag
-  // from false to true and never looked at capabilities, payouts_enabled,
-  // or a later restriction at all.
-  await syncOnboardingCompletedFlag(db, agent.id, storedOnboardingCompleted, completed, accountFields.onboardingCompleted)
-
-  const accountCountry = typeof account.country === 'string' ? account.country.toUpperCase() : null
+  const accountCountry = setup.country
 
   return NextResponse.json({
     onboarding_completed: completed,
-    stripe_account_id: stripeAccountId,
+    stripe_account_id: setup.accountId,
+    payment_setup_status: setup.status,
+    payment_ready: setup.ready,
+    next_action: setup.nextAction,
+    onboarding_endpoint: setup.onboardingEndpoint,
     payout_ready: readiness.payoutReady,
     card_ready: readiness.cardReady,
     sepa_debit_ready: readiness.sepaDebitReady,

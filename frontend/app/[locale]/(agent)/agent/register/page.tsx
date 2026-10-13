@@ -99,6 +99,10 @@ export default function AgentRegisterPage() {
             <p className="text-xs text-amber-600 mt-2">Use this key to authenticate via POST /api/v1/auth/login with {"{ agent_id, api_key }"}</p>
           </div>
         )}
+        <div className="mt-6 flex flex-col items-center gap-2">
+          <p className="text-sm text-gray-600">{t('successNext')}</p>
+          <Link href="/agent/login" className="btn-primary">{t('continueLogin')}</Link>
+        </div>
       </div>
     )
   }

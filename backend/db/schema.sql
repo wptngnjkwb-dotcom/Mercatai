@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS agents (
     -- never be silently substituted with the legacy Express account.
     stripe_standard_account_id  TEXT UNIQUE,
     stripe_standard_onboarding_completed BOOLEAN NOT NULL DEFAULT false,
+    -- Incremented whenever the operator rotates a lost API key. Refresh
+    -- tokens carry this version and are rejected after it changes; access
+    -- tokens remain short-lived (15 minutes) by design.
+    auth_version                INTEGER NOT NULL DEFAULT 1,
+    -- Admin-controlled migration notice. NULL means no confirmed delivery;
+    -- deployment itself never sends onboarding mail automatically.
+    standard_onboarding_notice_sent_at TIMESTAMPTZ,
     -- 'private' hides this agent from public discovery (directories, search,
     -- recommendations, Store) and profile/reputation/reviews/portfolio/work
     -- history, without affecting login, bidding, delivery, or payouts — see
@@ -86,6 +93,50 @@ CREATE TABLE IF NOT EXISTS agents (
     profile_visibility          TEXT NOT NULL DEFAULT 'public'
                                 CHECK (profile_visibility IN ('public', 'private'))
 );
+
+-- ============================================================
+-- agent API-key recovery (service-role only)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS agent_api_key_recovery_tokens (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_id    UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    token_hash  TEXT NOT NULL UNIQUE,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION consume_agent_api_key_recovery(
+    p_token_hash TEXT,
+    p_new_api_key_hash TEXT
+) RETURNS TABLE (agent_id UUID, agent_slug TEXT, auth_version INTEGER) AS $$
+DECLARE
+    v_token agent_api_key_recovery_tokens%ROWTYPE;
+    v_agent agents%ROWTYPE;
+BEGIN
+    IF p_token_hash IS NULL OR length(p_token_hash) <> 64 THEN
+        RAISE EXCEPTION USING ERRCODE='22023', MESSAGE='invalid recovery token hash';
+    END IF;
+    IF p_new_api_key_hash IS NULL OR length(p_new_api_key_hash) < 20 THEN
+        RAISE EXCEPTION USING ERRCODE='22023', MESSAGE='invalid API key hash';
+    END IF;
+    SELECT * INTO v_token FROM agent_api_key_recovery_tokens
+     WHERE token_hash=p_token_hash AND used_at IS NULL AND expires_at > NOW()
+     FOR UPDATE;
+    IF NOT FOUND THEN RETURN; END IF;
+    SELECT * INTO v_agent FROM agents WHERE id=v_token.agent_id FOR UPDATE;
+    IF NOT FOUND OR v_agent.is_active IS DISTINCT FROM TRUE THEN RETURN; END IF;
+    UPDATE agents SET api_key_hash=p_new_api_key_hash,
+                      auth_version=agents.auth_version+1
+     WHERE id=v_agent.id;
+    UPDATE agent_api_key_recovery_tokens SET used_at=NOW()
+     WHERE agent_api_key_recovery_tokens.agent_id=v_agent.id AND used_at IS NULL;
+    RETURN QUERY SELECT a.id, a.agent_id, a.auth_version FROM agents a WHERE a.id=v_agent.id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public;
+
+REVOKE ALL ON FUNCTION consume_agent_api_key_recovery(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION consume_agent_api_key_recovery(TEXT, TEXT) TO service_role;
 
 -- ============================================================
 -- tasks
@@ -782,6 +833,8 @@ CREATE INDEX IF NOT EXISTS idx_tasks_embedding
 CREATE INDEX IF NOT EXISTS idx_agents_public_active
     ON agents (reputation_score DESC, id)
     WHERE is_active = true AND profile_visibility = 'public';
+CREATE INDEX IF NOT EXISTS idx_agent_api_key_recovery_active
+    ON agent_api_key_recovery_tokens(agent_id, expires_at) WHERE used_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status      ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_category    ON tasks(category);
@@ -832,6 +885,7 @@ ALTER TABLE stripe_connect_account_status ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_disputes              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE opportunity_alert_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE opportunity_alert_deliveries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_api_key_recovery_tokens ENABLE ROW LEVEL SECURITY;
 
 -- Service role má plný přístup (backend vždy používá service_role_key)
 CREATE POLICY "service_role_all" ON organizations   TO service_role USING (true) WITH CHECK (true);
@@ -850,3 +904,4 @@ CREATE POLICY "service_role_all" ON stripe_connect_account_status TO service_rol
 CREATE POLICY "service_role_all" ON payment_disputes               TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_all" ON opportunity_alert_subscriptions TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_all" ON opportunity_alert_deliveries TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "service_role_all" ON agent_api_key_recovery_tokens TO service_role USING (true) WITH CHECK (true);

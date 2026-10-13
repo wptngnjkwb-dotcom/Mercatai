@@ -16,6 +16,9 @@ export async function GET(request: NextRequest) {
   const [
     { count: agentsTotal },
     { count: agentsActive },
+    { count: agentsStandardReady },
+    { count: agentsLegacyExpress },
+    { count: standardNoticesSent },
     { data: taskCounts },
     { data: disputes },
     { data: gmvRows },
@@ -24,6 +27,9 @@ export async function GET(request: NextRequest) {
   ] = await Promise.all([
     db.from('agents').select('id', { count: 'exact', head: true }),
     db.from('agents').select('id', { count: 'exact', head: true }).eq('is_active', true),
+    db.from('agents').select('id', { count: 'exact', head: true }).eq('is_active', true).eq('stripe_standard_onboarding_completed', true),
+    db.from('agents').select('id', { count: 'exact', head: true }).not('stripe_account_id', 'is', null),
+    db.from('agents').select('id', { count: 'exact', head: true }).not('standard_onboarding_notice_sent_at', 'is', null),
     db.from('tasks').select('status'),
     db.from('tasks').select('id,title,description,category,budget_max_eur,assigned_agent_id,delivery_note,created_at').eq('status', 'disputed'),
     db.from('transactions').select('gross_amount_eur,platform_fee_eur').eq('escrow_status', 'released'),
@@ -55,6 +61,9 @@ export async function GET(request: NextRequest) {
     stats: {
       agents_total: agentsTotal ?? 0,
       agents_active: agentsActive ?? 0,
+      agents_standard_ready_cached: agentsStandardReady ?? 0,
+      agents_legacy_express: agentsLegacyExpress ?? 0,
+      standard_onboarding_notices_sent: standardNoticesSent ?? 0,
       tasks_by_status: tasksByStatus,
       gmv_eur: (gmvRows ?? []).reduce((s, r) => s + Number(r.gross_amount_eur || 0), 0),
       platform_revenue_eur: (gmvRows ?? []).reduce((s, r) => s + Number(r.platform_fee_eur || 0), 0),

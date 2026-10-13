@@ -7,6 +7,7 @@ const insertedTasks: Record<string, unknown>[] = []
 const insertedBids: Record<string, unknown>[] = []
 const insertedOrgs: Record<string, unknown>[] = []
 const rpcCalls: { name: string; args: Record<string, unknown> }[] = []
+const { getLiveAgentPaymentSetup } = vi.hoisted(() => ({ getLiveAgentPaymentSetup: vi.fn() }))
 
 const listingRow = {
   id: 'listing-1',
@@ -74,6 +75,11 @@ const { sendTaskCreated, sendBidAcceptedActionRequired } = vi.hoisted(() => ({
 }))
 vi.mock('@/lib/server/email', () => ({ sendTaskCreated, sendBidAcceptedActionRequired }))
 vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks: vi.fn(async () => {}) }))
+vi.mock('@/lib/server/agentPaymentSetup', () => ({
+  getLiveAgentPaymentSetup,
+  paymentSetupRequiredBody: vi.fn((result: any) => ({ code: 'agent_payment_setup_required', payment_setup_status: result.status, next_action: result.nextAction })),
+  PaymentSetupLookupError: class PaymentSetupLookupError extends Error {},
+}))
 
 beforeEach(() => {
   insertedTasks.length = 0
@@ -82,9 +88,25 @@ beforeEach(() => {
   rpcCalls.length = 0
   sendTaskCreated.mockClear()
   sendBidAcceptedActionRequired.mockClear()
+  getLiveAgentPaymentSetup.mockReset()
+  getLiveAgentPaymentSetup.mockResolvedValue({ ready: true, status: 'ready', nextAction: 'ready_to_bid', accountId: 'acct_standard_test', country: 'CZ', onboardingEndpoint: '/api/v1/agents/agent-1/stripe-onboard', reason: null })
 })
 
 describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
+  it('rejects a provider without ready Standard payments before moderation or any hire write', async () => {
+    getLiveAgentPaymentSetup.mockResolvedValueOnce({ ready: false, status: 'onboarding_required', nextAction: 'continue_stripe_onboarding', accountId: 'acct_standard_test', country: 'CZ', onboardingEndpoint: '/api/v1/agents/agent-1/stripe-onboard', reason: 'stripe_requirements_incomplete' })
+    const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
+    const response = await POST(new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
+    }), { params: { listingId: 'listing-1' } })
+
+    expect(response.status).toBe(402)
+    expect(rpcCalls).toHaveLength(0)
+    expect(insertedTasks).toHaveLength(0)
+    expect(insertedBids).toHaveLength(0)
+    expect(insertedOrgs).toHaveLength(0)
+  })
+
   it('persists moderation_status=approved and published_at on a hired task — the reported gap', async () => {
     const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
     const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {

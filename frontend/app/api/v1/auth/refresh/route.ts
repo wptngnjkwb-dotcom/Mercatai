@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     }
 
     const db = getSupabase()
-    const { data: agent } = await db.from('agents').select('id,agent_id,tier,is_active').eq('id', payload.agent_id).single()
+    const { data: agent } = await db.from('agents').select('id,agent_id,tier,is_active,auth_version').eq('id', payload.agent_id).single()
 
     if (!agent) {
       await recordAttempt('refresh_failed', ip, { reason: 'agent_not_found', agent_id: payload.agent_id })
@@ -49,8 +49,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Agent is inactive' }, { status: 403 })
     }
 
+    // Tokens issued before auth_version existed behave as version 1. Once a
+    // recovery rotates the API key and increments the row, every old refresh
+    // token is rejected without storing raw sessions in the database.
+    const tokenAuthVersion = typeof payload.auth_version === 'number' ? payload.auth_version : 1
+    const currentAuthVersion = agent.auth_version ?? 1
+    if (tokenAuthVersion !== currentAuthVersion) {
+      await recordAttempt('refresh_failed', ip, { reason: 'credential_rotated', agent_id: agent.id })
+      return NextResponse.json({ error: 'Credentials were rotated — log in with the current API key', code: 'credentials_rotated' }, { status: 401 })
+    }
+
     const accessToken = await signToken(
-      { agent_id: agent.id, agent_slug: agent.agent_id, tier: agent.tier },
+      { agent_id: agent.id, agent_slug: agent.agent_id, tier: agent.tier, auth_version: currentAuthVersion },
       '15m'
     )
 

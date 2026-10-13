@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { Link } from '@/i18n/navigation'
 import { ArrowLeft, Clock, Euro } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { Task } from '@/lib/types'
 
 export default function PlaceBidPage() {
+  const td = useTranslations('agentDashboard')
   const { taskId } = useParams<{ taskId: string }>()
 
   const [task, setTask] = useState<Task | null>(null)
@@ -16,6 +18,8 @@ export default function PlaceBidPage() {
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
   const [loggedIn, setLoggedIn] = useState(true)
+  const [paymentReady, setPaymentReady] = useState<boolean | null>(null)
+  const [paymentSetupUrl, setPaymentSetupUrl] = useState('/agent/stripe-onboard')
 
   const [form, setForm] = useState({
     price_eur: '',
@@ -27,8 +31,20 @@ export default function PlaceBidPage() {
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('access_token')) {
       setLoggedIn(false)
+      return
     }
-  }, [])
+    const id = localStorage.getItem('agent_id')
+    if (id && taskId && task) {
+      api.getAgentPaymentSetup(id, taskId)
+        .then((status) => {
+          setPaymentReady(status.payment_ready)
+          setPaymentSetupUrl(task.stripe_account_requirement === 'legacy_express_platform_liability'
+            ? `/agent/stripe-onboard?task_id=${encodeURIComponent(taskId)}`
+            : '/agent/stripe-onboard')
+        })
+        .catch(() => setPaymentReady(false))
+    }
+  }, [taskId, task?.stripe_account_requirement])
 
   useEffect(() => {
     if (!taskId) return
@@ -58,7 +74,13 @@ export default function PlaceBidPage() {
         ...(form.sample_preview ? { sample_preview: form.sample_preview } : {}),
       })
       setDone(true)
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.body?.code === 'agent_payment_setup_required') {
+        setPaymentReady(false)
+        if (task?.stripe_account_requirement === 'legacy_express_platform_liability') {
+          setPaymentSetupUrl(`/agent/stripe-onboard?task_id=${encodeURIComponent(taskId)}`)
+        }
+      }
       setError(err instanceof Error ? err.message : 'Bid submission failed')
     } finally {
       setSubmitting(false)
@@ -120,6 +142,13 @@ export default function PlaceBidPage() {
             You need to be signed in as an agent to bid.{' '}
             <Link href="/agent/register" className="underline font-medium">Register an agent</Link>
           </p>
+        </div>
+      )}
+
+      {loggedIn && paymentReady === false && (
+        <div className="card p-4 mb-6 bg-amber-50 border-amber-300">
+          <p className="text-sm text-amber-900">{td('paymentBidBlocked')}</p>
+          <Link href={paymentSetupUrl as any} className="btn-primary inline-flex mt-3 text-sm">{td('paymentCta')}</Link>
         </div>
       )}
 
@@ -185,7 +214,7 @@ export default function PlaceBidPage() {
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <button type="submit" disabled={submitting || !loggedIn} className="btn-primary disabled:opacity-50">
+        <button type="submit" disabled={submitting || !loggedIn || paymentReady !== true} className="btn-primary disabled:opacity-50">
           {submitting ? 'Submitting…' : 'Submit bid'}
         </button>
       </form>

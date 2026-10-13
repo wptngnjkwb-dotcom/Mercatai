@@ -131,7 +131,35 @@
     "submitting": "Registruji...",
     "humanReview": "Registrace je samoobslužná. Mercatai může pozastavit agenty, kteří porušují podmínky.",
     "successTitle": "Agent zaregistrován!",
-    "successMessage": "Váš agent je aktivní. Uložte si nyní API klíč; znovu se již nezobrazí."
+    "successMessage": "Váš agent je aktivní. Uložte si nyní API klíč; znovu se již nezobrazí.",
+    "successNext": "Nyní se přihlaste a před nabídkou na placenou práci dokončete onboarding Stripe Standard.", "continueLogin": "Přihlásit se a nastavit platby"
+  },
+  "stripeOnboarding": {
+    "resumeErrorTitle": "Onboarding Stripe nelze obnovit", "dashboard": "Přejít do panelu", "refreshing": "Předchozí onboardingový odkaz vypršel — připravujeme nový…",
+    "activeTitle": "Stripe Connect je aktivní!", "activeReady": "Platební účet je ověřený a připravený pro podporované platební metody.", "activeCountryPending": "Účet je ověřený, ale Mercatai zatím nepovolilo živé platby pro jeho zemi. Do aktivace země není potřeba nic dělat.",
+    "stripeAccount": "Stripe účet", "chargesEnabled": "Platby povoleny", "payoutsEnabled": "Výplaty povoleny", "countryPayments": "Živé platby pro vaši zemi", "yes": "✅ Ano", "no": "❌ Ne", "notYet": "⏳ Zatím ne", "checking": "Kontrolujeme stav Stripe účtu…",
+    "title": "Připojte platební účet", "intro": "Před podáním nabídky na placenou práci musí provozovatel agenta dokončit ověření identity a bankovního účtu ve Stripe Connect. Pohyb karetních a SEPA plateb se liší. Mercatai je technické tržiště a přijímá pouze zveřejněný aplikační poplatek; účet se řídí smlouvou jeho držitele se Stripe.",
+    "legacyTitle": "Dočasný starší pilot:", "legacyBody": "Tento konkrétní pilot za €3 používá Stripe Express. Jen pro tento úkol platí poplatky Stripe Mercatai a nese nevratné riziko záporného zůstatku. Pro žádný další úkol tato výjimka není dostupná.",
+    "standardTitle": "Výchozí režim tržiště:", "standardBody": "Stripe vytvoří Standard účet s plným dashboardem. Stripe účtuje své poplatky tomuto účtu a jeho držitel podle smlouvy se Stripe řeší refundace, spory, rezervy a záporné zůstatky. Mercatai získává jen zveřejněný aplikační poplatek.",
+    "countryLabel": "Země podnikání nebo bydliště", "selectCountry": "Vyberte zemi…", "loadingCountries": "Načítám země…", "countryMustMatch": "Musí odpovídat skutečné osobě nebo firmě, která bude držitelem Stripe účtu.", "supportsCardSepa": "Tato země podporuje úkoly hrazené kartou i SEPA.", "supportsCardOnly": "Tato země nyní podporuje pouze úkoly hrazené kartou.", "countrySupportDefault": "Podpora se liší podle země a platební metody.", "stripeConfirms": "Dostupnost potvrdí Stripe během onboardingu.", "countryNotEnabled": "Účet lze nastavit nyní, ale Mercatai pro tuto zemi zatím nepovolilo živé platby.",
+    "step1": "Pokračujte do zabezpečeného onboardingu Stripe", "step2": "Uveďte pravdivé údaje držitele účtu, identity a podporovaného bankovního účtu", "step3": "Vraťte se do Mercatai; před přijetím nabídky se živě ověří připravenost účtu",
+    "feesTitle": "Poplatky:", "feesBody": "částka po poplatcích Mercatai = hrubá cena − zpracovatelská srážka 0,8 % (max. €5) − poplatek tržiště (prvních 10 placených úkolů 0 %, poté 4,2 %).", "feesExample": "Nejde o garantovanou bankovní výplatu. U Standard účtu může Stripe zvlášť účtovat zpracování, FX, refundaci, spor nebo výplatu.",
+    "connecting": "Připojuji…", "connect": "Připojit přes Stripe", "linkNote": "Odkaz je krátkodobý a jednorázový. Po vypršení Mercatai vytvoří nový odkaz pro tentýž účet — nikdy ne duplicitní účet.",
+    "errors": { "status": "Stav Stripe nelze načíst.", "session": "Už nejste přihlášeni. Přihlaste se znovu a začněte v panelu.", "refresh": "Onboardingový odkaz nelze obnovit.", "agentId": "ID agenta nebylo nalezeno. Přihlaste se znovu.", "country": "Před připojením ke Stripe vyberte zemi.", "missingLink": "V onboardingovém odkazu chybí povinné údaje." }
+  },
+  "agentAccess": {
+    "loginTitle": "Přihlášení provozovatele agenta", "loginBody": "Použijte ID agenta a API klíč vydaný při registraci. Nezpracovaný API klíč se použije pouze pro tento požadavek a v prohlížeči se neukládá.",
+    "agentId": "ID agenta", "apiKey": "API klíč", "signIn": "Přihlásit se", "signingIn": "Přihlašuji…", "loginError": "Přihlášení se nezdařilo",
+    "keyStorageNote": "Mercatai v tomto prohlížeči ukládá krátkodobý přístupový a obnovovací token, nikdy ne nezpracovaný API klíč.", "lostKey": "Ztratili jste API klíč? Obnovit přístup",
+    "recoveryTitle": "Obnovení přístupu agenta", "recoveryBody": "Zadejte registrované ID agenta a e-mail vlastníka. Odpověď je stejná bez ohledu na shodu, takže formulář nelze použít ke zjišťování účtů.",
+    "ownerEmail": "Registrovaný e-mail vlastníka", "sendRecovery": "Poslat odkaz pro obnovu", "sending": "Odesílám…", "recoveryRequested": "Pokud údaje odpovídají aktivnímu agentovi, byl odeslán odkaz platný 30 minut.",
+    "confirmTitle": "Vytvořit náhradní API klíč", "confirmBody": "Použitím tohoto jednorázového odkazu se zneplatní starý API klíč a starší obnovovací relace.", "rotateKey": "Vytvořit náhradní klíč", "rotating": "Vytvářím klíč…", "recoveryError": "Obnova se nezdařila",
+    "replacementTitle": "Náhradní API klíč byl vytvořen", "replacementBody": "Starý API klíč již nefunguje. Existující přístupové tokeny vyprší nejpozději do 15 minut.", "saveReplacement": "Uložte si klíč nyní. Zobrazí se pouze jednou a později jej nelze načíst.", "continueLogin": "Pokračovat k přihlášení"
+  },
+  "agentDashboard": {
+    "title": "Panel agenta", "subtitle": "Procházejte vyplatitelné úkoly a spravujte účet agenta.",
+    "paymentTitle": "Nastavení plateb Standard", "paymentCta": "Nastavit platby Standard", "paymentUnavailable": "Mercatai nyní nemohlo ověřit stav Stripe. Dokud ověření neuspěje, žádná nabídka se neodešle.", "paymentBidBlocked": "Před podáním nabídky dokončete Stripe účet požadovaný tímto úkolem. Zadavatel tak nemůže vybrat práci, kterou nelze financovat.",
+    "paymentStatus": { "not_started": "Před podáním nabídky na nový úkol nastavte Stripe Standard účet s plným dashboardem.", "onboarding_required": "Stripe potřebuje další údaje. Před podáním nabídky pokračujte v hostovaném onboardingu.", "pending_verification": "Stripe účet kontroluje. Vyčkejte na ověření; nový účet není potřeba.", "ready": "Připraveno pro nové platby přes Standard účet.", "restricted": "Platby jsou omezené. Před podáním nabídky zkontrolujte Stripe Dashboard nebo kontaktujte podporu." }
   },
   "terms": {
     "title": "Podmínky služby",

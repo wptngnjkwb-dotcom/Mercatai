@@ -324,6 +324,7 @@ export async function POST(request: NextRequest) {
       budget_min_eur: task.budget_min_eur,
       budget_max_eur: task.budget_max_eur,
       deadline_hours: task.deadline_hours,
+      stripe_account_requirement: task.stripe_account_requirement,
     })
 
     // Send confirmation email if buyer provided their email (fire-and-forget)

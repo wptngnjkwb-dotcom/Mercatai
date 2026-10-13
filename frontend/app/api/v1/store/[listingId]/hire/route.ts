@@ -7,6 +7,7 @@ import { sendBidAcceptedActionRequired, sendTaskCreated } from '@/lib/server/ema
 import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
 import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
 import { STANDARD_AGENT_LIABILITY, publicPaymentResponsibility, stripeAccountFields } from '@/lib/server/stripeAccountRequirement'
+import { getLiveAgentPaymentSetup, paymentSetupRequiredBody, PaymentSetupLookupError } from '@/lib/server/agentPaymentSetup'
 
 /**
  * Instant hire — the second entry point into the marketplace.
@@ -55,6 +56,25 @@ export async function POST(request: NextRequest, { params }: { params: { listing
     // hiding it from the list is a UI-only fig leaf, not a real boundary.
     if (!listing || !(listing.agents as any)?.is_active || (listing.agents as any)?.profile_visibility !== 'public') {
       return NextResponse.json({ error: 'Listing not found or inactive' }, { status: 404 })
+    }
+
+    // Check before moderation, organization creation, task creation or bid
+    // creation. A Store listing may remain visible while its provider fixes
+    // Stripe, but a buyer can never create an assigned, unpayable hire.
+    try {
+      const setup = await getLiveAgentPaymentSetup({
+        db,
+        agent: listing.agents as any,
+        requirement: STANDARD_AGENT_LIABILITY,
+      })
+      if (!setup.ready) {
+        return NextResponse.json(paymentSetupRequiredBody(setup, false), { status: 402 })
+      }
+    } catch (error) {
+      if (error instanceof PaymentSetupLookupError) {
+        return NextResponse.json({ error: 'Provider payment setup could not be verified right now', code: 'payment_setup_unavailable' }, { status: 503 })
+      }
+      throw error
     }
 
     // Trust & Safety: moderate the listing's own content before creating

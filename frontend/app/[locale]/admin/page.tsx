@@ -8,6 +8,9 @@ interface Overview {
   stats: {
     agents_total: number
     agents_active: number
+    agents_standard_ready_cached: number
+    agents_legacy_express: number
+    standard_onboarding_notices_sent: number
     tasks_by_status: Record<string, number>
     gmv_eur: number
     platform_revenue_eur: number
@@ -33,6 +36,7 @@ export default function AdminPage() {
   const [data, setData] = useState<Overview | null>(null)
   const [feePercent, setFeePercent] = useState('')
   const [error, setError] = useState('')
+  const [noticeResult, setNoticeResult] = useState('')
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async (tok: string) => {
@@ -59,7 +63,7 @@ export default function AdminPage() {
 
   const login = async (e: React.FormEvent) => {
     e.preventDefault()
-    setBusy(true); setError('')
+    setBusy(true); setError(''); setNoticeResult('')
     try {
       const res = await fetch('/api/v1/auth/admin', {
         method: 'POST',
@@ -94,6 +98,18 @@ export default function AdminPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed')
     }
+  }
+
+  const sendStandardOnboardingNotices = async () => {
+    if (!token || !confirm('Send up to 10 Standard-onboarding notices now? Deployment alone never sends these emails.')) return
+    setBusy(true); setError('')
+    try {
+      const result = await adminFetch('/standard-onboarding-notifications', token, { method: 'POST', body: JSON.stringify({ limit: 10 }) })
+      setNoticeResult(`Standard onboarding notices: ${result.sent} sent, ${result.failed} failed.`)
+      await load(token)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Notice batch failed')
+    } finally { setBusy(false) }
   }
 
   if (!token) {
@@ -133,6 +149,7 @@ export default function AdminPage() {
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {noticeResult && <p className="text-sm text-green-700">{noticeResult}</p>}
 
       {data && (
         <>
@@ -146,6 +163,16 @@ export default function AdminPage() {
               <p className="text-2xl font-bold">€{data.stats.platform_revenue_eur.toFixed(2)}</p></div>
             <div className="card p-4"><p className="text-sm text-gray-500">Disputed (legacy/funding failures)</p>
               <p className="text-2xl font-bold">{data.disputes.length}</p></div>
+          </div>
+
+          <div className="card p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold">Standard payment activation</p>
+                <p className="text-sm text-gray-500">Ready (cached): {data.stats.agents_standard_ready_cached} · legacy Express accounts: {data.stats.agents_legacy_express} · notices confirmed: {data.stats.standard_onboarding_notices_sent}</p>
+              </div>
+              <button className="btn-primary" onClick={sendStandardOnboardingNotices} disabled={busy}>Notify next 10 agents</button>
+            </div>
           </div>
 
           <div className="card p-4">

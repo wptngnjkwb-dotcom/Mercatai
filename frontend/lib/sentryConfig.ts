@@ -62,7 +62,28 @@ function stripQueryString(url: string): string {
 // added without updating this file, still can't leak headers, cookies,
 // request/response bodies, query strings, stack-frame locals, or a user
 // object.
-export function sentryBeforeSend(event: ErrorEvent, _hint: EventHint): ErrorEvent {
+function isInjectedBrowserExtensionError(event: ErrorEvent): boolean {
+  const frames = (event.exception?.values ?? []).flatMap(value => value.stacktrace?.frames ?? [])
+  if (frames.length === 0) return false
+
+  // Browser extensions commonly inject a file literally named `inpage.js`.
+  // Extension-owned errors are not actionable Mercatai failures and can make
+  // the free Sentry quota noisy. Only discard an event when every frame with a
+  // filename is clearly extension-owned; a mixed stack containing an app frame
+  // remains visible.
+  const filenames = frames.map(frame => frame.filename).filter((value): value is string => Boolean(value))
+  return filenames.length > 0 && filenames.every(filename =>
+    filename === 'inpage.js'
+      || filename.endsWith('/inpage.js')
+      || filename.startsWith('chrome-extension://')
+      || filename.startsWith('moz-extension://')
+      || filename.startsWith('safari-web-extension://')
+  )
+}
+
+export function sentryBeforeSend(event: ErrorEvent, _hint: EventHint): ErrorEvent | null {
+  if (isInjectedBrowserExtensionError(event)) return null
+
   if (event.request) {
     delete event.request.headers
     delete event.request.cookies

@@ -1,3 +1,5 @@
+import { createHash } from 'crypto'
+
 /**
  * Email notifications via Resend.
  * Free tier: 3 000 emails/month.
@@ -67,7 +69,70 @@ export async function sendExecutionAuthorized(params: {
   )
 }
 
-export const OPPORTUNITY_ALERT_PAYLOAD_VERSION = 1
+export async function sendAgentApiKeyRecoveryOrThrow(params: {
+  to: string
+  agentId: string
+  recoveryToken: string
+}): Promise<string> {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) throw new Error('RESEND_API_KEY is not configured — agent access recovery cannot be delivered')
+  const { Resend } = await import('resend')
+  const resend = new Resend(apiKey)
+  const url = `${BASE_URL}/agent/recover-api-key?token=${encodeURIComponent(params.recoveryToken)}`
+  const { data, error } = await resend.emails.send({
+    from: FROM,
+    to: params.to,
+    subject: 'Mercatai: recover your agent API key',
+    html: `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#4f46e5">Recover agent access</h2>
+      <p>A recovery link was requested for agent <strong>${escapeEmailHtml(params.agentId)}</strong>.</p>
+      <p>The link expires in 30 minutes and can be used once. Completing it replaces the old API key and invalidates older refresh sessions. Existing access tokens expire within 15 minutes.</p>
+      <a href="${url}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">Create replacement API key</a>
+      <p style="font-size:12px;color:#6b7280">If you did not request this, ignore the message. Nothing changes until the link is completed. Never send identity documents, Stripe credentials or API keys by email.</p>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>`,
+  }, { idempotencyKey: `agent-key-recovery-${createHash('sha256').update(params.recoveryToken).digest('hex')}` })
+  if (error) throw new Error(`Resend rejected the recovery email: ${error.message}`)
+  if (!data?.id) throw new Error('Resend accepted the recovery email but returned no email id')
+  return data.id
+}
+
+export async function sendStandardOnboardingNoticeOrThrow(params: {
+  to: string
+  agentId: string
+  agentDbId: string
+}): Promise<string> {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) throw new Error('RESEND_API_KEY is not configured — Standard onboarding notice cannot be delivered')
+  const { Resend } = await import('resend')
+  const resend = new Resend(apiKey)
+  const onboardingUrl = `${BASE_URL}/agent/stripe-onboard`
+  const recoveryUrl = `${BASE_URL}/agent/recover-api-key`
+  const payload = {
+    from: FROM,
+    to: params.to,
+    subject: 'Mercatai: set up your Standard Stripe account before bidding',
+    html: `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#111">
+      <h2 style="color:#4f46e5">Payment setup required for future tasks</h2>
+      <p>Agent <strong>${escapeEmailHtml(params.agentId)}</strong> remains registered. Do not create another Mercatai agent.</p>
+      <p>Before bidding on a new marketplace task, sign in and complete ordinary Stripe onboarding. Mercatai will create a separate Standard/full-dashboard connected account; an older Express account remains usable only for one of the three explicitly labelled legacy pilots.</p>
+      <a href="${onboardingUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">Set up Standard payments</a>
+      <p>Lost the original API key? Use the supported <a href="${recoveryUrl}">API-key recovery flow</a> instead of registering a duplicate.</p>
+      <p style="font-size:12px;color:#6b7280">Onboarding does not authorize work. Start only after assignment and when the authenticated Task API reports funding_status=funded and execution_authorized=true.</p>
+      <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>
+    </div>`,
+  }
+  const { data, error } = await resend.emails.send(payload, {
+    idempotencyKey: `standard-onboarding-${params.agentDbId}`,
+  })
+  if (error) throw new Error(`Resend rejected the Standard onboarding notice: ${error.message}`)
+  if (!data?.id) throw new Error('Resend accepted the Standard onboarding notice but returned no email id')
+  return data.id
+}
+
+export const OPPORTUNITY_ALERT_PAYLOAD_VERSION = 2
 
 export interface FrozenOpportunityAlertPayload {
   from: string
@@ -83,7 +148,10 @@ const OPPORTUNITY_COPY = {
     heading: 'New genuine buyer task',
     intro: 'A non-demo buyer task matching your saved alert is now open for bids.',
     warning: 'This task is not funded yet. Do not begin substantive work unless your bid is selected and the authenticated API reports funding_status: funded and execution_authorized: true.',
+    payment: 'Before bidding, sign in and verify that the task-scoped payment status says payment_ready: true. New tasks require the agent operator\'s own Standard Stripe account; do not create a duplicate Mercatai agent if you lost access.',
     button: 'Inspect task and bid',
+    setup: 'Sign in / set up Standard payments',
+    recover: 'Recover a lost API key',
     manage: 'Manage or disable opportunity alerts',
   },
   cs: {
@@ -91,7 +159,10 @@ const OPPORTUNITY_COPY = {
     heading: 'Nový skutečný úkol zadavatele',
     intro: 'Nový nedemonstrační úkol odpovídající vašemu uloženému filtru je otevřený pro nabídky.',
     warning: 'Úkol zatím není financovaný. Nezačínejte pracovat, dokud nebude vaše nabídka vybrána a autentizované API nebude vracet funding_status: funded a execution_authorized: true.',
+    payment: 'Před podáním nabídky se přihlaste a ověřte, že stav platby pro tento úkol uvádí payment_ready: true. Nové úkoly vyžadují vlastní Standard Stripe účet provozovatele agenta; při ztrátě přístupu nezakládejte duplicitního agenta.',
     button: 'Prohlédnout úkol a podat nabídku',
+    setup: 'Přihlásit se / nastavit Standard platby',
+    recover: 'Obnovit ztracený API klíč',
     manage: 'Spravovat nebo vypnout upozornění',
   },
   de: {
@@ -99,7 +170,10 @@ const OPPORTUNITY_COPY = {
     heading: 'Neue echte Käuferaufgabe',
     intro: 'Eine neue, nicht als Demo gekennzeichnete Käuferaufgabe passt zu Ihrem gespeicherten Filter und ist offen für Angebote.',
     warning: 'Diese Aufgabe ist noch nicht finanziert. Beginnen Sie erst mit der Arbeit, wenn Ihr Angebot ausgewählt wurde und die authentifizierte API funding_status: funded sowie execution_authorized: true meldet.',
+    payment: 'Melden Sie sich vor dem Angebot an und prüfen Sie, dass der aufgabenbezogene Zahlungsstatus payment_ready: true meldet. Neue Aufgaben erfordern das eigene Standard-Stripe-Konto des Agentenbetreibers; erstellen Sie bei verlorenem Zugang keinen doppelten Mercatai-Agenten.',
     button: 'Aufgabe prüfen und Angebot abgeben',
+    setup: 'Anmelden / Standard-Zahlungen einrichten',
+    recover: 'Verlorenen API-Schlüssel wiederherstellen',
     manage: 'Benachrichtigungen verwalten oder deaktivieren',
   },
   es: {
@@ -107,7 +181,10 @@ const OPPORTUNITY_COPY = {
     heading: 'Nueva tarea real de un comprador',
     intro: 'Una nueva tarea no demostrativa coincide con su filtro guardado y está abierta a ofertas.',
     warning: 'La tarea aún no está financiada. No empiece el trabajo hasta que se seleccione su oferta y la API autenticada indique funding_status: funded y execution_authorized: true.',
+    payment: 'Antes de ofertar, inicie sesión y compruebe que el estado de pago de la tarea indique payment_ready: true. Las tareas nuevas requieren la cuenta Stripe Standard propia del operador; no cree un agente duplicado si perdió el acceso.',
     button: 'Revisar la tarea y ofertar',
+    setup: 'Iniciar sesión / configurar pagos Standard',
+    recover: 'Recuperar una clave API perdida',
     manage: 'Gestionar o desactivar alertas',
   },
 } as const
@@ -125,6 +202,8 @@ export function buildOpportunityAlertProviderPayload(params: {
   const copy = OPPORTUNITY_COPY[params.locale] ?? OPPORTUNITY_COPY.en
   const taskUrl = `${BASE_URL}/marketplace/${encodeURIComponent(params.taskId)}`
   const settingsUrl = `${BASE_URL}/agent/autobid#opportunity-alerts`
+  const loginUrl = `${BASE_URL}/agent/login`
+  const recoveryUrl = `${BASE_URL}/agent/recover-api-key`
   const safeTitle = escapeEmailHtml(params.title)
   const safeCategory = escapeEmailHtml(params.category)
   const safeCapabilities = params.capabilities.map(escapeEmailHtml).join(', ') || '—'
@@ -144,6 +223,7 @@ export function buildOpportunityAlertProviderPayload(params: {
         <tr><td style="padding:6px;color:#6b7280">Capabilities</td><td style="padding:6px">${safeCapabilities}</td></tr>
       </table>
       <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:12px;margin:16px 0"><strong>Important:</strong> ${copy.warning}</div>
+      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:12px;margin:16px 0">${copy.payment}<br><a href="${loginUrl}" style="color:#4f46e5">${copy.setup}</a> · <a href="${recoveryUrl}" style="color:#4f46e5">${copy.recover}</a></div>
       <a href="${taskUrl}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;margin:12px 0">${copy.button}</a>
       <p style="font-size:12px;color:#6b7280"><a href="${settingsUrl}" style="color:#4f46e5">${copy.manage}</a></p>
       <p style="font-size:11px;color:#9ca3af;margin-top:24px">Mercatai · mercatai.eu</p>

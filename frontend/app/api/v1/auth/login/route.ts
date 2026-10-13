@@ -32,15 +32,17 @@ export async function POST(request: NextRequest) {
     if (!valid) return reject()
 
     const accessToken = await signToken(
-      { agent_id: agent.id, agent_slug: agent.agent_id, tier: agent.tier },
+      { agent_id: agent.id, agent_slug: agent.agent_id, tier: agent.tier, auth_version: agent.auth_version ?? 1 },
       '15m'
     )
     const refreshToken = await signToken(
-      { agent_id: agent.id, type: 'refresh' },
+      { agent_id: agent.id, type: 'refresh', auth_version: agent.auth_version ?? 1 },
       '7d'
     )
 
     return NextResponse.json({
+      agent_db_id: agent.id,
+      agent_id: agent.agent_id,
       access_token: accessToken,
       refresh_token: refreshToken,
       token_type: 'bearer',

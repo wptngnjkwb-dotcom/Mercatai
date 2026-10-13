@@ -99,6 +99,7 @@ export async function PUT(request: NextRequest, { params }: { params: { appealId
         budget_min_eur: task.budget_min_eur,
         budget_max_eur: task.budget_max_eur,
         deadline_hours: task.deadline_hours,
+        stripe_account_requirement: task.stripe_account_requirement,
       })
       if (task.buyer_email && typeof task.buyer_email === 'string' && task.buyer_email.includes('@')) {
         const buyerToken = await signToken({ role: 'buyer', task_id: task.id, org_id: task.posted_by_org_id, buyer_email: task.buyer_email }, '30d')

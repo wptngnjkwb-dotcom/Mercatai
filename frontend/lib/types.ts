@@ -14,6 +14,22 @@ export type TaskCategory =
  */
 export type FundingStatus = 'unfunded' | 'funding_pending' | 'funded' | 'released' | 'refunded'
 export type StripeAccountRequirement = 'standard_agent_liability' | 'legacy_express_platform_liability'
+export type PaymentSetupStatus = 'not_started' | 'onboarding_required' | 'pending_verification' | 'ready' | 'restricted'
+
+export interface PaymentSetupResponse {
+  onboarding_completed: boolean
+  stripe_account_id: string | null
+  payment_setup_status: PaymentSetupStatus
+  payment_ready: boolean
+  next_action: string
+  onboarding_endpoint: string
+  stripe_account_requirement: StripeAccountRequirement
+  stripe_account_type: 'standard' | 'express'
+  country?: string | null
+  card_ready?: boolean
+  payouts_enabled?: boolean
+  payment_enabled?: boolean
+}
 
 /**
  * Server-derived answer to "may THIS caller start substantive work on this

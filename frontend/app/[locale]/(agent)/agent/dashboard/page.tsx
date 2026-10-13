@@ -1,24 +1,31 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
-import { Star, Award, Zap } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+import { Star, Award, Zap, CreditCard, AlertCircle, CheckCircle } from 'lucide-react'
+import { Link } from '@/i18n/navigation'
 import TaskCard from '@/components/TaskCard'
 import { api } from '@/lib/api'
-import type { Task } from '@/lib/types'
+import type { PaymentSetupResponse, Task } from '@/lib/types'
 
 export default function AgentDashboard() {
+  const t = useTranslations('agentDashboard')
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
-
-  // In production this would come from the JWT / session
-  const agentId = typeof window !== 'undefined' ? localStorage.getItem('agent_id') : null
+  const [agentId, setAgentId] = useState<string | null>(null)
+  const [paymentSetup, setPaymentSetup] = useState<PaymentSetupResponse | null>(null)
+  const [paymentError, setPaymentError] = useState(false)
 
   useEffect(() => {
-    if (agentId) {
-      api.getAgentTasks(agentId)
-        .then(r => setTasks(r.tasks))
-        .catch(() => setTasks([]))
+    const id = localStorage.getItem('agent_id')
+    setAgentId(id)
+    if (id) {
+      Promise.allSettled([api.getAgentTasks(id), api.getAgentPaymentSetup(id)])
+        .then(([taskResult, paymentResult]) => {
+          setTasks(taskResult.status === 'fulfilled' ? taskResult.value.tasks : [])
+          if (paymentResult.status === 'fulfilled') setPaymentSetup(paymentResult.value)
+          else setPaymentError(true)
+        })
         .finally(() => setLoading(false))
     } else {
       // Show marketplace tasks for non-logged-in agents — no explicit
@@ -29,14 +36,14 @@ export default function AgentDashboard() {
         .catch(() => setTasks([]))
         .finally(() => setLoading(false))
     }
-  }, [agentId])
+  }, [])
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10">
       <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Agent Dashboard</h1>
-          <p className="text-gray-500 mt-1">Browse open tasks and place competitive bids.</p>
+          <h1 className="text-3xl font-bold text-gray-900">{t('title')}</h1>
+          <p className="text-gray-500 mt-1">{t('subtitle')}</p>
         </div>
         <div className="flex gap-2">
           {agentId && (
@@ -60,6 +67,23 @@ export default function AgentDashboard() {
             Register your AI agent to start bidding on tasks. 0% marketplace fee on your first 10 paid tasks.
           </p>
           <Link href="/agent/register" className="btn-primary text-sm">Register Now →</Link>
+        </div>
+      )}
+
+      {agentId && (
+        <div className={`card p-5 mb-8 border ${paymentSetup?.payment_ready ? 'border-green-200 bg-green-50' : 'border-amber-300 bg-amber-50'}`}>
+          <div className="flex items-start gap-3">
+            {paymentSetup?.payment_ready ? <CheckCircle className="text-green-700 shrink-0" /> : <AlertCircle className="text-amber-700 shrink-0" />}
+            <div className="flex-1">
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2"><CreditCard size={17} /> {t('paymentTitle')}</h2>
+              <p className="text-sm text-gray-700 mt-1">
+                {paymentError ? t('paymentUnavailable') : t(`paymentStatus.${paymentSetup?.payment_setup_status ?? 'not_started'}`)}
+              </p>
+              {!paymentSetup?.payment_ready && !paymentError && (
+                <Link href="/agent/stripe-onboard" className="btn-primary inline-flex mt-3 text-sm">{t('paymentCta')}</Link>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

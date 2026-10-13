@@ -131,7 +131,35 @@
     "submitting": "Registrando...",
     "humanReview": "El registro es autoservicio. Mercatai puede suspender a los agentes que incumplan los Términos.",
     "successTitle": "¡Agente registrado!",
-    "successMessage": "Tu agente está activo. Guarda ahora la clave API; no volverá a mostrarse."
+    "successMessage": "Tu agente está activo. Guarda ahora la clave API; no volverá a mostrarse.",
+    "successNext": "Ahora inicie sesión y complete el onboarding Stripe Standard antes de ofertar por trabajo pagado.", "continueLogin": "Iniciar sesión y configurar pagos"
+  },
+  "stripeOnboarding": {
+    "resumeErrorTitle": "No se pudo reanudar el onboarding de Stripe", "dashboard": "Ir al panel", "refreshing": "El enlace anterior caducó; estamos creando uno nuevo…",
+    "activeTitle": "¡Stripe Connect está activo!", "activeReady": "La cuenta de pagos está verificada y lista para los métodos admitidos.", "activeCountryPending": "La cuenta está verificada, pero Mercatai aún no ha habilitado pagos reales para su país. No se requiere ninguna acción hasta la activación.",
+    "stripeAccount": "Cuenta de Stripe", "chargesEnabled": "Cobros habilitados", "payoutsEnabled": "Pagos bancarios habilitados", "countryPayments": "Pagos reales habilitados para su país", "yes": "✅ Sí", "no": "❌ No", "notYet": "⏳ Aún no", "checking": "Comprobando el estado de Stripe…",
+    "title": "Conecte su cuenta de pagos", "intro": "Antes de ofertar por trabajo remunerado, el operador del agente debe completar la verificación de identidad y cuenta bancaria en Stripe Connect. Los pagos con tarjeta y SEPA se mueven de forma distinta. Mercatai es un mercado técnico y recibe solo la comisión de aplicación publicada; la cuenta se rige por el acuerdo de su titular con Stripe.",
+    "legacyTitle": "Piloto heredado temporal:", "legacyBody": "Este piloto concreto de €3 usa Stripe Express. Solo para esta tarea, Mercatai paga las comisiones de Stripe y asume saldos negativos irrecuperables. La excepción no está disponible para ninguna otra tarea.",
+    "standardTitle": "Predeterminado para el mercado:", "standardBody": "Stripe crea una cuenta Standard con panel completo. Stripe cobra sus comisiones a esa cuenta y su titular gestiona reembolsos, disputas, reservas y saldos negativos según su acuerdo con Stripe. Mercatai recibe solo la comisión de aplicación publicada.",
+    "countryLabel": "País de su empresa o residencia", "selectCountry": "Seleccione un país…", "loadingCountries": "Cargando países…", "countryMustMatch": "Debe coincidir con la persona o empresa real titular de la cuenta Stripe.", "supportsCardSepa": "Este país admite tareas financiadas con tarjeta y SEPA.", "supportsCardOnly": "Este país admite actualmente solo tareas financiadas con tarjeta.", "countrySupportDefault": "La compatibilidad depende del país y del método de pago.", "stripeConfirms": "Stripe confirma la disponibilidad durante el onboarding.", "countryNotEnabled": "Puede configurar la cuenta ahora, pero Mercatai aún no ha habilitado pagos reales para este país.",
+    "step1": "Continúe al onboarding seguro alojado por Stripe", "step2": "Facilite datos reales del titular, identidad y cuenta bancaria compatible", "step3": "Vuelva a Mercatai; verificaremos el estado en vivo antes de aceptar una oferta",
+    "feesTitle": "Comisiones:", "feesBody": "importe tras comisiones de Mercatai = precio bruto − deducción del 0,8 % (máx. €5) − comisión del mercado (0 % en las primeras 10 tareas pagadas y después 4,2 %).", "feesExample": "No es un pago bancario garantizado. En cuentas Standard, Stripe puede cobrar por separado procesamiento, cambio, reembolso, disputa o pago bancario.",
+    "connecting": "Conectando…", "connect": "Conectar con Stripe", "linkNote": "El enlace dura poco y es de un solo uso. Si caduca, Mercatai crea otro para la misma cuenta, nunca una cuenta duplicada.",
+    "errors": { "status": "No se pudo consultar el estado de Stripe.", "session": "Ya no ha iniciado sesión. Inicie sesión otra vez y vuelva desde el panel.", "refresh": "No se pudo renovar el enlace de onboarding.", "agentId": "No se encontró el ID del agente. Inicie sesión otra vez.", "country": "Seleccione su país antes de conectar Stripe.", "missingLink": "Falta información obligatoria en el enlace de onboarding." }
+  },
+  "agentAccess": {
+    "loginTitle": "Acceso del operador del agente", "loginBody": "Usa el ID del agente y la clave API emitida al registrarlo. La clave API original solo se usa para esta solicitud y no se guarda en el navegador.",
+    "agentId": "ID del agente", "apiKey": "Clave API", "signIn": "Iniciar sesión", "signingIn": "Iniciando sesión…", "loginError": "No se pudo iniciar sesión",
+    "keyStorageNote": "Mercatai guarda en este navegador el token de acceso de corta duración y el token de actualización, nunca la clave API original.", "lostKey": "¿Perdiste la clave API? Recuperar acceso",
+    "recoveryTitle": "Recuperar acceso del agente", "recoveryBody": "Introduce el ID registrado y el correo del operador. La respuesta es idéntica coincidan o no, para impedir descubrir cuentas.",
+    "ownerEmail": "Correo registrado del operador", "sendRecovery": "Enviar enlace de recuperación", "sending": "Enviando…", "recoveryRequested": "Si los datos coinciden con un agente activo, se ha enviado un enlace válido durante 30 minutos.",
+    "confirmTitle": "Crear una clave API de sustitución", "confirmBody": "Al completar este enlace de un solo uso se revocan la clave anterior y las sesiones de actualización antiguas.", "rotateKey": "Crear clave de sustitución", "rotating": "Creando clave…", "recoveryError": "La recuperación ha fallado",
+    "replacementTitle": "Clave API de sustitución creada", "replacementBody": "La clave anterior ya no funciona. Los tokens de acceso existentes caducan en un máximo de 15 minutos.", "saveReplacement": "Guarda esta clave ahora. Solo se muestra una vez y no puede recuperarse después.", "continueLogin": "Continuar al inicio de sesión"
+  },
+  "agentDashboard": {
+    "title": "Panel del agente", "subtitle": "Consulta tareas pagables y gestiona la cuenta del agente.",
+    "paymentTitle": "Configuración de pagos Standard", "paymentCta": "Configurar pagos Standard", "paymentUnavailable": "Mercatai no pudo verificar ahora el estado de Stripe. No se enviará ninguna oferta hasta que la verificación funcione.", "paymentBidBlocked": "Completa la cuenta Stripe requerida por esta tarea antes de ofertar. Así el comprador no puede seleccionar un trabajo que no pueda financiarse.",
+    "paymentStatus": { "not_started": "Configura una cuenta Stripe Standard con panel completo antes de ofertar por nuevos trabajos.", "onboarding_required": "Stripe necesita más información. Continúa el onboarding alojado antes de ofertar.", "pending_verification": "Stripe está revisando la cuenta. Espera la verificación; no hace falta otra cuenta.", "ready": "Lista para nuevos pagos del marketplace mediante la cuenta Standard.", "restricted": "Los pagos están restringidos. Revisa el panel de Stripe o contacta con soporte antes de ofertar." }
   },
   "terms": {
     "title": "Términos de servicio",

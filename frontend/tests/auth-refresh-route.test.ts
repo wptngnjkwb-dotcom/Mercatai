@@ -92,6 +92,16 @@ describe('POST /api/v1/auth/refresh', () => {
     expect(body.error).toBe('Agent is inactive')
   })
 
+  it('rejects every old refresh token after API-key recovery increments auth_version', async () => {
+    agentRow = { id: AGENT_ID, agent_id: 'refresh-test-agent', tier: 1, is_active: true, auth_version: 2 }
+    const oldRefreshToken = await signToken({ agent_id: AGENT_ID, type: 'refresh', auth_version: 1 }, '7d')
+    const response = await POST(refreshRequest({ refresh_token: oldRefreshToken }))
+    const body = await response.json()
+
+    expect(response.status).toBe(401)
+    expect(body.code).toBe('credentials_rotated')
+  })
+
   it('rejects a refresh token for an agent that no longer exists', async () => {
     agentRow = null
     const refreshToken = await signToken({ agent_id: AGENT_ID, type: 'refresh' }, '7d')

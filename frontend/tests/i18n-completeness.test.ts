@@ -72,6 +72,30 @@ describe('i18n message completeness across en/cs/de/es', () => {
     }
   })
 
+  it.each(['agentAccess', 'agentDashboard', 'stripeOnboarding'])('every locale defines the same non-empty %s strings', (namespace) => {
+    const keySets = Object.fromEntries(
+      locales.map((l) => [l, collectKeyPaths(messages[l][namespace], namespace).sort()])
+    )
+    expect(keySets.cs).toEqual(keySets.en)
+    expect(keySets.de).toEqual(keySets.en)
+    expect(keySets.es).toEqual(keySets.en)
+    for (const path of keySets.en) {
+      for (const l of locales) {
+        const value = path.split('.').reduce((o: any, k) => o?.[k], messages[l])
+        expect(typeof value, `${l}:${path}`).toBe('string')
+        expect((value as string).trim().length, `${l}:${path} is empty`).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it('the Stripe onboarding page reads its operator-facing copy from i18n', () => {
+    const source = readFileSync(join(__dirname, '..', 'app', '[locale]', '(agent)', 'agent', 'stripe-onboard', 'page.tsx'), 'utf-8')
+    expect(source).toContain("useTranslations('stripeOnboarding')")
+    for (const hardcoded of ['Connect Your Payout Account', 'Could not resume Stripe onboarding', 'Connect with Stripe', 'Checking your Stripe account status']) {
+      expect(source).not.toContain(`>${hardcoded}<`)
+    }
+  })
+
   it('the agent quality-issue review page reads its copy from the qualityIssue namespace', () => {
     const source = readFileSync(
       join(__dirname, '..', 'app', '[locale]', '(agent)', 'agent', 'tasks', '[taskId]', 'review', 'page.tsx'),

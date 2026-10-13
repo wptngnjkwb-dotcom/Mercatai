@@ -13,6 +13,8 @@ import crypto from 'crypto'
 import { getSupabase } from './supabase'
 import { validateWebhookUrl } from './webhookSecurity'
 import { dispatchOpportunityAlerts } from './opportunityAlerts'
+import { getLiveAgentPaymentSetup } from './agentPaymentSetup'
+import { isStripeAccountRequirement, type StripeAccountRequirement } from './stripeAccountRequirement'
 
 interface TaskRow {
   id: string
@@ -23,6 +25,7 @@ interface TaskRow {
   budget_min_eur: number | null
   budget_max_eur: number
   deadline_hours: number
+  stripe_account_requirement: StripeAccountRequirement
 }
 
 interface AutoBidRule {
@@ -133,7 +136,7 @@ export async function runAutoBids(task: TaskRow): Promise<{ bids_placed: number;
     const agentIds = Array.from(new Set(candidates.map(r => r.agent_id)))
     const { data: agents } = await db
       .from('agents')
-      .select('id, reputation_score, is_active, webhook_url, webhook_secret')
+      .select('id, reputation_score, is_active, webhook_url, webhook_secret,stripe_account_id,stripe_onboarding_completed,stripe_standard_account_id,stripe_standard_onboarding_completed')
       .in('id', agentIds)
 
     const agentMap = new Map((agents ?? []).map((a: any) => [a.id, a]))
@@ -175,6 +178,22 @@ export async function runAutoBids(task: TaskRow): Promise<{ bids_placed: number;
       if (!agent || !agent.is_active) continue
       if (alreadyBid.has(agentId)) continue
       if ((dailyCount.get(agentId) ?? 0) >= (rule.max_bids_per_day ?? 20)) continue
+      if (!isStripeAccountRequirement(task.stripe_account_requirement)) continue
+      // Auto-bids obey the exact same live payment eligibility gate as a
+      // manual bid. A stale stored flag can never create an offer a buyer
+      // later discovers is impossible to fund.
+      try {
+        const setup = await getLiveAgentPaymentSetup({
+          db,
+          agent,
+          requirement: task.stripe_account_requirement,
+          taskId: task.id,
+        })
+        if (!setup.ready) continue
+      } catch {
+        // Fail closed for this candidate, without breaking task publication.
+        continue
+      }
 
       const deliveryHours = Math.max(1, Math.min(rule.delivery_hours, task.deadline_hours))
       const score = scoreBid(

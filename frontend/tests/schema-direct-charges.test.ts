@@ -8,6 +8,7 @@ const compose = readFileSync(join(ROOT, 'deploy/docker-compose.yml'), 'utf8')
 const createIntent = readFileSync(join(ROOT, 'frontend/app/api/v1/payments/create-intent/route.ts'), 'utf8')
 const checkout = readFileSync(join(ROOT, 'frontend/components/PaymentCheckout.tsx'), 'utf8')
 const onboardPage = readFileSync(join(ROOT, 'frontend/app/[locale]/(agent)/agent/stripe-onboard/page.tsx'), 'utf8')
+const enMessages = JSON.parse(readFileSync(join(ROOT, 'frontend/messages/en.json'), 'utf8'))
 const onboardStatusRoute = readFileSync(join(ROOT, 'frontend/app/api/v1/agents/[id]/stripe-onboard/route.ts'), 'utf8')
 
 describe('migration 21 — Direct Charge object namespace', () => {
@@ -57,7 +58,8 @@ describe('migration 21 — Direct Charge object namespace', () => {
     // post-onboarding success message (conditional on stripeStatus.payment_enabled)
     // and the country-selector warning (conditional on paymentEnabledCountryCodes).
     expect(onboardPage).toMatch(/stripeStatus\.payment_enabled/)
-    expect(onboardPage).toMatch(/has not yet enabled live payments/i)
+    expect(onboardPage).toContain("t('activeCountryPending')")
+    expect(enMessages.stripeOnboarding.activeCountryPending).toMatch(/has not enabled live payments/i)
     expect(onboardPage).toMatch(/paymentEnabledCountryCodes\.includes\(country\)/)
   })
 

@@ -43,6 +43,8 @@ describe('sentryBeforeSend strips headers, cookies, bodies, and stack-frame loca
 
     const result = sentryBeforeSend(event, {} as any)
 
+    if (!result) throw new Error('A Mercatai application error must not be filtered')
+
     expect(result.request?.headers).toBeUndefined()
     expect(result.request?.cookies).toBeUndefined()
     expect(result.request?.data).toBeUndefined()
@@ -60,7 +62,43 @@ describe('sentryBeforeSend strips headers, cookies, bodies, and stack-frame loca
     const { sentryBeforeSend } = await import('../lib/sentryConfig')
     const event: any = { exception: { values: [{ type: 'Error', value: 'boom' }] } }
     const result = sentryBeforeSend(event, {} as any)
+    if (!result) throw new Error('An unclassified application error must not be filtered')
     expect(result.exception?.values?.[0]?.value).toBe('boom')
+  })
+
+  it('drops errors whose entire stack belongs to an injected browser extension', async () => {
+    const { sentryBeforeSend } = await import('../lib/sentryConfig')
+    const event: any = {
+      exception: {
+        values: [{
+          type: 'Error',
+          value: 'func sseError not found',
+          stacktrace: { frames: [{ filename: 'app:///inpage.js', function: 'next' }] },
+        }],
+      },
+    }
+
+    expect(sentryBeforeSend(event, {} as any)).toBeNull()
+  })
+
+  it('keeps a mixed stack containing a Mercatai application frame', async () => {
+    const { sentryBeforeSend } = await import('../lib/sentryConfig')
+    const event: any = {
+      exception: {
+        values: [{
+          type: 'Error',
+          value: 'real application failure',
+          stacktrace: {
+            frames: [
+              { filename: 'app:///inpage.js', function: 'injected' },
+              { filename: 'app:///_next/static/chunks/app.js', function: 'mercatai' },
+            ],
+          },
+        }],
+      },
+    }
+
+    expect(sentryBeforeSend(event, {} as any)).toBe(event)
   })
 })
 

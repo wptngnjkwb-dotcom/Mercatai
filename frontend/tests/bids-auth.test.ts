@@ -15,12 +15,14 @@ const taskRow = {
   deadline_hours: 24,
   title: 'Test task',
   buyer_email: null,
+  stripe_account_requirement: 'standard_agent_liability',
   moderation_status: 'approved',
   bidding_closes_at: '2099-01-01T00:00:00.000Z',
 }
-const agentRow = { id: AGENT_ID, is_active: true, reputation_score: 50, display_name: 'Test Agent' }
+const agentRow = { id: AGENT_ID, is_active: true, reputation_score: 50, display_name: 'Test Agent', stripe_standard_account_id: 'acct_standard_test', stripe_standard_onboarding_completed: true }
 
 const bidInserts: Record<string, unknown>[] = []
+const { getLiveAgentPaymentSetup } = vi.hoisted(() => ({ getLiveAgentPaymentSetup: vi.fn() }))
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
@@ -48,6 +50,11 @@ vi.mock('@/lib/server/supabase', () => ({
 
 vi.mock('@/lib/server/audit', () => ({ auditLog: vi.fn(async () => {}) }))
 vi.mock('@/lib/server/email', () => ({ sendNewBid: vi.fn(async () => {}) }))
+vi.mock('@/lib/server/agentPaymentSetup', () => ({
+  getLiveAgentPaymentSetup,
+  paymentSetupRequiredBody: vi.fn((result: any) => ({ code: 'agent_payment_setup_required', payment_setup_status: result.status, next_action: result.nextAction })),
+  PaymentSetupLookupError: class PaymentSetupLookupError extends Error {},
+}))
 
 function bidRequest(bearer: string, bodyOverrides: Record<string, unknown> = {}) {
   return new NextRequest('http://localhost/api/v1/bids', {
@@ -60,6 +67,19 @@ function bidRequest(bearer: string, bodyOverrides: Record<string, unknown> = {})
 describe('POST /api/v1/bids auth', () => {
   beforeEach(() => {
     bidInserts.length = 0
+    getLiveAgentPaymentSetup.mockReset()
+    getLiveAgentPaymentSetup.mockResolvedValue({ ready: true, status: 'ready', nextAction: 'ready_to_bid', accountId: 'acct_standard_test', country: 'CZ', onboardingEndpoint: `/api/v1/agents/${AGENT_ID}/stripe-onboard`, reason: null })
+  })
+
+  it('rejects a payment-unready agent before bid, task, audit, or email writes', async () => {
+    getLiveAgentPaymentSetup.mockResolvedValueOnce({ ready: false, status: 'not_started', nextAction: 'start_stripe_onboarding', accountId: null, country: null, onboardingEndpoint: `/api/v1/agents/${AGENT_ID}/stripe-onboard`, reason: 'stripe_account_missing' })
+    const accessToken = await signToken({ agent_id: AGENT_ID, agent_slug: 'test-agent', tier: 1 }, '15m')
+    const response = await POST(bidRequest(accessToken))
+    const body = await response.json()
+
+    expect(response.status).toBe(402)
+    expect(body).toMatchObject({ code: 'agent_payment_setup_required', payment_setup_status: 'not_started', next_action: 'start_stripe_onboarding' })
+    expect(bidInserts).toHaveLength(0)
   })
 
   it('rejects a refresh token used as a Bearer access token — the reported vulnerability', async () => {
