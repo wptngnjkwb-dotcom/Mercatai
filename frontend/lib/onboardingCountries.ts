@@ -32,14 +32,13 @@ export interface OnboardingCountry {
 export interface RequiredStripeCapabilities {
   card_payments: { requested: true }
   sepa_debit_payments?: { requested: true }
-  // Stripe rejects `card_payments` on a legacy Express account unless `transfers`
-  // is requested alongside it — a platform-level pairing rule enforced at
-  // account-creation time, unrelated to which charge architecture actually
-  // moves the money. Direct Charges settle on the connected account itself
-  // and never need `transfers` to be ACTIVE (see stripeAccountReadiness.ts,
-  // which deliberately excludes it from payoutReady/onboardingComplete) —
-  // but it must still be REQUESTED, every time card_payments is, or Stripe
-  // refuses to create or update the account at all.
+  // Stripe rejects a connected-account request for `card_payments` unless
+  // `transfers` is requested alongside it. The live API enforces this for
+  // both Standard and Express accounts; it is a request-level pairing rule,
+  // unrelated to which charge architecture actually moves the money. Direct
+  // Charges never need `transfers` to be ACTIVE (see
+  // stripeAccountReadiness.ts), but it must be present whenever we request
+  // card_payments or Stripe refuses to create/update the account.
   transfers?: { requested: true }
 }
 
@@ -223,10 +222,7 @@ export function requiredCapabilitiesForCountry(
 
   return {
     card_payments: { requested: true },
-    // Stripe requires this pairing for legacy Express creation. Standard
-    // accounts used by every new task own their Direct Charges and do not
-    // need the platform-transfer capability.
-    ...(accountType === 'express' ? { transfers: { requested: true as const } } : {}),
+    transfers: { requested: true },
     ...(country.supportsSepaDebit ? { sepa_debit_payments: { requested: true as const } } : {}),
   }
 }

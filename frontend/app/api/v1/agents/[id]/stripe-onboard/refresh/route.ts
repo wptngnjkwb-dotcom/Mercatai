@@ -119,9 +119,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (requiredCapabilities.sepa_debit_payments && readiness.sepaDebitPaymentsStatus !== 'active') {
       missingCapabilities.sepa_debit_payments = { requested: true }
     }
-    // Stripe pairs `transfers` with `card_payments` at the request level —
-    // see RequiredStripeCapabilities in onboardingCountries.ts.
-    if (requiredCapabilities.transfers && readiness.transfersStatus !== 'active') {
+    // Stripe pairs `transfers` with `card_payments` at request time for both
+    // Standard and Express accounts. Standard Direct Charges do not require
+    // transfers to become active, so only pair it with a missing card request;
+    // legacy Express keeps its independent transfer remediation.
+    if (requiredCapabilities.transfers && readiness.transfersStatus !== 'active' &&
+        (accountFields.stripeType === 'express' || readiness.cardPaymentsStatus !== 'active')) {
       missingCapabilities.transfers = { requested: true }
     }
     if (Object.keys(missingCapabilities).length > 0) {

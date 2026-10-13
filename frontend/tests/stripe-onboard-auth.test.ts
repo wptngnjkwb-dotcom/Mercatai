@@ -236,7 +236,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({ country: 'NO' }))
   })
 
-  it('creates a Standard account for an EU member with card and SEPA capabilities, without the Express-only transfers pairing', async () => {
+  it('creates a Standard EU account with Stripe-required card/transfers pairing and SEPA', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'DE' }), { params: { id: OWN_AGENT_ID } })
 
@@ -245,12 +245,13 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
       country: 'DE',
       capabilities: {
         card_payments: { requested: true },
+        transfers: { requested: true },
         sepa_debit_payments: { requested: true },
       },
     }))
   })
 
-  it('creates a Standard account in a card-only country without SEPA or transfers', async () => {
+  it('creates a Standard account in a card-only country with the required transfers pairing but no SEPA', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'AU' }), { params: { id: OWN_AGENT_ID } })
     const body = await response.json()
@@ -261,6 +262,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
       country: 'AU',
       capabilities: {
         card_payments: { requested: true },
+        transfers: { requested: true },
       },
     }))
     expect((accountsCreate as any).mock.calls[0][0].capabilities).not.toHaveProperty('sepa_debit_payments')
@@ -291,7 +293,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     expect(accountsCreate).not.toHaveBeenCalled()
   })
 
-  it('does not request the Express transfers capability for the default Standard account', async () => {
+  it('requests transfers alongside card for the default Standard account without changing its model', async () => {
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
 
@@ -299,6 +301,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     const createArgs = (accountsCreate as any).mock.calls[0][0]
     expect(createArgs.capabilities).toEqual({
       card_payments: { requested: true },
+      transfers: { requested: true },
       sepa_debit_payments: { requested: true },
     })
     expect(createArgs.type).toBe('standard')
@@ -312,6 +315,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — country and business_type 
     const createArgs = (accountsCreate as any).mock.calls[0][0]
     expect(createArgs.capabilities).toEqual({
       card_payments: { requested: true },
+      transfers: { requested: true },
       sepa_debit_payments: { requested: true },
     })
   })
@@ -393,7 +397,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — task-scoped legacy Express
 
     expect(response.status).toBe(200)
     expect(accountsCreate).toHaveBeenCalledWith(expect.objectContaining({ type: 'standard' }))
-    expect((accountsCreate as any).mock.calls[0][0].capabilities).not.toHaveProperty('transfers')
+    expect((accountsCreate as any).mock.calls[0][0].capabilities).toHaveProperty('transfers', { requested: true })
   })
 
   it('rejects task-scoped Express onboarding for an agent who is not assigned to that task', async () => {
@@ -609,7 +613,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
       // onboardingComplete (at least one method + payout ready), so this
       // also proves card_payments still gets requested even though the
       // account isn't "incomplete" by that looser bar.
-      capabilities: { sepa_debit_payments: 'active', transfers: 'active' },
+      capabilities: { sepa_debit_payments: 'active' },
     } as any)
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country: 'CZ' }), { params: { id: OWN_AGENT_ID } })
@@ -618,7 +622,10 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — existing-account remediati
     expect(response.status).toBe(200)
     expect(body.onboarding_url).toBeTruthy()
     expect(accountsUpdate).toHaveBeenCalledWith('acct_existing', {
-      capabilities: expect.objectContaining({ card_payments: { requested: true } }),
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
     })
     expect(accountsCreate).not.toHaveBeenCalled()
   })
@@ -735,7 +742,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — FR/ES/GB pair transfers wi
     })
   }
 
-  it.each(['FR', 'ES', 'GB'])('creating a new %s Standard account requests card and SEPA, but not transfers', async (country) => {
+  it.each(['FR', 'ES', 'GB'])('creating a new %s Standard account requests card, transfers, and SEPA', async (country) => {
     ;(agentRow as any).stripe_standard_account_id = null
     const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
     const response = await POST(requestWithBody(token, { country }), { params: { id: OWN_AGENT_ID } })
@@ -745,6 +752,7 @@ describe('POST /api/v1/agents/[id]/stripe-onboard — FR/ES/GB pair transfers wi
     expect(createArgs.country).toBe(country)
     expect(createArgs.capabilities).toEqual({
       card_payments: { requested: true },
+      transfers: { requested: true },
       sepa_debit_payments: { requested: true },
     })
     expect(createArgs.type).toBe('standard')

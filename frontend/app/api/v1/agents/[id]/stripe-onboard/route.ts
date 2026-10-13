@@ -208,12 +208,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (requiredCapabilities.sepa_debit_payments && readiness.sepaDebitPaymentsStatus !== 'active') {
       missingCapabilities.sepa_debit_payments = { requested: true }
     }
-    // Stripe pairs `transfers` with `card_payments` at the request level
-    // (see RequiredStripeCapabilities in onboardingCountries.ts) — a legacy
-    // account whose transfers capability was never requested would fail the
-    // remediation update below with the exact same "card_payments without
-    // transfers" error accounts.create() gives a brand-new account missing it.
-    if (requiredCapabilities.transfers && readiness.transfersStatus !== 'active') {
+    // Stripe pairs `transfers` with `card_payments` at request time for both
+    // Standard and Express accounts. Standard Direct Charges do not require
+    // transfers to become active, so only pair it with a missing card request;
+    // legacy Express keeps its independent transfer remediation.
+    if (requiredCapabilities.transfers && readiness.transfersStatus !== 'active' &&
+        (accountFields.stripeType === 'express' || readiness.cardPaymentsStatus !== 'active')) {
       missingCapabilities.transfers = { requested: true }
     }
     const hasMissingCapabilities = Object.keys(missingCapabilities).length > 0
@@ -252,10 +252,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         type: accountFields.stripeType,
         country,
         email: agent.owner_email,
-        // Express pilot accounts pair `transfers` with `card_payments`
-        // because Stripe rejects the Express request without it. Standard
-        // accounts deliberately omit `transfers`; their own Dashboard and
-        // Stripe responsibility model govern settlement and payouts.
+        // Stripe requires `transfers` to be requested alongside
+        // `card_payments` for both Standard and Express account creation.
+        // This does not make transfers an active-readiness requirement for
+        // Standard Direct Charges; their own Dashboard and Stripe
+        // responsibility model still govern settlement and payouts.
         // SEPA is requested only where Stripe documents the connected
         // account's country as a supported business location.
         capabilities: requiredCapabilities,

@@ -217,6 +217,30 @@ describe('POST /api/v1/agents/[id]/stripe-onboard/refresh', () => {
       expect(accountsCreate).not.toHaveBeenCalled()
     })
 
+    it('pairs transfers with card when refreshing a Standard account missing both capabilities', async () => {
+      accountsRetrieve.mockResolvedValueOnce({
+        id: EXISTING_ACCOUNT_ID,
+        type: 'standard',
+        country: 'DE',
+        charges_enabled: false,
+        payouts_enabled: true,
+        details_submitted: true,
+        requirements: { disabled_reason: 'action_required.requested_capabilities', currently_due: [] },
+        capabilities: { sepa_debit_payments: 'active' },
+      } as any)
+      const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+      const response = await POST(request(token), { params: { id: OWN_AGENT_ID } })
+
+      expect(accountsUpdate).toHaveBeenCalledWith(EXISTING_ACCOUNT_ID, {
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+      })
+      expect(response.status).toBe(200)
+      expect(accountLinksCreate).toHaveBeenCalledWith(expect.objectContaining({ account: EXISTING_ACCOUNT_ID }))
+    })
+
     it.each(['FR', 'ES', 'GB'])('does not require transfers when refreshing an otherwise-ready %s Standard account', async (country) => {
       accountsRetrieve.mockResolvedValueOnce({
         id: EXISTING_ACCOUNT_ID,

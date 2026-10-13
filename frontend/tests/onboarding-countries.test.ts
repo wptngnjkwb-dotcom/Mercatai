@@ -71,10 +71,11 @@ describe('Stripe Connect onboarding countries', () => {
     })
   })
 
-  it('requests card and SEPA, but not transfers, for every Standard rollout country except its documented method exceptions', () => {
+  it('pairs transfers with card for every Standard rollout country and adds SEPA where supported', () => {
     for (const country of SUPPORTED_ONBOARDING_COUNTRIES.filter((item) => STANDARD_ACCOUNT_COUNTRY_CODES.has(item.code))) {
       expect(requiredCapabilitiesForCountry(country.code)).toEqual({
         card_payments: { requested: true },
+        transfers: { requested: true },
         ...(country.supportsSepaDebit ? { sepa_debit_payments: { requested: true } } : {}),
       })
     }
@@ -86,7 +87,7 @@ describe('Stripe Connect onboarding countries', () => {
     }
   })
 
-  it('pairs transfers with card_payments only where the server-selected Express model is available', () => {
+  it('pairs transfers with card_payments for every available server-selected account model', () => {
     for (const country of SUPPORTED_ONBOARDING_COUNTRIES) {
       if (EXPRESS_ACCOUNT_COUNTRY_CODES.has(country.code)) {
         expect(requiredCapabilitiesForCountry(country.code, 'express')).toMatchObject({ transfers: { requested: true } })
@@ -94,7 +95,7 @@ describe('Stripe Connect onboarding countries', () => {
         expect(requiredCapabilitiesForCountry(country.code, 'express')).toBeNull()
       }
       const standard = requiredCapabilitiesForCountry(country.code, 'standard')
-      if (standard) expect(standard).not.toHaveProperty('transfers')
+      if (standard) expect(standard).toMatchObject({ transfers: { requested: true } })
     }
   })
 

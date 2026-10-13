@@ -34,12 +34,14 @@ New payments are Direct Charges in the connected account. The default
 onboarding creates a Standard/full-dashboard account and asks for:
 
 - `card_payments` for every enabled account;
+- `transfers` alongside `card_payments`, because Stripe requires that pairing
+  when creating or updating both Standard and Express connected accounts;
 - `sepa_debit_payments` only where `supportsSepaDebit` is true.
 
-Standard accounts do not request `transfers`. The three explicitly migrated
-€3 pilots are the only exception: their assigned agent receives a
-task-scoped Express onboarding flow, where Stripe requires `transfers` to be
-requested alongside `card_payments`. There is no public account-type switch
+Requesting `transfers` does not make it an active-readiness requirement for
+Standard Direct Charges and does not change the connected account's Stripe
+responsibility model. The three explicitly migrated €3 pilots still use their
+task-scoped Express onboarding flow. There is no public account-type switch
 and a client-supplied Express value cannot enable it. A live
 payment requires the selected payment capability, `charges_enabled` and
 `payouts_enabled`; identity details and Stripe requirements must also be
