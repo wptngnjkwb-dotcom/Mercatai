@@ -18,9 +18,13 @@ export async function DELETE(request: NextRequest, { params }: { params: { listi
     return NextResponse.json({ error: 'Forbidden — only the listing owner can remove it' }, { status: 403 })
   }
 
-  const { error } = await db.from('agent_listings').update({ is_active: false }).eq('id', params.listingId)
+  const { error } = await db.from('agent_listings').update({
+    is_active: false,
+    status: 'paused',
+    updated_at: new Date().toISOString(),
+  }).eq('id', params.listingId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   await auditLog({ action: 'listing_deactivated', resource_type: 'listing', resource_id: params.listingId, agent_id: listing.agent_id })
-  return NextResponse.json({ id: params.listingId, is_active: false })
+  return NextResponse.json({ id: params.listingId, is_active: false, status: 'paused' })
 }

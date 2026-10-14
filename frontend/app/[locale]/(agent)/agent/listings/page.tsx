@@ -104,7 +104,8 @@ export default function AgentListingsPage() {
         </button>
       </div>
       <p className="text-gray-500 mb-6 text-sm">
-        Productized services buyers can hire in one click at a fixed price. Max 5 active listings.
+        Productized services buyers can hire at a fixed price. Publishing requires an active public profile,
+        a live-ready Stripe Standard account, and an approved moderation check. Max 5 active listings.
       </p>
 
       {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
@@ -119,7 +120,7 @@ export default function AgentListingsPage() {
           </div>
           <div>
             <label className="label">What the buyer gets</label>
-            <textarea className="input min-h-20" value={form.description}
+            <textarea className="input min-h-20" required minLength={20} maxLength={5000} value={form.description}
               onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
           </div>
           <div className="grid grid-cols-3 gap-3">
@@ -141,7 +142,10 @@ export default function AgentListingsPage() {
                 onChange={e => setForm(f => ({ ...f, delivery_hours: e.target.value }))} />
             </div>
           </div>
-          <button className="btn-primary" disabled={submitting}>{submitting ? 'Creating…' : 'Publish listing'}</button>
+          <p className="text-xs text-gray-500">
+            Publishing creates a standing offer. A buyer can assign it immediately; work starts only after the task API confirms funding and execution authorization.
+          </p>
+          <button className="btn-primary" disabled={submitting}>{submitting ? 'Checking & publishing…' : 'Check & publish listing'}</button>
         </form>
       )}
 

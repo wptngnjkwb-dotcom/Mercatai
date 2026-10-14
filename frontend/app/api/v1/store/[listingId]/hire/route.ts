@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createHash } from 'node:crypto'
 import { getSupabase } from '@/lib/server/supabase'
 import { signToken } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
@@ -16,9 +17,9 @@ import { getLiveAgentPaymentSetup, paymentSetupRequiredBody, PaymentSetupLookupE
  * productized service from the Agent Store. This creates a task already
  * assigned to the listing's agent (with an accepted bid at the listed
  * price), and returns the buyer token. Payment then flows through the
- * standard pay-on-approval pipeline (create-intent → in_progress →
- * deliver → approve), so escrow, SLA refunds, disputes, and audit all
- * work unchanged.
+ * standard protected-payment pipeline (create-intent → in_progress →
+ * deliver → approve), so payment confirmation, objective SLA refunds,
+ * facilitated quality issues, and audit all work unchanged.
  */
 export async function POST(request: NextRequest, { params }: { params: { listingId: string } }) {
   try {
@@ -27,6 +28,13 @@ export async function POST(request: NextRequest, { params }: { params: { listing
     // want a misconfigured secret to leave an orphaned assigned task behind.
     if (!process.env.JWT_SECRET_KEY) {
       throw new Error('JWT_SECRET_KEY environment variable is not set')
+    }
+
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim() ?? ''
+    if (!/^[A-Za-z0-9._:-]{16,200}$/.test(idempotencyKey)) {
+      return NextResponse.json({
+        error: 'Idempotency-Key header is required (16-200 letters, numbers, dot, underscore, colon or hyphen)',
+      }, { status: 400 })
     }
 
     const body = await request.json().catch(() => ({}))
@@ -44,11 +52,85 @@ export async function POST(request: NextRequest, { params }: { params: { listing
 
     const db = getSupabase()
 
+    const normalizedOrgName = typeof org_name === 'string' ? org_name.trim() : 'anonymous'
+    const normalizedDetails = typeof details === 'string' ? details.trim() : null
+    const requestFingerprint = createHash('sha256').update(JSON.stringify({
+      listing_id: params.listingId,
+      buyer_email: normalizedBuyerEmail,
+      org_name: normalizedOrgName || 'anonymous',
+      details: normalizedDetails || '',
+    })).digest('hex')
+
+    // A successful response may have been lost after the transaction
+    // committed. Replays must return that original task even if the listing
+    // was subsequently paused or Stripe is temporarily unavailable. The
+    // RPC remains the canonical fingerprint/ownership check; this lookup
+    // only chooses the safe replay path before any external side effect.
+    const { data: existingHire, error: existingHireError } = await db
+      .from('store_hire_requests')
+      .select('task_id,request_fingerprint')
+      .eq('listing_id', params.listingId)
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle()
+    if (existingHireError) throw existingHireError
+    if (existingHire) {
+      if (existingHire.request_fingerprint !== requestFingerprint) {
+        return NextResponse.json({ error: 'Idempotency-Key was already used for a different request' }, { status: 409 })
+      }
+      const { data: existingTask, error: existingTaskError } = await db
+        .from('tasks')
+        .select('assigned_agent_id')
+        .eq('id', existingHire.task_id)
+        .single()
+      if (existingTaskError || !existingTask?.assigned_agent_id) {
+        throw existingTaskError || new Error('Stored hire task is unavailable')
+      }
+      const { data: replayData, error: replayError } = await db.rpc('create_store_hire', {
+        p_listing_id: params.listingId,
+        p_expected_agent_id: existingTask.assigned_agent_id,
+        p_org_name: normalizedOrgName,
+        p_buyer_email: normalizedBuyerEmail,
+        p_buyer_details: normalizedDetails,
+        p_moderation_risk_score: 0,
+        p_moderation_reason_codes: [],
+        p_moderation_policy_version: 'idempotent-replay',
+        p_idempotency_key: idempotencyKey,
+        p_request_fingerprint: requestFingerprint,
+      })
+      if (replayError) {
+        if (replayError.code === 'P0003') {
+          return NextResponse.json({ error: 'Idempotency-Key was already used for a different request' }, { status: 409 })
+        }
+        throw replayError
+      }
+      const replay = Array.isArray(replayData) ? replayData[0] : replayData
+      if (!replay?.task_id || !replay?.buyer_org_id) throw new Error('Instant hire replay was not confirmed')
+      const replayBuyerToken = await signToken({
+        role: 'buyer', task_id: replay.task_id, org_id: replay.buyer_org_id, buyer_email: normalizedBuyerEmail,
+      }, '30d')
+      return NextResponse.json({
+        task_id: replay.task_id,
+        buyer_org_id: replay.buyer_org_id,
+        agent: replay.agent_display_name,
+        price_eur: Number(replay.price_eur),
+        delivery_deadline_at: null,
+        ...publicPaymentResponsibility(STANDARD_AGENT_LIABILITY),
+        buyer_token: replayBuyerToken,
+        buyer_token_note: 'Save this token — required to fund, review, approve, or open a facilitated quality issue for this task',
+        idempotent_replay: true,
+        visibility: 'private',
+        source: 'store',
+        next_step: 'POST /api/v1/payments/create-intent with this buyer_token to fund the task',
+      }, { status: 200 })
+    }
+
     const { data: listing } = await db
       .from('agent_listings')
       .select('*, agents!inner(id,display_name,is_active,profile_visibility,owner_email,stripe_standard_account_id,stripe_standard_onboarding_completed)')
       .eq('id', params.listingId)
       .eq('is_active', true)
+      .eq('status', 'active')
+      .eq('moderation_status', 'approved')
       .single()
 
     // A private agent's listing must be just as unreachable by a known
@@ -110,16 +192,19 @@ export async function POST(request: NextRequest, { params }: { params: { listing
     const { data: hireData, error: hireError } = await db.rpc('create_store_hire', {
       p_listing_id: listing.id,
       p_expected_agent_id: listing.agent_id,
-      p_org_name: typeof org_name === 'string' ? org_name.trim() : 'anonymous',
+      p_org_name: normalizedOrgName,
       p_buyer_email: normalizedBuyerEmail,
-      p_buyer_details: typeof details === 'string' ? details.trim() : null,
+      p_buyer_details: normalizedDetails,
       p_moderation_risk_score: moderation.riskScore,
       p_moderation_reason_codes: moderation.reasonCodes,
       p_moderation_policy_version: moderation.policyVersion,
+      p_idempotency_key: idempotencyKey,
+      p_request_fingerprint: requestFingerprint,
     })
     if (hireError) {
       if (hireError.code === 'P0001') return NextResponse.json({ error: 'Listing can no longer be hired' }, { status: 409 })
       if (hireError.code === 'P0002') return NextResponse.json({ error: 'Listing not found or inactive' }, { status: 404 })
+      if (hireError.code === 'P0003') return NextResponse.json({ error: 'Idempotency-Key was already used for a different request' }, { status: 409 })
       throw hireError
     }
     const task = Array.isArray(hireData) ? hireData[0] : hireData
@@ -131,45 +216,38 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       '30d'
     )
 
-    await auditLog({
-      action: 'instant_hire',
-      resource_type: 'task',
-      resource_id: task.task_id,
-      agent_id: listing.agent_id,
-      details: { listing_id: listing.id, price_eur: listing.price_eur },
-      ip_address: request.headers.get('x-forwarded-for') ?? undefined,
-    })
-    fireWebhooks('bid.accepted', {
-      task_id: task.task_id,
-      ...(await agentIdentityForWebhook(db, listing.agent_id)),
-      price_eur: listing.price_eur,
-    })
-
-    const listingAgent = listing.agents as any
-    if (listingAgent?.owner_email) {
-      const fields = stripeAccountFields(STANDARD_AGENT_LIABILITY)
-      await sendBidAcceptedActionRequired({
-        to: listingAgent.owner_email,
-        taskTitle: task.task_title,
-        taskId: task.task_id,
-        agentId: listing.agent_id,
-        priceEur: Number(listing.price_eur),
-        deliveryHours: Number(listing.delivery_hours),
-        stripeAccountType: fields.stripeType,
-        onboardingRequired: !listingAgent[fields.accountId] || listingAgent[fields.onboardingCompleted] !== true,
+    const createdNew = task.created_new !== false
+    if (createdNew) {
+      fireWebhooks('bid.accepted', {
+        task_id: task.task_id,
+        ...(await agentIdentityForWebhook(db, listing.agent_id)),
+        price_eur: listing.price_eur,
       })
-    }
 
-    if (normalizedBuyerEmail) {
+      const listingAgent = listing.agents as any
+      if (listingAgent?.owner_email) {
+        const fields = stripeAccountFields(STANDARD_AGENT_LIABILITY)
+        await sendBidAcceptedActionRequired({
+          to: listingAgent.owner_email,
+          taskTitle: task.task_title,
+          taskId: task.task_id,
+          agentId: listing.agent_id,
+          priceEur: Number(listing.price_eur),
+          deliveryHours: Number(listing.delivery_hours),
+          stripeAccountType: fields.stripeType,
+          onboardingRequired: !listingAgent[fields.accountId] || listingAgent[fields.onboardingCompleted] !== true,
+        })
+      }
+
       await sendTaskCreated({
-        to: normalizedBuyerEmail,
-        taskTitle: task.task_title,
-        taskId: task.task_id,
-        buyerToken,
-        budgetMax: listing.price_eur,
-        kind: 'store_hire',
-        assignedAgentName: task.agent_display_name,
-      })
+          to: normalizedBuyerEmail,
+          taskTitle: task.task_title,
+          taskId: task.task_id,
+          buyerToken,
+          budgetMax: listing.price_eur,
+          kind: 'store_hire',
+          assignedAgentName: task.agent_display_name,
+        })
     }
 
     return NextResponse.json({
@@ -180,9 +258,12 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       delivery_deadline_at: null,
       ...publicPaymentResponsibility(STANDARD_AGENT_LIABILITY),
       buyer_token: buyerToken,
-      buyer_token_note: 'Save this token — required to pay, approve, or dispute this task',
+      buyer_token_note: 'Save this token — required to fund, review, approve, or open a facilitated quality issue for this task',
+      idempotent_replay: !createdNew,
+      visibility: 'private',
+      source: 'store',
       next_step: 'POST /api/v1/payments/create-intent with this buyer_token to fund the task',
-    }, { status: 201 })
+    }, { status: createdNew ? 201 : 200 })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: 'Instant hire failed' }, { status: 500 })

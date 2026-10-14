@@ -202,10 +202,11 @@ export async function computeSettledMetrics(
   }
 
   const taskIds = Array.from(byTask.keys())
-  const taskRows = await fetchInChunks<{ id: string; posted_by_org_id: string | null }>(taskIds, (chunk) =>
-    db.from('tasks').select('id, posted_by_org_id').in('id', chunk)
+  const taskRows = await fetchInChunks<{ id: string; posted_by_org_id: string | null; source?: string | null }>(taskIds, (chunk) =>
+    db.from('tasks').select('id, posted_by_org_id, source').in('id', chunk)
   )
   const orgIdByTask = new Map(taskRows.map((t) => [t.id, t.posted_by_org_id]))
+  const sourceByTask = new Map(taskRows.map((t) => [t.id, t.source ?? 'marketplace']))
 
   const orgIds = Array.from(new Set(Array.from(orgIdByTask.values()).filter((id): id is string => !!id)))
   const seedOrgIds = await fetchSeedOrgIds(db, orgIds)
@@ -217,6 +218,7 @@ export async function computeSettledMetrics(
     // succeeded, but no matching row — e.g. orphaned data) can never be
     // verified as non-demo, so it must never count.
     if (!orgIdByTask.has(taskId)) return
+    if (sourceByTask.get(taskId) === 'internal_pilot') return
     const orgId = orgIdByTask.get(taskId)
     if (orgId && seedOrgIds.has(orgId)) return // demo/sample task — excluded from real business metrics
     tasksCompleted += 1

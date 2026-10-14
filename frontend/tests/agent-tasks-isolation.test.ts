@@ -22,6 +22,8 @@ const rawTask = {
   delivery_deadline_at: '2026-08-03T00:00:00.000Z',
   archived_at: null as string | null,
   moderation_status: 'approved',
+  visibility: 'public',
+  source: 'marketplace',
   // Must never leak through this public, unauthenticated endpoint.
   buyer_email: 'buyer@example.com',
   buyer_token: 'buyer-token-private',

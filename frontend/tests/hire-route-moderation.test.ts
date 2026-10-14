@@ -7,6 +7,8 @@ const insertedTasks: Record<string, unknown>[] = []
 const insertedBids: Record<string, unknown>[] = []
 const insertedOrgs: Record<string, unknown>[] = []
 const rpcCalls: { name: string; args: Record<string, unknown> }[] = []
+let rpcCreatedNew = true
+let existingHireRequest: { task_id: string; request_fingerprint: string } | null = null
 const { getLiveAgentPaymentSetup } = vi.hoisted(() => ({ getLiveAgentPaymentSetup: vi.fn() }))
 
 const listingRow = {
@@ -19,6 +21,8 @@ const listingRow = {
   hires_count: 0,
   agent_id: 'agent-1',
   is_active: true,
+  status: 'active',
+  moderation_status: 'approved',
   agents: {
     id: 'agent-1', display_name: 'Translator Bot', is_active: true, profile_visibility: 'public',
     owner_email: 'operator@example.com', stripe_standard_account_id: null,
@@ -36,6 +40,7 @@ vi.mock('@/lib/server/supabase', () => ({
         delivery_hours: listingRow.delivery_hours,
         agent_display_name: listingRow.agents.display_name,
         assigned_at: '2026-09-01T00:00:00.000Z',
+        created_new: rpcCreatedNew,
       }], error: null }
     },
     from(table: string) {
@@ -48,11 +53,12 @@ vi.mock('@/lib/server/supabase', () => ({
           if (table === 'agent_listings') return { data: listingRow, error: null }
           if (table === 'agents') return { data: { id: 'agent-1', profile_visibility: listingRow.agents.profile_visibility }, error: null }
           if (table === 'organizations') return { data: { id: 'org-1' }, error: null }
-          if (table === 'tasks') return { data: { id: 'task-1', ...insertedRow }, error: null }
+          if (table === 'tasks') return { data: { id: 'task-1', assigned_agent_id: 'agent-1', ...(insertedRow ?? {}) }, error: null }
           return { data: null, error: null }
         },
         maybeSingle: async () => {
           if (table === 'organizations') return { data: null, error: null }
+          if (table === 'store_hire_requests') return { data: existingHireRequest, error: null }
           return { data: null, error: null }
         },
         insert: (values: Record<string, unknown>) => {
@@ -86,18 +92,38 @@ beforeEach(() => {
   insertedBids.length = 0
   insertedOrgs.length = 0
   rpcCalls.length = 0
+  rpcCreatedNew = true
+  existingHireRequest = null
   sendTaskCreated.mockClear()
   sendBidAcceptedActionRequired.mockClear()
   getLiveAgentPaymentSetup.mockReset()
   getLiveAgentPaymentSetup.mockResolvedValue({ ready: true, status: 'ready', nextAction: 'ready_to_bid', accountId: 'acct_standard_test', country: 'CZ', onboardingEndpoint: '/api/v1/agents/agent-1/stripe-onboard', reason: null })
 })
 
+const hireHeaders = {
+  'content-type': 'application/json',
+  'idempotency-key': 'test-hire-request-0001',
+}
+
 describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
+  it('requires an idempotency key before any lookup or write', async () => {
+    const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
+    const response = await POST(new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
+    }), { params: { listingId: 'listing-1' } })
+
+    expect(response.status).toBe(400)
+    expect(rpcCalls).toHaveLength(0)
+    expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
+  })
+
   it('rejects a provider without ready Standard payments before moderation or any hire write', async () => {
     getLiveAgentPaymentSetup.mockResolvedValueOnce({ ready: false, status: 'onboarding_required', nextAction: 'continue_stripe_onboarding', accountId: 'acct_standard_test', country: 'CZ', onboardingEndpoint: '/api/v1/agents/agent-1/stripe-onboard', reason: 'stripe_requirements_incomplete' })
     const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
     const response = await POST(new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
+      method: 'POST', headers: hireHeaders, body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
     }), { params: { listingId: 'listing-1' } })
 
     expect(response.status).toBe(402)
@@ -111,7 +137,7 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
     const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: hireHeaders,
       body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
     })
     const response = await POST(request, { params: { listingId: 'listing-1' } })
@@ -122,6 +148,8 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     expect(rpcCalls[0]).toMatchObject({ name: 'create_store_hire', args: {
       p_listing_id: 'listing-1', p_expected_agent_id: 'agent-1',
       p_moderation_policy_version: expect.any(String),
+      p_idempotency_key: 'test-hire-request-0001',
+      p_request_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
     } })
     // Organization, approved task, accepted bid and counter are created
     // inside this single transaction rather than independent app writes.
@@ -144,7 +172,7 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     try {
       const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: hireHeaders,
         body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
       })
       const response = await POST(request, { params: { listingId: 'listing-1' } })
@@ -160,13 +188,61 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
     const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: hireHeaders,
       body: JSON.stringify({ org_name: 'Mercatai Sample Briefs', buyer_email: 'buyer@example.com' }),
     })
     const response = await POST(request, { params: { listingId: 'listing-1' } })
     expect(response.status).toBe(201)
     expect(insertedOrgs).toHaveLength(0)
     expect(rpcCalls[0]).toMatchObject({ args: { p_org_name: 'Mercatai Sample Briefs' } })
+  })
+
+  it('returns the original private task on a replay without repeating email side effects', async () => {
+    const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
+    const first = await POST(new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
+      method: 'POST',
+      headers: hireHeaders,
+      body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
+    }), { params: { listingId: 'listing-1' } })
+    expect(first.status).toBe(201)
+
+    existingHireRequest = {
+      task_id: 'task-1',
+      request_fingerprint: String(rpcCalls[0].args.p_request_fingerprint),
+    }
+    rpcCreatedNew = false
+    rpcCalls.length = 0
+    sendTaskCreated.mockClear()
+    sendBidAcceptedActionRequired.mockClear()
+    getLiveAgentPaymentSetup.mockReset()
+    getLiveAgentPaymentSetup.mockRejectedValue(new Error('Stripe unavailable during retry'))
+    const response = await POST(new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
+      method: 'POST',
+      headers: hireHeaders,
+      body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
+    }), { params: { listingId: 'listing-1' } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body).toMatchObject({ task_id: 'task-1', idempotent_replay: true, visibility: 'private', source: 'store' })
+    expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
+    expect(rpcCalls).toHaveLength(1)
+    expect(sendTaskCreated).not.toHaveBeenCalled()
+    expect(sendBidAcceptedActionRequired).not.toHaveBeenCalled()
+  })
+
+  it('rejects reuse of the same key with different request content', async () => {
+    existingHireRequest = { task_id: 'task-1', request_fingerprint: 'a'.repeat(64) }
+    const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
+    const response = await POST(new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
+      method: 'POST',
+      headers: hireHeaders,
+      body: JSON.stringify({ buyer_email: 'different@example.com' }),
+    }), { params: { listingId: 'listing-1' } })
+
+    expect(response.status).toBe(409)
+    expect(rpcCalls).toHaveLength(0)
+    expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
   })
 })
 
@@ -178,7 +254,7 @@ describe('POST /api/v1/store/[listingId]/hire — private-agent listing', () => 
       const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
       const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: hireHeaders,
         body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
       })
       const response = await POST(request, { params: { listingId: 'listing-1' } })
@@ -198,7 +274,7 @@ describe('POST /api/v1/store/[listingId]/hire — private-agent listing', () => 
       const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
       const request = new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: hireHeaders,
         body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
       })
       const response = await POST(request, { params: { listingId: 'listing-1' } })

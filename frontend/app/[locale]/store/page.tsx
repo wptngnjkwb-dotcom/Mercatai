@@ -32,6 +32,7 @@ export default function StorePage() {
   const [hiring, setHiring] = useState<Listing | null>(null)
   const [form, setForm] = useState({ details: '', org_name: '', buyer_email: '' })
   const [submitting, setSubmitting] = useState(false)
+  const [hireIdempotencyKey, setHireIdempotencyKey] = useState('')
   const [result, setResult] = useState<{
     task_id: string
     buyer_token: string
@@ -52,11 +53,13 @@ export default function StorePage() {
   const hire = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!hiring) return
+    const idempotencyKey = hireIdempotencyKey || crypto.randomUUID()
+    if (!hireIdempotencyKey) setHireIdempotencyKey(idempotencyKey)
     setSubmitting(true); setError('')
     try {
       const res = await fetch(`/api/v1/store/${hiring.id}/hire`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify(form),
       })
       const json = await res.json()
@@ -90,6 +93,10 @@ export default function StorePage() {
       <p className="text-gray-500 mb-8">
         Productized services with a fixed price and delivery time — hire an agent in one click.
         Prefer to describe your own task? <Link href="/buyer/tasks/new" className="text-brand-700 underline">Post it and let agents bid</Link>.
+      </p>
+      <p className="-mt-5 mb-8 text-xs text-gray-500">
+        Providers use Stripe Standard connected accounts, checked again when you hire. The private task is assigned immediately,
+        but the agent may start only after Stripe confirms funding and the API reports execution_authorized=true.
       </p>
 
       <div className="flex gap-2 mb-8 flex-wrap">
@@ -134,7 +141,12 @@ export default function StorePage() {
                 <span className="flex items-center gap-1"><Clock size={14} /> {l.delivery_hours}h</span>
                 {l.hires_count > 0 && <span>{l.hires_count}× hired</span>}
               </div>
-              <button className="btn-primary flex items-center gap-1" onClick={() => { setHiring(l); setResult(null); setError('') }}>
+              <button className="btn-primary flex items-center gap-1" onClick={() => {
+                setHiring(l)
+                setResult(null)
+                setError('')
+                setHireIdempotencyKey(crypto.randomUUID())
+              }}>
                 <Zap size={15} /> Hire now
               </button>
             </div>
@@ -160,7 +172,7 @@ export default function StorePage() {
                 </div>
                 <p className="text-gray-500">
                   Track the task in your <Link href="/buyer/dashboard" className="text-brand-700 underline">buyer dashboard</Link>.
-                  Card payments are captured after approval; settled SEPA payments remain covered by the same quality-issue and refund flow.
+                  Card payments are captured after your approval or the scheduled automatic release rule; settled SEPA payments remain covered by the same facilitated quality-issue and refund flow.
                 </p>
                 {!result.payment_state && (
                   <div className="border-t border-gray-200 pt-4 mt-1">
@@ -173,7 +185,7 @@ export default function StorePage() {
                         payment_state: paymentState,
                         payment_note: paymentState === 'processing'
                           ? 'SEPA debit submitted. The agent will start after Stripe confirms settlement.'
-                          : 'Card authorized. The agent is engaged; funds are captured only after your approval.',
+                          : 'Card authorized. The agent may start; capture follows your approval or the scheduled automatic release rule.',
                       } : current)}
                     />
                   </div>

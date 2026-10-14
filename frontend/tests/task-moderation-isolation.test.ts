@@ -29,12 +29,14 @@ let cannedTask: Record<string, unknown> = {
   assigned_at: null,
   delivery_deadline_at: null,
   moderation_status: 'approved',
+  visibility: 'public',
+  source: 'marketplace',
 }
 
 // Rows for the activity feed's recentBids query — each carries its own
 // embedded task moderation_status/posted_by_org_id, independent of
 // cannedTask above.
-let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string; posted_by_org_id?: string; archived_at?: string | null } | null; agents: { display_name: string; profile_visibility?: string } }[] = []
+let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string; posted_by_org_id?: string; archived_at?: string | null; visibility?: string | null } | null; agents: { display_name: string; profile_visibility?: string } }[] = []
 
 // Seedable transactions/organizations rows for is_demo + funding_status +
 // settled-GMV coverage. The shared `tasks` dispatch below only ever returns
@@ -59,7 +61,7 @@ let bidsFromCallCount = 0
 // needed to test pagination across many different tasks. Left empty, the
 // 'tasks' dispatch below falls back to its original cannedTask behavior
 // exactly as before, so no existing test is affected.
-let activitySettledTaskRows: { id: string; title?: string; category?: string; posted_by_org_id?: string | null; archived_at?: string | null }[] = []
+let activitySettledTaskRows: { id: string; title?: string; category?: string; posted_by_org_id?: string | null; archived_at?: string | null; visibility?: string | null; source?: string | null }[] = []
 // Backs the batched agents visibility lookup attachPublicTaskFields makes
 // for GET /api/v1/tasks (list) — separate from cannedTask so a task's
 // assigned_agent_id can be tested against both a public and a private agent.
@@ -132,7 +134,9 @@ vi.mock('@/lib/server/supabase', () => ({
             // — otherwise fall through to the original single-cannedTask
             // behavior below, unchanged for every other existing test.
             if (inFilterIds && activitySettledTaskRows.length > 0) {
-              const matched = activitySettledTaskRows.filter((t) => inFilterIds!.includes(t.id))
+              const matched = activitySettledTaskRows
+                .filter((t) => inFilterIds!.includes(t.id))
+                .map((t) => ({ visibility: 'public', source: 'marketplace', ...t }))
               return resolve({ data: matched, count: matched.length, error: null })
             }
             const matches = eqFilters.every(([f, v]) => (cannedTask as Record<string, unknown>)[f] === v)
@@ -159,7 +163,11 @@ vi.mock('@/lib/server/supabase', () => ({
               const matched = (inFilterIds ?? []).filter((id) => agentOwnBidTaskIds.includes(id))
               return resolve({ data: matched.map((task_id) => ({ task_id })), error: null })
             }
-            return resolve({ data: applyPaging(activityBidRows), count: activityBidRows.length, error: null })
+            const rows = activityBidRows.map((row) => ({
+              ...row,
+              tasks: row.tasks ? { visibility: 'public', ...row.tasks } : null,
+            }))
+            return resolve({ data: applyPaging(rows), count: rows.length, error: null })
           }
           if (table === 'agents') return resolve({ data: taskListAgentVisibilityRows, count: taskListAgentVisibilityRows.length, error: null })
           if (table === 'transactions') {

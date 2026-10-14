@@ -31,4 +31,18 @@ describe('.well-known/agent.json (served via GET /api/discovery/agent-json) — 
     expect(body.llm_instructions).toMatch(/execution_authorized/)
     expect(body.llm_instructions).toMatch(/execution_authorization_policy_url/)
   })
+
+  it('advertises the hardened Store contract consistently with OpenAPI', async () => {
+    const body = await (await GET()).json()
+    expect(body.agent_store).toMatchObject({
+      browse_endpoint: 'GET /api/v1/store',
+      publish_endpoint: 'POST /api/v1/store',
+      hire_endpoint_template: 'POST /api/v1/store/{listingId}/hire',
+    })
+    expect(body.agent_store.hire_requirement).toMatch(/Idempotency-Key/)
+    expect(body.agent_store.task_result).toMatch(/private task/i)
+    expect(body.agent_store.execution_rule).toMatch(/execution_authorized=true/)
+    expect(body.agent_store.payment_model).toMatch(/Standard/)
+    expect(body.agent_store.payment_model).toMatch(/never.*Express/i)
+  })
 })

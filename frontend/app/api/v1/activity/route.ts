@@ -76,7 +76,7 @@ interface BidRow {
   id: string
   price_eur: number
   submitted_at: string | null
-  tasks: { title?: string; category?: string; moderation_status?: string; posted_by_org_id?: string | null; archived_at?: string | null } | null
+  tasks: { title?: string; category?: string; moderation_status?: string; posted_by_org_id?: string | null; archived_at?: string | null; visibility?: string | null } | null
   agents: { display_name?: string; profile_visibility?: string } | null
 }
 
@@ -98,12 +98,13 @@ export async function GET(_request: NextRequest) {
     // used here without risking a real bid being pushed out by a backlog
     // of newer hidden ones.
     const isVisible = (b: BidRow) =>
-      b.tasks?.moderation_status === 'approved' && !b.tasks?.archived_at && b.agents?.profile_visibility === 'public'
+      b.tasks?.moderation_status === 'approved' && !b.tasks?.archived_at
+      && b.tasks?.visibility === 'public' && b.agents?.profile_visibility === 'public'
     const rows = await fetchVisibleRows<BidRow>(
       (offset, pageSize) =>
         db
           .from('bids')
-          .select('id, price_eur, submitted_at, tasks(title, category, moderation_status, posted_by_org_id, archived_at), agents(display_name, profile_visibility)')
+          .select('id, price_eur, submitted_at, tasks(title, category, moderation_status, posted_by_org_id, archived_at, visibility), agents(display_name, profile_visibility)')
           .order('submitted_at', { ascending: false })
           .range(offset, offset + pageSize - 1) as unknown as PromiseLike<{ data: BidRow[] | null; error: unknown }>,
       isVisible,
@@ -138,6 +139,7 @@ export async function GET(_request: NextRequest) {
       // own demo tasks) is excluded the same way — see
       // frontend/sql/15_task_archival.sql.
       .eq('moderation_status', 'approved')
+      .eq('visibility', 'public')
       .is('archived_at', null)
       .order('created_at', { ascending: false })
       .limit(15)
@@ -185,7 +187,7 @@ export async function GET(_request: NextRequest) {
       const taskIds = Array.from(new Set(rows.map((r: any) => r.task_id)))
       const { data: taskRows, error: taskErr } = await db
         .from('tasks')
-        .select('id, title, category, posted_by_org_id, archived_at')
+        .select('id, title, category, posted_by_org_id, archived_at, visibility, source')
         .in('id', taskIds)
       if (taskErr) throw taskErr
       const taskById = new Map((taskRows ?? []).map((t: any) => [t.id, t]))
@@ -204,6 +206,7 @@ export async function GET(_request: NextRequest) {
         // Archived is a separate, broader exclusion — any archived task
         // (demo or not) has no business appearing as a public completion.
         if (task.archived_at) continue
+        if (task.visibility !== 'public' || task.source === 'internal_pilot') continue
         events.push({
           id: `completed-${tx.task_id}`,
           type: 'completed',
@@ -235,8 +238,8 @@ export async function GET(_request: NextRequest) {
   // and gmv_eur are scoped to real, released, non-demo transactions
   // specifically — see stats.metrics_scope.
   const [tasksTotal, bidsTotal, agentsTotal] = await Promise.all([
-    safe(async () => (await db.from('tasks').select('id', { count: 'exact', head: true }).eq('moderation_status', 'approved').is('archived_at', null)).count ?? 0, 0),
-    safe(async () => (await db.from('bids').select('id, tasks!inner(archived_at)', { count: 'exact', head: true }).is('tasks.archived_at', null)).count ?? 0, 0),
+    safe(async () => (await db.from('tasks').select('id', { count: 'exact', head: true }).eq('moderation_status', 'approved').eq('visibility', 'public').is('archived_at', null)).count ?? 0, 0),
+    safe(async () => (await db.from('bids').select('id, tasks!inner(archived_at,visibility)', { count: 'exact', head: true }).is('tasks.archived_at', null).eq('tasks.visibility', 'public')).count ?? 0, 0),
     safe(async () => (await db.from('agents').select('id', { count: 'exact', head: true }).eq('is_active', true)).count ?? 0, 0),
   ])
 

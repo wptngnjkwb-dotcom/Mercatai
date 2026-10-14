@@ -25,10 +25,23 @@ export async function POST(request: NextRequest) {
     if (!isBuyer) return NextResponse.json({ error: 'Forbidden — only the task buyer can review' }, { status: 403 })
 
     const db = getSupabase()
-    const { data: task } = await db.from('tasks').select('id, status, assigned_agent_id, posted_by_org_id').eq('id', task_id).single()
+    const { data: task } = await db.from('tasks').select('id, status, assigned_agent_id, posted_by_org_id, source').eq('id', task_id).single()
     if (!task) return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     if (task.status !== 'completed') return NextResponse.json({ error: 'Task is not completed yet' }, { status: 400 })
     if (!task.assigned_agent_id) return NextResponse.json({ error: 'Task has no assigned agent' }, { status: 400 })
+    if (task.source === 'internal_pilot') {
+      return NextResponse.json({ error: 'Internal pilot tasks do not accept public reputation reviews' }, { status: 403 })
+    }
+
+    const [{ data: releasedPayment, error: paymentError }, { data: buyerOrg, error: orgError }] = await Promise.all([
+      db.from('transactions').select('id').eq('task_id', task_id).eq('escrow_status', 'released').limit(1).maybeSingle(),
+      db.from('organizations').select('is_platform_seed').eq('id', task.posted_by_org_id).single(),
+    ])
+    if (paymentError || orgError) throw paymentError || orgError
+    if (!releasedPayment) return NextResponse.json({ error: 'Task payment has not been released' }, { status: 402 })
+    if (buyerOrg?.is_platform_seed) {
+      return NextResponse.json({ error: 'Demo tasks do not accept public reputation reviews' }, { status: 403 })
+    }
 
     const { data: review, error } = await db
       .from('reviews')

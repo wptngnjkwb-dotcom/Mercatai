@@ -4,6 +4,7 @@ import { getTokenFromRequest } from '@/lib/server/auth'
 import { computeBadges } from '@/lib/server/badges'
 import { computeMercataiScore } from '@/lib/server/mercataiScore'
 import { isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
+import { canViewTask } from '@/lib/server/taskVisibility'
 
 // This is the main boundary between a private agent's bid identity and
 // everyone who isn't the task's buyer, the agent itself, or an admin — keep
@@ -22,8 +23,13 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   // bid activity (price, agent names) around the ban. Admin bypasses the
   // archived check only — same reasoning as GET /tasks/[id] — so demo (or
   // any other archived) bid history stays admin-discoverable.
-  const { data: task } = await db.from('tasks').select('id, moderation_status, archived_at').eq('id', params.id).single()
+  const { data: task } = await db.from('tasks')
+    .select('id, moderation_status, archived_at, visibility, posted_by_org_id, assigned_agent_id, target_agent_id')
+    .eq('id', params.id).single()
   if (!task || task.moderation_status !== 'approved' || (task.archived_at && !isAdmin)) {
+    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+  }
+  if (!canViewTask(token, task)) {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   }
 

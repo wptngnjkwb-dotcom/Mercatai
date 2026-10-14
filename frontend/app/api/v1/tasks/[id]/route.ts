@@ -6,6 +6,7 @@ import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
 import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
 import { fetchDeliveredWorkFor } from '@/lib/server/deliveredWork'
+import { canViewTask } from '@/lib/server/taskVisibility'
 
 // This endpoint is public. Keep both the database projection and the response
 // explicit so contact details, delivered work, embeddings, or future private
@@ -15,7 +16,7 @@ import { fetchDeliveredWorkFor } from '@/lib/server/deliveredWork'
 // moderation_status just above it. Delivered work (delivery_note) is never
 // part of this projection: it is loaded separately, and only for the task's
 // buyer, assigned agent or an admin — see lib/server/deliveredWork.ts.
-const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status,posted_by_org_id,archived_at,archived_reason,stripe_account_requirement'
+const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status,posted_by_org_id,archived_at,archived_reason,stripe_account_requirement,visibility,source,target_agent_id'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
@@ -43,6 +44,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   // directly by id, see archived_at/archived_reason below, to find demo
   // or other archived data without a separate lookup surface.
   if (error || !task || task.moderation_status !== 'approved' || (task.archived_at && !isAdmin)) {
+    return NextResponse.json({ error: 'Task not found' }, { status: 404 })
+  }
+  if (!canViewTask(token, task)) {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   }
 
@@ -107,6 +111,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       execution_authorized: decision.execution_authorized,
       next_action: decision.next_action,
       stripe_account_requirement: task.stripe_account_requirement,
+      visibility: task.visibility,
+      source: task.source,
       // Only ever non-null here for an admin viewing an archived task —
       // anyone else who could see this field at all would already have
       // 404'd above.

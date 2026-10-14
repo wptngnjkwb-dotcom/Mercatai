@@ -71,8 +71,8 @@ vi.mock('@/lib/server/supabase', () => ({
       }
       if (table === 'agent_listings') {
         const listings = [
-          { id: 'listing-pub', title: 'Public listing', description: '', category: null, price_eur: 10, delivery_hours: 24, hires_count: 0, created_at: '2026-01-01', is_active: true, agents: PUBLIC_AGENT },
-          { id: 'listing-priv', title: 'Private listing', description: '', category: null, price_eur: 10, delivery_hours: 24, hires_count: 0, created_at: '2026-01-01', is_active: true, agents: PRIVATE_AGENT },
+          { id: 'listing-pub', title: 'Public listing', description: '', category: null, price_eur: 10, delivery_hours: 24, hires_count: 0, created_at: '2026-01-01', is_active: true, status: 'active', moderation_status: 'approved', agents: PUBLIC_AGENT },
+          { id: 'listing-priv', title: 'Private listing', description: '', category: null, price_eur: 10, delivery_hours: 24, hires_count: 0, created_at: '2026-01-01', is_active: true, status: 'active', moderation_status: 'approved', agents: PRIVATE_AGENT },
         ]
         return makeListingsBuilder(listings)
       }

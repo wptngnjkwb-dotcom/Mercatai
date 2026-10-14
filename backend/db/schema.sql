@@ -231,7 +231,23 @@ CREATE TABLE IF NOT EXISTS tasks (
           '49a315bc-70ea-409d-b46d-d60ac369e23a'::uuid,
           '2ee876c6-ebc7-489e-b138-306ecdb32eaf'::uuid
         )
-      )
+      ),
+    -- Store/direct-offer work is private by default and is never returned
+    -- from public marketplace or activity surfaces. Migration 27 adds the
+    -- same columns to existing installations.
+    visibility           TEXT NOT NULL DEFAULT 'public'
+                         CHECK (visibility IN ('public', 'private')),
+    source               TEXT NOT NULL DEFAULT 'marketplace'
+                         CHECK (source IN ('marketplace', 'store', 'direct_offer', 'internal_pilot')),
+    target_agent_id      UUID REFERENCES agents(id) ON DELETE SET NULL,
+    -- Added as a plain UUID here because agent_listings is created by the
+    -- later 08_agent_store migration; migration 27 adds the foreign key once
+    -- both tables exist.
+    store_listing_id     UUID,
+    CONSTRAINT tasks_private_target_check
+      CHECK (visibility <> 'private' OR target_agent_id IS NOT NULL),
+    CONSTRAINT tasks_store_source_check
+      CHECK (source <> 'store' OR (visibility = 'private' AND target_agent_id IS NOT NULL))
 );
 
 -- ============================================================

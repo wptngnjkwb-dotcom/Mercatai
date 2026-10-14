@@ -13,7 +13,7 @@ import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
 // matter what the tasks table grows in the future. posted_by_org_id is
 // selected only to derive is_demo below (see attachPublicTaskFields) — it
 // must never itself appear in the returned JSON.
-const PUBLIC_TASK_COLUMNS = 'id,title,description,category,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,posted_by_org_id,archived_at'
+const PUBLIC_TASK_COLUMNS = 'id,title,description,category,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,posted_by_org_id,archived_at,visibility,source'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
@@ -59,14 +59,16 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
   }
 
-  const { data, error } = await db
+  const canSeePrivateHistory = token?.tier === 'admin'
+    || (typeof token?.agent_id === 'string' && token.agent_id === agent.id)
+  let taskQuery = db
     .from('tasks')
     .select(PUBLIC_TASK_COLUMNS)
     .eq('assigned_agent_id', agent.id)
     .eq('moderation_status', 'approved')
     .is('archived_at', null)
-    .order('created_at', { ascending: false })
-    .limit(50)
+  if (!canSeePrivateHistory) taskQuery = taskQuery.eq('visibility', 'public')
+  const { data, error } = await taskQuery.order('created_at', { ascending: false }).limit(50)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -122,6 +124,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         funding_status: t.funding_status,
         execution_authorized: decision.execution_authorized,
         next_action: decision.next_action,
+        visibility: raw.visibility,
+        source: raw.source,
       }
     })
     // execution_authorized/next_action (and funding_status) can differ by

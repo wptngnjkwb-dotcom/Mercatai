@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     const wantsArchived = searchParams.get('archived') === 'true' && token?.tier === 'admin'
 
     // Exclude embedding (vector field) from public response
-    let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at,archived_at,archived_reason,stripe_account_requirement')
+    let query = db.from('tasks').select('id,title,description,category,status,budget_min_eur,budget_max_eur,deadline_hours,required_capabilities,required_languages,posted_by_org_id,assigned_agent_id,bidding_closes_at,created_at,archived_at,archived_reason,stripe_account_requirement,visibility,source')
 
     if (wantsArchived) {
       // Admin-only lookup of archived tasks (demo cleanup and any future
@@ -68,6 +68,9 @@ export async function GET(request: NextRequest) {
         // Trust & Safety: only ever surface moderated-and-approved tasks
         // publicly, independent of the workflow status filtering below.
         .eq('moderation_status', 'approved')
+        // Store/direct-offer briefs are counterparty-private. Their UUID,
+        // title, budget and existence must never enter the public catalog.
+        .eq('visibility', 'public')
         // Archived (e.g. the platform's own demo tasks, hidden by the
         // manual frontend/sql/manual_archive_demo_tasks.sql script) is
         // hidden from every default and explicit-status view.
@@ -251,6 +254,9 @@ export async function POST(request: NextRequest) {
         deadline_hours,
         status: 'open',
         stripe_account_requirement: STANDARD_AGENT_LIABILITY,
+        visibility: 'public',
+        source: 'marketplace',
+        target_agent_id: null,
         bidding_closes_at: biddingClosesAt,
         ...(apiClient ? { referred_by_client_id: apiClient.id } : {}),
         buyer_email: normalizedBuyerEmail,
