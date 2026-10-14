@@ -18,10 +18,11 @@ idempotent ten-argument overload.
 - The controlled Standard-account canary is labelled
   `source=internal_pilot` and private.
 - `store_hire_requests` records one immutable result for each
-  `(listing_id, Idempotency-Key)` pair.
+  `(listing_id, Idempotency-Key)` pair and when it first became funded.
 - A new `create_store_hire` overload atomically creates the organization,
-  private task, accepted bid, counter update, idempotency record and audit
-  event.
+  private task, accepted bid, idempotency record and audit event.
+- `record_store_hire_funded` increments the public Store counter exactly once
+  after Stripe funding is confirmed; unfunded requests do not count.
 
 No payment, transaction, Stripe account, payout, delivery or Quality Issue
 row is created or modified by this migration.
@@ -111,7 +112,7 @@ order by grantee, privilege_type;
 select routine_name, specific_name
 from information_schema.routines
 where routine_schema = 'public'
-  and routine_name = 'create_store_hire';
+  and routine_name in ('create_store_hire','record_store_hire_funded');
 
 select id, visibility, source, target_agent_id
 from tasks
@@ -125,6 +126,7 @@ Expected:
 - `store_hire_requests.relrowsecurity=true`,
 - public/anon/authenticated have no table privileges,
 - both rolling-deploy RPC overloads exist,
+- the funded-hire counter RPC exists and is service-role-only,
 - the controlled canary is private and labelled `internal_pilot`.
 
 ## 5. Deploy application
@@ -147,6 +149,13 @@ Then verify:
    private task.
 10. Funding still uses the ordinary Standard protected-payment flow and the
     delivery deadline remains null until funding authorizes execution.
+11. Creating an unfunded hire does not change `hires_count`; confirmed
+    funding increments it once, and webhook/status retries do not increment it
+    again.
+12. Six valid anonymous hire attempts from one IP within an hour cause the
+    sixth request to return HTTP 429 with `Retry-After`.
+13. No global developer `bid.accepted` webhook is emitted for the private
+    Store task.
 
 Use a dedicated private test agent and a low-value controlled task. Do not use
 a real agent's credentials for the smoke test.
@@ -187,6 +196,7 @@ For the first 24 hours watch:
   `POST /api/v1/store/{listingId}/hire`,
 - HTTP 409 idempotency conflicts,
 - HTTP 402 payment-readiness blocks,
+- HTTP 429 rate-limit responses,
 - duplicate Store tasks with the same listing/buyer details,
 - email/webhook duplication,
 - private task IDs appearing in public endpoints.

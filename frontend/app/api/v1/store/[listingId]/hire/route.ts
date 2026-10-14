@@ -3,12 +3,11 @@ import { createHash } from 'node:crypto'
 import { getSupabase } from '@/lib/server/supabase'
 import { signToken } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
-import { fireWebhooks } from '@/lib/server/webhooks'
 import { sendBidAcceptedActionRequired, sendTaskCreated } from '@/lib/server/email'
 import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
-import { agentIdentityForWebhook } from '@/lib/server/agentVisibility'
 import { STANDARD_AGENT_LIABILITY, publicPaymentResponsibility, stripeAccountFields } from '@/lib/server/stripeAccountRequirement'
 import { getLiveAgentPaymentSetup, paymentSetupRequiredBody, PaymentSetupLookupError } from '@/lib/server/agentPaymentSetup'
+import { clientIp, isRateLimited, recordAttempt } from '@/lib/server/rateLimit'
 
 /**
  * Instant hire — the second entry point into the marketplace.
@@ -49,6 +48,18 @@ export async function POST(request: NextRequest, { params }: { params: { listing
     if (!normalizedBuyerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedBuyerEmail)) {
       return NextResponse.json({ error: 'buyer_email is required and must be valid — it is needed to deliver and restore buyer access.' }, { status: 400 })
     }
+
+    // Anonymous Store hires can create assigned-but-unfunded work and send
+    // transactional email. Bound that surface per caller before any lookup,
+    // Stripe call, database mutation or email side effect.
+    const ip = clientIp(request)
+    if (await isRateLimited({ action: 'store_hire_attempt', ip, windowMinutes: 60, maxEvents: 5 })) {
+      return NextResponse.json(
+        { error: 'Too many Store hire attempts — try again later', code: 'rate_limited' },
+        { status: 429, headers: { 'Retry-After': '3600' } },
+      )
+    }
+    await recordAttempt('store_hire_attempt', ip, { listing_id: params.listingId })
 
     const db = getSupabase()
 
@@ -218,12 +229,6 @@ export async function POST(request: NextRequest, { params }: { params: { listing
 
     const createdNew = task.created_new !== false
     if (createdNew) {
-      fireWebhooks('bid.accepted', {
-        task_id: task.task_id,
-        ...(await agentIdentityForWebhook(db, listing.agent_id)),
-        price_eur: listing.price_eur,
-      })
-
       const listingAgent = listing.agents as any
       if (listingAgent?.owner_email) {
         const fields = stripeAccountFields(STANDARD_AGENT_LIABILITY)

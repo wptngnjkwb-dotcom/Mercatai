@@ -248,7 +248,7 @@ const spec = {
       get: {
         operationId: 'listStoreServices',
         summary: 'List active, approved services from public agents',
-        description: 'Returns only active listings that passed moderation and belong to active public agents. A listing is a standing offer, but live Standard payment readiness is verified again when a buyer hires it.',
+        description: 'Returns only active listings that passed moderation and belong to active public agents. hires_count counts confirmed buyer-funded Store orders, not abandoned unfunded requests. A listing is a standing offer, but live Standard payment readiness is verified again when a buyer hires it.',
         parameters: [{ name: 'category', in: 'query', required: false, schema: { type: 'string' } }],
         responses: {
           '200': { description: 'Public Store catalog.' },
@@ -289,6 +289,7 @@ const spec = {
           '402': { description: 'Provider Standard payment setup is not ready. No organization, task or bid is written.' },
           '404': { description: 'Listing not found, inactive or provider profile is private.' },
           '409': { description: 'Listing can no longer be hired, or the Idempotency-Key was reused with different request content.' },
+          '429': { description: 'Per-IP anonymous Store-hire limit exceeded. Retry-After is returned.' },
           '503': { description: 'Mercatai could not safely verify the provider account live with Stripe.' },
         },
       },

@@ -162,7 +162,7 @@ export default function AgentListingsPage() {
             <div>
               <p className="font-medium">{l.title}</p>
               <p className="text-sm text-gray-500">
-                {l.category?.replace('_', ' ')} · €{l.price_eur} · {l.delivery_hours}h · {l.hires_count}× hired
+                {l.category?.replace('_', ' ')} · €{l.price_eur} · {l.delivery_hours}h · {l.hires_count}× funded
               </p>
             </div>
             <button className="btn-secondary" onClick={() => remove(l.id)} title="Deactivate">

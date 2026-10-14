@@ -9,7 +9,12 @@ const insertedOrgs: Record<string, unknown>[] = []
 const rpcCalls: { name: string; args: Record<string, unknown> }[] = []
 let rpcCreatedNew = true
 let existingHireRequest: { task_id: string; request_fingerprint: string } | null = null
-const { getLiveAgentPaymentSetup } = vi.hoisted(() => ({ getLiveAgentPaymentSetup: vi.fn() }))
+const { getLiveAgentPaymentSetup, isRateLimited, recordAttempt, fireWebhooks } = vi.hoisted(() => ({
+  getLiveAgentPaymentSetup: vi.fn(),
+  isRateLimited: vi.fn(async () => false),
+  recordAttempt: vi.fn(async () => {}),
+  fireWebhooks: vi.fn(async () => {}),
+}))
 
 const listingRow = {
   id: 'listing-1',
@@ -80,7 +85,12 @@ const { sendTaskCreated, sendBidAcceptedActionRequired } = vi.hoisted(() => ({
   sendBidAcceptedActionRequired: vi.fn(async () => {}),
 }))
 vi.mock('@/lib/server/email', () => ({ sendTaskCreated, sendBidAcceptedActionRequired }))
-vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks: vi.fn(async () => {}) }))
+vi.mock('@/lib/server/webhooks', () => ({ fireWebhooks }))
+vi.mock('@/lib/server/rateLimit', () => ({
+  clientIp: vi.fn((request: NextRequest) => request.headers.get('x-forwarded-for')),
+  isRateLimited,
+  recordAttempt,
+}))
 vi.mock('@/lib/server/agentPaymentSetup', () => ({
   getLiveAgentPaymentSetup,
   paymentSetupRequiredBody: vi.fn((result: any) => ({ code: 'agent_payment_setup_required', payment_setup_status: result.status, next_action: result.nextAction })),
@@ -97,6 +107,10 @@ beforeEach(() => {
   sendTaskCreated.mockClear()
   sendBidAcceptedActionRequired.mockClear()
   getLiveAgentPaymentSetup.mockReset()
+  isRateLimited.mockReset()
+  isRateLimited.mockResolvedValue(false)
+  recordAttempt.mockClear()
+  fireWebhooks.mockClear()
   getLiveAgentPaymentSetup.mockResolvedValue({ ready: true, status: 'ready', nextAction: 'ready_to_bid', accountId: 'acct_standard_test', country: 'CZ', onboardingEndpoint: '/api/v1/agents/agent-1/stripe-onboard', reason: null })
 })
 
@@ -117,6 +131,22 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     expect(response.status).toBe(400)
     expect(rpcCalls).toHaveLength(0)
     expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
+  })
+
+  it('rate-limits anonymous Store hire attempts before lookup or side effects', async () => {
+    isRateLimited.mockResolvedValueOnce(true)
+    const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
+    const response = await POST(new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
+      method: 'POST',
+      headers: { ...hireHeaders, 'x-forwarded-for': '203.0.113.9' },
+      body: JSON.stringify({ buyer_email: 'buyer@example.com' }),
+    }), { params: { listingId: 'listing-1' } })
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get('retry-after')).toBe('3600')
+    expect(recordAttempt).not.toHaveBeenCalled()
+    expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
+    expect(rpcCalls).toHaveLength(0)
   })
 
   it('rejects a provider without ready Standard payments before moderation or any hire write', async () => {
@@ -160,6 +190,7 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     expect(sendBidAcceptedActionRequired).toHaveBeenCalledWith(expect.objectContaining({
       to: 'operator@example.com', taskId: 'task-1', agentId: 'agent-1', onboardingRequired: true,
     }))
+    expect(fireWebhooks).not.toHaveBeenCalled()
   })
 
   it('blocks a listing whose content fails moderation, creating nothing', async () => {

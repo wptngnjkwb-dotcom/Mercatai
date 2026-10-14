@@ -23,7 +23,8 @@ UPDATE agent_listings
        moderation_status = CASE WHEN is_active THEN 'approved' ELSE moderation_status END,
        moderated_at = COALESCE(moderated_at, created_at, NOW()),
        published_at = CASE WHEN is_active THEN COALESCE(published_at, created_at, NOW()) ELSE published_at END,
-       updated_at = COALESCE(updated_at, created_at, NOW());
+       updated_at = COALESCE(updated_at, created_at, NOW())
+ WHERE moderated_at IS NULL;
 
 DO $$
 BEGIN
@@ -111,6 +112,7 @@ CREATE TABLE IF NOT EXISTS store_hire_requests (
   idempotency_key TEXT NOT NULL,
   request_fingerprint TEXT NOT NULL,
   task_id UUID NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE RESTRICT,
+  funded_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT store_hire_requests_key_check CHECK (
     idempotency_key ~ '^[A-Za-z0-9._:-]{16,200}$'
@@ -121,6 +123,9 @@ CREATE TABLE IF NOT EXISTS store_hire_requests (
   CONSTRAINT store_hire_requests_listing_key_unique UNIQUE (listing_id, idempotency_key)
 );
 
+ALTER TABLE store_hire_requests
+  ADD COLUMN IF NOT EXISTS funded_at TIMESTAMPTZ;
+
 ALTER TABLE store_hire_requests ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE store_hire_requests FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT ON TABLE store_hire_requests TO service_role;
@@ -128,7 +133,8 @@ GRANT SELECT, INSERT ON TABLE store_hire_requests TO service_role;
 -- Idempotent overload. A transaction-scoped advisory lock serializes two
 -- simultaneous requests using the same (listing,key) tuple before either can
 -- create an organization/task/bid. Replays return the original task and never
--- increment hires_count or repeat an atomic audit event.
+-- repeat an atomic audit event. hires_count is deliberately not incremented
+-- until Stripe confirms funding (record_store_hire_funded below).
 CREATE OR REPLACE FUNCTION create_store_hire(
   p_listing_id UUID,
   p_expected_agent_id UUID,
@@ -233,9 +239,6 @@ BEGIN
           v_listing.delivery_hours,
           'Instant hire via Agent Store listing "' || v_listing.title || '"',
           1, 'accepted');
-  UPDATE agent_listings
-     SET hires_count = hires_count + 1, updated_at = CLOCK_TIMESTAMP()
-   WHERE id = v_listing.id;
   INSERT INTO store_hire_requests(listing_id, idempotency_key, request_fingerprint, task_id)
   VALUES (v_listing.id, p_idempotency_key, p_request_fingerprint, v_task_id);
   INSERT INTO audit_logs(action, resource_type, resource_id, agent_id, details)
@@ -253,3 +256,61 @@ REVOKE ALL ON FUNCTION create_store_hire(UUID, UUID, TEXT, TEXT, TEXT, INTEGER, 
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION create_store_hire(UUID, UUID, TEXT, TEXT, TEXT, INTEGER, TEXT[], TEXT, TEXT, TEXT)
   TO service_role;
+
+-- Count only buyer-funded Store orders. A row lock on the durable hire
+-- request makes this idempotent across webhook/status retries and concurrent
+-- payment reconciliation. Non-Store tasks return FALSE without side effects.
+CREATE OR REPLACE FUNCTION record_store_hire_funded(
+  p_task_id UUID,
+  p_transaction_id UUID
+) RETURNS BOOLEAN AS $$
+DECLARE
+  v_request store_hire_requests%ROWTYPE;
+  v_task tasks%ROWTYPE;
+  v_tx transactions%ROWTYPE;
+BEGIN
+  SELECT r.* INTO v_request
+    FROM store_hire_requests r
+   WHERE r.task_id = p_task_id
+   FOR UPDATE;
+  IF NOT FOUND THEN RETURN FALSE; END IF;
+
+  SELECT t.* INTO v_task FROM tasks t WHERE t.id = p_task_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'Store task not found';
+  END IF;
+  SELECT tr.* INTO v_tx FROM transactions tr WHERE tr.id = p_transaction_id FOR UPDATE;
+  IF NOT FOUND
+     OR v_task.source <> 'store'
+     OR v_task.store_listing_id IS DISTINCT FROM v_request.listing_id
+     OR v_tx.task_id IS DISTINCT FROM v_task.id
+     OR v_tx.agent_id IS DISTINCT FROM v_task.assigned_agent_id
+     OR v_tx.buyer_org_id IS DISTINCT FROM v_task.posted_by_org_id
+     OR v_tx.escrow_status NOT IN ('held', 'released') THEN
+    RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'Store funding context does not match';
+  END IF;
+
+  IF v_request.funded_at IS NOT NULL THEN RETURN FALSE; END IF;
+
+  UPDATE store_hire_requests SET funded_at = CLOCK_TIMESTAMP()
+   WHERE id = v_request.id AND funded_at IS NULL;
+  IF NOT FOUND THEN RETURN FALSE; END IF;
+
+  UPDATE agent_listings
+     SET hires_count = hires_count + 1, updated_at = CLOCK_TIMESTAMP()
+   WHERE id = v_request.listing_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'Store listing not found';
+  END IF;
+
+  INSERT INTO audit_logs(action, resource_type, resource_id, agent_id, details)
+  VALUES ('store_hire_funded', 'task', v_task.id, v_task.assigned_agent_id,
+          jsonb_build_object('listing_id', v_request.listing_id,
+                             'transaction_id', v_tx.id));
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public;
+
+REVOKE ALL ON FUNCTION record_store_hire_funded(UUID, UUID)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION record_store_hire_funded(UUID, UUID) TO service_role;

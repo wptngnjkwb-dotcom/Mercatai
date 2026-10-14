@@ -21,6 +21,8 @@ type Row = Record<string, any>
 let tables: Record<string, Row[]>
 let dbCalls: string[]
 let failNextTaskTransition = false
+let storeHireFunded = false
+let fundedStoreHireCount = 0
 let currentStripeIntent: Row = { id: 'pi_1', status: 'requires_payment_method' }
 
 function resetDb() {
@@ -82,6 +84,17 @@ function makeDb() {
           }],
           error: null,
         }
+      }
+      if (name === 'record_store_hire_funded') {
+        const task = tables.tasks.find((row) => row.id === args.p_task_id)
+        const tx = tables.transactions.find((row) => row.id === args.p_transaction_id)
+        if (!task || !tx || task.source !== 'store' || tx.escrow_status !== 'held') {
+          return { data: null, error: { code: 'P0001', message: 'Store funding context does not match' } }
+        }
+        if (storeHireFunded) return { data: false, error: null }
+        storeHireFunded = true
+        fundedStoreHireCount += 1
+        return { data: true, error: null }
       }
       if (name !== 'invalidate_task_funding') throw new Error(`unexpected rpc ${name}`)
       const tx = tables.transactions.find((row) => row.id === args.p_transaction_id)
@@ -238,6 +251,8 @@ beforeEach(() => {
   resetDb()
   auditLog.mockClear()
   failNextTaskTransition = false
+  storeHireFunded = false
+  fundedStoreHireCount = 0
   constructEvent.mockClear()
   retrieveDispute.mockClear()
   retrieveCharge.mockClear()
@@ -376,6 +391,17 @@ describe('idempotent redelivery', () => {
     expect(tables.transactions[0].escrow_status).toBe('held') // unchanged, not double-applied
     expect(auditLog.mock.calls.length).toBe(auditCallsAfterFirst) // no duplicate audit entry
     expect(tables.tasks[0].delivery_deadline_at).toBe(deadlineAfterFirst)
+  })
+
+  it('counts a Store hire only after confirmed funding and only once across retries', async () => {
+    tables.tasks[0].source = 'store'
+    const event = paymentIntentEvent('evt_store_funded', 'payment_intent.succeeded', 'succeeded')
+
+    expect(fundedStoreHireCount).toBe(0)
+    expect((await POST(webhookRequest(event))).status).toBe(200)
+    expect(fundedStoreHireCount).toBe(1)
+    expect((await POST(webhookRequest(event))).status).toBe(200)
+    expect(fundedStoreHireCount).toBe(1)
   })
 
   it('a payout_failed-style redelivery after the transaction already succeeded does not flip it back to failed', async () => {

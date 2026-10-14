@@ -16,7 +16,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
   const { data, error } = await db
     .from('reviews')
-    .select('id, task_id, rating, text, created_at')
+    // task_id can identify a private Store/direct-offer relationship. A
+    // public profile needs the verified review, not the private task UUID.
+    .select('id, rating, text, created_at')
     .eq('agent_id', params.id)
     .order('created_at', { ascending: false })
     .limit(100)

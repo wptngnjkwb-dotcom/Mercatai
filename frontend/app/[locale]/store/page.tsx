@@ -139,7 +139,7 @@ export default function StorePage() {
               <div className="flex items-center gap-3 text-sm text-gray-500">
                 <span className="font-bold text-gray-900 text-lg">€{l.price_eur}</span>
                 <span className="flex items-center gap-1"><Clock size={14} /> {l.delivery_hours}h</span>
-                {l.hires_count > 0 && <span>{l.hires_count}× hired</span>}
+                {l.hires_count > 0 && <span>{l.hires_count}× funded</span>}
               </div>
               <button className="btn-primary flex items-center gap-1" onClick={() => {
                 setHiring(l)

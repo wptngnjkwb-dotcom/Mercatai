@@ -7,6 +7,7 @@ const migration = readFileSync(resolve(root, 'frontend/sql/27_store_hardening.sq
 const compose = readFileSync(resolve(root, 'deploy/docker-compose.yml'), 'utf8')
 const publicFields = readFileSync(resolve(root, 'frontend/lib/server/publicTaskFields.ts'), 'utf8')
 const reviewsRoute = readFileSync(resolve(root, 'frontend/app/api/v1/reviews/route.ts'), 'utf8')
+const publicAgentReviewsRoute = readFileSync(resolve(root, 'frontend/app/api/v1/agents/[id]/reviews/route.ts'), 'utf8')
 
 describe('migration 27 — Agent Store hardening', () => {
   it('runs after agent-access migration on fresh self-hosted installs', () => {
@@ -32,6 +33,7 @@ describe('migration 27 — Agent Store hardening', () => {
     expect(migration).toContain('ALTER TABLE store_hire_requests ENABLE ROW LEVEL SECURITY')
     expect(migration).toContain('REVOKE ALL ON TABLE store_hire_requests FROM PUBLIC, anon, authenticated')
     expect(migration).toContain('GRANT SELECT, INSERT ON TABLE store_hire_requests TO service_role')
+    expect(migration).toContain('funded_at TIMESTAMPTZ')
   })
 
   it('serializes duplicate hires and replays the original private task', () => {
@@ -45,6 +47,21 @@ describe('migration 27 — Agent Store hardening', () => {
     expect(fn).toContain('v_agent.profile_visibility <> \'public\'')
     expect(fn).toContain('INSERT INTO store_hire_requests')
     expect(fn).toContain('created_new BOOLEAN')
+    expect(fn).not.toContain('SET hires_count = hires_count + 1')
+  })
+
+  it('counts Store popularity only after confirmed funding and idempotently', () => {
+    const fn = migration.match(/CREATE OR REPLACE FUNCTION record_store_hire_funded\([\s\S]*?\$\$ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public;/)?.[0] ?? ''
+    expect(fn).toContain('v_tx.escrow_status NOT IN (\'held\', \'released\')')
+    expect(fn).toContain('v_request.funded_at IS NOT NULL')
+    expect(fn).toContain('SET hires_count = hires_count + 1')
+    expect(fn).toContain("VALUES ('store_hire_funded'")
+    expect(migration).toContain('REVOKE ALL ON FUNCTION record_store_hire_funded(UUID, UUID)')
+    expect(migration).toContain('GRANT EXECUTE ON FUNCTION record_store_hire_funded(UUID, UUID) TO service_role')
+  })
+
+  it('does not overwrite an already-moderated listing when the migration is rerun', () => {
+    expect(migration).toContain('WHERE moderated_at IS NULL;')
   })
 
   it('keeps the idempotent RPC unavailable to public database roles', () => {
@@ -58,5 +75,10 @@ describe('migration 27 — Agent Store hardening', () => {
     expect(migration).toContain("'ddf5de51-7e06-473c-8a64-d360eef1de55'::uuid")
     expect(publicFields).toContain("sourceByTask.get(taskId) === 'internal_pilot'")
     expect(reviewsRoute).toContain("task.source === 'internal_pilot'")
+  })
+
+  it('does not expose a private task UUID through public agent reviews', () => {
+    expect(publicAgentReviewsRoute).toContain(".select('id, rating, text, created_at')")
+    expect(publicAgentReviewsRoute).not.toContain(".select('id, task_id, rating, text, created_at')")
   })
 })

@@ -117,7 +117,7 @@ async function ensureFundedTaskStarted(
 ): Promise<void> {
   const { data: task, error: taskError } = await db
     .from('tasks')
-    .select('id,status,delivery_deadline_at,assigned_agent_id,posted_by_org_id,archived_at,moderation_status,organizations!posted_by_org_id(is_platform_seed)')
+    .select('id,status,delivery_deadline_at,assigned_agent_id,posted_by_org_id,archived_at,moderation_status,source,organizations!posted_by_org_id(is_platform_seed)')
     .eq('id', tx.task_id)
     .maybeSingle()
   if (taskError) throw taskError
@@ -129,9 +129,24 @@ async function ensureFundedTaskStarted(
     throw new Error('Funded transaction does not match task assignment')
   }
 
+  // Store popularity counts confirmed funded orders, not anonymous requests.
+  // The SQL function is idempotent, so a retry can repair a task transition
+  // that committed before this counter update did.
+  const recordFundedStoreHire = async () => {
+    if (task.source !== 'store') return
+    const { error } = await db.rpc('record_store_hire_funded', {
+      p_task_id: task.id,
+      p_transaction_id: tx.id,
+    })
+    if (error) throw new Error(`Failed to record funded Store hire: ${error.message}`)
+  }
+
   // A later workflow state proves the assigned -> in_progress transition
   // already happened. An exact in_progress state is likewise idempotent.
-  if (['in_progress', 'review', 'completed'].includes(task.status)) return
+  if (['in_progress', 'review', 'completed'].includes(task.status)) {
+    await recordFundedStoreHire()
+    return
+  }
   if (task.status !== 'assigned') {
     throw new Error(`Funded task cannot start from status ${task.status}`)
   }
@@ -174,8 +189,11 @@ async function ensureFundedTaskStarted(
     if (!currentTask || !['in_progress', 'review', 'completed'].includes(currentTask.status)) {
       throw new Error('Funded task transition was not confirmed')
     }
+    await recordFundedStoreHire()
     return
   }
+
+  await recordFundedStoreHire()
 
   await auditLog({
     action: 'payment_funded',

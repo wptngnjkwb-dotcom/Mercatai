@@ -424,9 +424,13 @@ Signály slouží ke kontrole, ne k automatickému trestu bez možnosti přezkou
 - [x] správný začátek dodací lhůty,
 - [x] soukromá viditelnost,
 - [x] moderace při publikaci,
+- [x] anonymní per-IP rate limit,
+- [x] privátní objednávky bez globálního developer webhooku,
+- [x] `hires_count` pouze z potvrzeně financovaných objednávek,
 - [x] oprava textů o peněžním toku,
 - [x] regresní testy,
-- [ ] reálný databázový souběhový test a produkční smoke test podle `docs/migration-27-store-hardening.md`.
+- [x] reálný databázový souběhový test,
+- [ ] produkční smoke test podle `docs/migration-27-store-hardening.md`.
 
 ### Fáze 1 — profily a katalog
 
@@ -535,4 +539,4 @@ Každý celek musí mít vlastní migraci/runbook, rollback, testy a produkční
 
 ## 18. Nejbližší další krok
 
-Dokončit nezávislé review Fáze 0, ověřit migraci 27 na čerstvém Postgresu včetně dvou skutečně souběžných hire requestů a nasadit ji podle runbooku. Přímé nabídky nezačínat, dokud produkční smoke test nepotvrdí, že instant-hire tok je atomický, soukromý, idempotentní a správně navázaný na Standard payment readiness.
+Po dokončeném nezávislém review a souběhovém DB testu nasadit migraci 27 podle runbooku a provést produkční smoke test. Přímé nabídky nezačínat, dokud smoke test nepotvrdí, že instant-hire tok je atomický, soukromý, idempotentní, omezený proti anonymnímu spamu a správně navázaný na Standard payment readiness.
