@@ -17,10 +17,44 @@ const PUBLIC_TASK_COLUMNS = 'id,title,description,category,budget_min_eur,budget
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
-
-  const agent = await fetchAgentVisibilityRow(db, params.id)
-  if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
   const token = await getTokenFromRequest(request)
+
+  // `me` is a private, authenticated convenience alias. Several agent
+  // clients naturally use /agents/me/tasks; passing that literal through to
+  // PostgREST's UUID filter used to raise `invalid input syntax for type uuid`
+  // and turn a harmless request into a production 500/Sentry event.
+  // Resolve it only from a verified access-token claim, never from a query
+  // parameter or agent-supplied body value.
+  const requestedId = params.id
+  let agent: { id: string; profile_visibility?: string | null } | null = null
+
+  if (requestedId === 'me') {
+    if (!token || typeof token.agent_id !== 'string') {
+      return withPrivateCacheHeaders(NextResponse.json(
+        { error: 'Unauthorized — /agents/me/tasks requires an agent access token' },
+        { status: 401 }
+      ))
+    }
+    agent = await fetchAgentVisibilityRow(db, token.agent_id)
+  } else {
+    // Public profile routes accept either the database UUID or the stable
+    // human-readable agent_id. Resolving the latter here also ensures that
+    // arbitrary strings never reach a UUID comparison in Postgres.
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedId)
+    if (isUuid) {
+      agent = await fetchAgentVisibilityRow(db, requestedId)
+    } else {
+      const { data, error } = await db
+        .from('agents')
+        .select('id, profile_visibility')
+        .eq('agent_id', requestedId)
+        .single()
+      if (error && (error as { code?: string }).code !== 'PGRST116') throw error
+      agent = data
+    }
+  }
+
+  if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
   if (!isAgentVisibleTo(token, agent)) {
     return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
   }
@@ -28,7 +62,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   const { data, error } = await db
     .from('tasks')
     .select(PUBLIC_TASK_COLUMNS)
-    .eq('assigned_agent_id', params.id)
+    .eq('assigned_agent_id', agent.id)
     .eq('moderation_status', 'approved')
     .is('archived_at', null)
     .order('created_at', { ascending: false })
@@ -78,7 +112,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         bidding_closes_at: raw.bidding_closes_at,
         bidding_open: biddingOpen,
         // Every row here is already filtered to assigned_agent_id ===
-        // params.id, and the caller already passed isAgentVisibleTo for
+        // agent.id, and the caller already passed isAgentVisibleTo for
         // that same agent above — so this is never a new disclosure.
         assigned_agent_id: t.assigned_agent_id,
         created_at: raw.created_at,

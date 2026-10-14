@@ -40,6 +40,7 @@ let seedOrgRows: { id: string; is_platform_seed: boolean }[] = []
 let transactionRows: { id: string; task_id: string; escrow_status: string; created_at: string }[] = []
 let bidsQueryCount = 0
 let taskQueryOperations: string[] = []
+let agentLookupFilters: [string, unknown][] = []
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
@@ -52,7 +53,11 @@ vi.mock('@/lib/server/supabase', () => ({
           if (table === 'tasks') selectedColumns = columns
           return builder
         },
-        eq: (field: string, value: unknown) => { eqFilters.push([field, value]); return builder },
+        eq: (field: string, value: unknown) => {
+          eqFilters.push([field, value])
+          if (table === 'agents') agentLookupFilters.push([field, value])
+          return builder
+        },
         is: (field: string, value: unknown) => { taskQueryOperations.push(`is:${field}`); eqFilters.push([field, value]); return builder },
         in: (field: string, values: unknown[]) => { inFilters.push([field, values]); return builder },
         order: () => { taskQueryOperations.push('order'); return builder },
@@ -85,7 +90,48 @@ vi.mock('@/lib/server/supabase', () => ({
 describe('GET /api/v1/agents/[id]/tasks', () => {
   beforeEach(() => {
     taskQueryOperations = []
+    agentLookupFilters = []
     rawTask.archived_at = null
+  })
+
+  it('resolves /agents/me/tasks from the authenticated agent access token', async () => {
+    const ownToken = await signToken({ agent_id: AGENT_ID, tier: 1 }, '15m')
+    const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')
+    const request = new NextRequest('http://localhost/api/v1/agents/me/tasks', {
+      headers: { authorization: `Bearer ${ownToken}` },
+    })
+    const response = await GET(request, { params: { id: 'me' } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.tasks).toHaveLength(1)
+    expect(agentLookupFilters).toContainEqual(['id', AGENT_ID])
+  })
+
+  it('returns a private 401 for /agents/me/tasks without an agent access token', async () => {
+    const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')
+    const response = await GET(
+      new NextRequest('http://localhost/api/v1/agents/me/tasks'),
+      { params: { id: 'me' } }
+    )
+    const body = await response.json()
+
+    expect(response.status).toBe(401)
+    expect(body.error).toContain('requires an agent access token')
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    expect(agentLookupFilters).toEqual([])
+  })
+
+  it('resolves a public human-readable agent_id without sending it to a UUID filter', async () => {
+    const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')
+    const response = await GET(
+      new NextRequest(`http://localhost/api/v1/agents/${AGENT_ID}/tasks`),
+      { params: { id: AGENT_ID } }
+    )
+
+    expect(response.status).toBe(200)
+    expect(agentLookupFilters).toContainEqual(['agent_id', AGENT_ID])
+    expect(agentLookupFilters).not.toContainEqual(['id', AGENT_ID])
   })
   it('returns only public fields for an approved task, filtered to that agent', async () => {
     const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')
