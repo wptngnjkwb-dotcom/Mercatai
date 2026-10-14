@@ -27,6 +27,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   // parameter or agent-supplied body value.
   const requestedId = params.id
   let agent: { id: string; profile_visibility?: string | null } | null = null
+  let effectiveToken = token
 
   if (requestedId === 'me') {
     if (!token || typeof token.agent_id !== 'string') {
@@ -35,7 +36,33 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         { status: 401 }
       ))
     }
-    agent = await fetchAgentVisibilityRow(db, token.agent_id)
+    if (token.role === 'oauth' && (!Array.isArray(token.scopes) || !token.scopes.includes('tasks:read'))) {
+      return withPrivateCacheHeaders(NextResponse.json(
+        { error: 'Forbidden — OAuth token requires tasks:read scope' },
+        { status: 403 }
+      ))
+    }
+
+    // First-party agent tokens carry the database UUID in agent_id. OAuth
+    // access tokens intentionally carry the stable public slug there and
+    // the UUID in agent_uuid. Never pass the slug into a UUID filter (the
+    // old behavior produced a Postgres 22P02 and a production 500).
+    const tokenAgentUuid = token.role === 'oauth' && typeof token.agent_uuid === 'string'
+      ? token.agent_uuid
+      : token.agent_id
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tokenAgentUuid)
+    if (isUuid) {
+      agent = await fetchAgentVisibilityRow(db, tokenAgentUuid)
+    } else {
+      const { data, error } = await db
+        .from('agents')
+        .select('id, profile_visibility')
+        .eq('agent_id', token.agent_id)
+        .single()
+      if (error && (error as { code?: string }).code !== 'PGRST116') throw error
+      agent = data
+    }
+    if (agent) effectiveToken = { ...token, agent_id: agent.id }
   } else {
     // Public profile routes accept either the database UUID or the stable
     // human-readable agent_id. Resolving the latter here also ensures that
@@ -55,12 +82,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 
   if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
-  if (!isAgentVisibleTo(token, agent)) {
+  if (!isAgentVisibleTo(effectiveToken, agent)) {
     return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
   }
 
-  const canSeePrivateHistory = token?.tier === 'admin'
-    || (typeof token?.agent_id === 'string' && token.agent_id === agent.id)
+  const canSeePrivateHistory = effectiveToken?.tier === 'admin'
+    || (typeof effectiveToken?.agent_id === 'string' && effectiveToken.agent_id === agent.id)
   let taskQuery = db
     .from('tasks')
     .select(PUBLIC_TASK_COLUMNS)
@@ -75,14 +102,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   const rawRows = data ?? []
 
   try {
-    const callerAgentId = callerAgentIdFromToken(token)
+    const callerAgentId = callerAgentIdFromToken(effectiveToken)
     // One batched query for the whole page (never one per task) — see
     // fetchAgentBidTaskIds's own doc comment. In practice this is always
     // empty here (every row is already assigned, never 'open'/'bidding'),
     // but computing it the same batched way keeps this endpoint's decision
     // identical in shape to GET /tasks and GET /tasks/[id].
     const [decorated, bidTaskIds] = await Promise.all([
-      attachPublicTaskFields(db, rawRows, token),
+      attachPublicTaskFields(db, rawRows, effectiveToken),
       fetchAgentBidTaskIds(db, callerAgentId, rawRows.map((t: any) => t.id)),
     ])
 

@@ -133,7 +133,7 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
   })
 
-  it('rate-limits anonymous Store hire attempts before lookup or side effects', async () => {
+  it('rate-limits new anonymous Store hire attempts before payment lookup or side effects', async () => {
     isRateLimited.mockResolvedValueOnce(true)
     const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
     const response = await POST(new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
@@ -247,6 +247,9 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     sendBidAcceptedActionRequired.mockClear()
     getLiveAgentPaymentSetup.mockReset()
     getLiveAgentPaymentSetup.mockRejectedValue(new Error('Stripe unavailable during retry'))
+    isRateLimited.mockReset()
+    isRateLimited.mockResolvedValue(true)
+    recordAttempt.mockClear()
     const response = await POST(new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
       method: 'POST',
       headers: hireHeaders,
@@ -256,6 +259,8 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
 
     expect(response.status).toBe(200)
     expect(body).toMatchObject({ task_id: 'task-1', idempotent_replay: true, visibility: 'private', source: 'store' })
+    expect(isRateLimited).not.toHaveBeenCalled()
+    expect(recordAttempt).not.toHaveBeenCalled()
     expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
     expect(rpcCalls).toHaveLength(1)
     expect(sendTaskCreated).not.toHaveBeenCalled()

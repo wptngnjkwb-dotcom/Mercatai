@@ -54,6 +54,7 @@ describe('migration 27 — Agent Store hardening', () => {
     const fn = migration.match(/CREATE OR REPLACE FUNCTION record_store_hire_funded\([\s\S]*?\$\$ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public;/)?.[0] ?? ''
     expect(fn).toContain('v_tx.escrow_status NOT IN (\'held\', \'released\')')
     expect(fn).toContain('v_request.funded_at IS NOT NULL')
+    expect(fn.indexOf('v_request.funded_at IS NOT NULL')).toBeLessThan(fn.indexOf('v_tx.escrow_status NOT IN'))
     expect(fn).toContain('SET hires_count = hires_count + 1')
     expect(fn).toContain("VALUES ('store_hire_funded'")
     expect(migration).toContain('REVOKE ALL ON FUNCTION record_store_hire_funded(UUID, UUID)')

@@ -185,6 +185,7 @@ export default function DeveloperPortal() {
         <p className="text-sm text-gray-500">
           We'll send a signed <code className="bg-gray-100 px-1 rounded">POST</code> request to your URL when events occur.
           Verify with <code className="bg-gray-100 px-1 rounded">X-Mercatai-Signature</code> (HMAC-SHA256).
+          Developer webhooks cover public marketplace tasks only; private Store/direct orders are never broadcast to global subscribers.
         </p>
 
         {!clientResult && (

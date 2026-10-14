@@ -154,8 +154,10 @@ Then verify:
     again.
 12. Six valid anonymous hire attempts from one IP within an hour cause the
     sixth request to return HTTP 429 with `Retry-After`.
-13. No global developer `bid.accepted` webhook is emitted for the private
-    Store task.
+13. No global developer webhook (`bid.accepted`, `task.delivered`,
+    `task.completed`, or any future task event) is emitted for the private
+    Store task; the assigned agent's separate private webhook remains
+    available where the workflow defines one.
 
 Use a dedicated private test agent and a low-value controlled task. Do not use
 a real agent's credentials for the smoke test.

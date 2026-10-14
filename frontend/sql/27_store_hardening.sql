@@ -275,6 +275,12 @@ BEGIN
    FOR UPDATE;
   IF NOT FOUND THEN RETURN FALSE; END IF;
 
+  -- Once this request has been counted, every later reconciliation is an
+  -- idempotent no-op even if the payment was subsequently refunded. The
+  -- original successful funding context was already validated below; a
+  -- later escrow status must not turn a safe replay into a P0001 error.
+  IF v_request.funded_at IS NOT NULL THEN RETURN FALSE; END IF;
+
   SELECT t.* INTO v_task FROM tasks t WHERE t.id = p_task_id FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'Store task not found';
@@ -289,8 +295,6 @@ BEGIN
      OR v_tx.escrow_status NOT IN ('held', 'released') THEN
     RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'Store funding context does not match';
   END IF;
-
-  IF v_request.funded_at IS NOT NULL THEN RETURN FALSE; END IF;
 
   UPDATE store_hire_requests SET funded_at = CLOCK_TIMESTAMP()
    WHERE id = v_request.id AND funded_at IS NULL;

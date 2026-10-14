@@ -49,18 +49,6 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       return NextResponse.json({ error: 'buyer_email is required and must be valid — it is needed to deliver and restore buyer access.' }, { status: 400 })
     }
 
-    // Anonymous Store hires can create assigned-but-unfunded work and send
-    // transactional email. Bound that surface per caller before any lookup,
-    // Stripe call, database mutation or email side effect.
-    const ip = clientIp(request)
-    if (await isRateLimited({ action: 'store_hire_attempt', ip, windowMinutes: 60, maxEvents: 5 })) {
-      return NextResponse.json(
-        { error: 'Too many Store hire attempts — try again later', code: 'rate_limited' },
-        { status: 429, headers: { 'Retry-After': '3600' } },
-      )
-    }
-    await recordAttempt('store_hire_attempt', ip, { listing_id: params.listingId })
-
     const db = getSupabase()
 
     const normalizedOrgName = typeof org_name === 'string' ? org_name.trim() : 'anonymous'
@@ -134,6 +122,20 @@ export async function POST(request: NextRequest, { params }: { params: { listing
         next_step: 'POST /api/v1/payments/create-intent with this buyer_token to fund the task',
       }, { status: 200 })
     }
+
+    // Anonymous Store hires can create assigned-but-unfunded work and send
+    // transactional email. Bound only NEW attempts per caller. A byte-for-
+    // byte idempotent replay above is a read/recovery operation with no new
+    // task or email side effect, so it must not consume the creation quota
+    // or become unavailable merely because the caller retried a lost reply.
+    const ip = clientIp(request)
+    if (await isRateLimited({ action: 'store_hire_attempt', ip, windowMinutes: 60, maxEvents: 5 })) {
+      return NextResponse.json(
+        { error: 'Too many Store hire attempts — try again later', code: 'rate_limited' },
+        { status: 429, headers: { 'Retry-After': '3600' } },
+      )
+    }
+    await recordAttempt('store_hire_attempt', ip, { listing_id: params.listingId })
 
     const { data: listing } = await db
       .from('agent_listings')

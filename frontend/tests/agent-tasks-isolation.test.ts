@@ -4,8 +4,9 @@ import { signToken } from '@/lib/server/auth'
 
 process.env.JWT_SECRET_KEY = 'test-secret-for-agent-tasks-isolation-32ch'
 
-const AGENT_ID = 'agent-with-history'
-const OTHER_AGENT_ID = 'agent-other'
+const AGENT_ID = '11111111-1111-4111-8111-111111111111'
+const AGENT_SLUG = 'agent-with-history'
+const OTHER_AGENT_ID = '22222222-2222-4222-8222-222222222222'
 
 const rawTask = {
   id: 'task-1',
@@ -110,6 +111,42 @@ describe('GET /api/v1/agents/[id]/tasks', () => {
     expect(agentLookupFilters).toContainEqual(['id', AGENT_ID])
   })
 
+  it('resolves /agents/me/tasks from an OAuth access token without sending its slug to a UUID filter', async () => {
+    const oauthToken = await signToken({
+      role: 'oauth',
+      agent_id: 'stable-agent-slug',
+      agent_uuid: AGENT_ID,
+      scopes: ['tasks:read'],
+    }, '1h')
+    const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/agents/me/tasks', {
+      headers: { authorization: `Bearer ${oauthToken}` },
+    }), { params: { id: 'me' } })
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.tasks).toHaveLength(1)
+    expect(agentLookupFilters).toContainEqual(['id', AGENT_ID])
+    expect(agentLookupFilters).not.toContainEqual(['id', 'stable-agent-slug'])
+  })
+
+  it('rejects an OAuth /agents/me/tasks request without tasks:read scope', async () => {
+    const oauthToken = await signToken({
+      role: 'oauth',
+      agent_id: 'stable-agent-slug',
+      agent_uuid: AGENT_ID,
+      scopes: ['profile:read'],
+    }, '1h')
+    const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/agents/me/tasks', {
+      headers: { authorization: `Bearer ${oauthToken}` },
+    }), { params: { id: 'me' } })
+
+    expect(response.status).toBe(403)
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    expect(agentLookupFilters).toEqual([])
+  })
+
   it('returns a private 401 for /agents/me/tasks without an agent access token', async () => {
     const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')
     const response = await GET(
@@ -127,13 +164,13 @@ describe('GET /api/v1/agents/[id]/tasks', () => {
   it('resolves a public human-readable agent_id without sending it to a UUID filter', async () => {
     const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')
     const response = await GET(
-      new NextRequest(`http://localhost/api/v1/agents/${AGENT_ID}/tasks`),
-      { params: { id: AGENT_ID } }
+      new NextRequest(`http://localhost/api/v1/agents/${AGENT_SLUG}/tasks`),
+      { params: { id: AGENT_SLUG } }
     )
 
     expect(response.status).toBe(200)
-    expect(agentLookupFilters).toContainEqual(['agent_id', AGENT_ID])
-    expect(agentLookupFilters).not.toContainEqual(['id', AGENT_ID])
+    expect(agentLookupFilters).toContainEqual(['agent_id', AGENT_SLUG])
+    expect(agentLookupFilters).not.toContainEqual(['id', AGENT_SLUG])
   })
   it('returns only public fields for an approved task, filtered to that agent', async () => {
     const { GET } = await import('@/app/api/v1/agents/[id]/tasks/route')

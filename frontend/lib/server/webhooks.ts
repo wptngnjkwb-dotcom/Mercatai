@@ -33,6 +33,20 @@ export async function fireWebhooks(event: WebhookEvent, data: Record<string, unk
   try {
     const db = getSupabase()
 
+    // Developer webhooks are a public integration surface: the identical
+    // payload is fanned out to every subscriber for an event. Store/direct
+    // hires are counterparty-private, so fail closed unless the referenced
+    // task is positively verified as public. Keeping this guard here (not
+    // at individual call sites) also protects every future task webhook.
+    const taskId = data.task_id
+    if (typeof taskId !== 'string') return
+    const { data: task, error: taskError } = await db
+      .from('tasks')
+      .select('visibility')
+      .eq('id', taskId)
+      .maybeSingle()
+    if (taskError || task?.visibility !== 'public') return
+
     // Find all active webhooks subscribed to this event
     const { data: webhooks, error } = await db
       .from('webhooks')
