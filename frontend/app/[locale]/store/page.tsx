@@ -35,8 +35,9 @@ export default function StorePage() {
   const [hireIdempotencyKey, setHireIdempotencyKey] = useState('')
   const [result, setResult] = useState<{
     task_id: string
-    buyer_token: string
+    buyer_token?: string
     payment_note: string
+    buyer_access_recovery_sent?: boolean
     payment_state?: 'authorized' | 'processing'
   } | null>(null)
   const [error, setError] = useState('')
@@ -65,17 +66,40 @@ export default function StorePage() {
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'Hire failed')
 
-      // Persist the buyer token the same way the post-a-task flow does —
-      // without it this task can never be paid, approved, or have a quality
-      // issue reported on it, and it wouldn't show up on the buyer dashboard.
-      if (json.buyer_token && json.task_id) {
-        localStorage.setItem(`buyer_token_${json.task_id}`, json.buyer_token)
+      // A token is returned exactly once, when the hire is first created.
+      // Exact replays return only the original task id. Prefer the credential
+      // already saved by this browser; if it is unavailable, ask the existing
+      // enumeration-safe recovery endpoint to email the original buyer.
+      const storedBuyerToken = json.task_id
+        ? localStorage.getItem(`buyer_token_${json.task_id}`) ?? undefined
+        : undefined
+      const buyerToken = typeof json.buyer_token === 'string' ? json.buyer_token : storedBuyerToken
+      if (buyerToken && json.task_id) {
+        localStorage.setItem(`buyer_token_${json.task_id}`, buyerToken)
+      }
+
+      let buyerAccessRecoverySent = false
+      if (!buyerToken && json.idempotent_replay && json.task_id) {
+        const recoveryEndpoint = typeof json.buyer_access_recovery_endpoint === 'string'
+          ? json.buyer_access_recovery_endpoint
+          : `/api/v1/tasks/${encodeURIComponent(json.task_id)}/buyer-access`
+        const recoveryResponse = await fetch(recoveryEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: form.buyer_email }),
+        })
+        buyerAccessRecoverySent = recoveryResponse.ok
       }
 
       setResult({
         task_id: json.task_id,
-        buyer_token: json.buyer_token,
-        payment_note: 'Task created. Complete the secure payment below to engage the agent.',
+        buyer_token: buyerToken,
+        buyer_access_recovery_sent: buyerAccessRecoverySent,
+        payment_note: buyerToken
+          ? (json.idempotent_replay ? 'This hire already exists. Continue its secure payment below.' : 'Task created. Complete the secure payment below to engage the agent.')
+          : buyerAccessRecoverySent
+            ? 'This hire already exists. We requested a replacement buyer-access link for the original email address.'
+            : 'This hire already exists, but buyer access is not stored in this browser. Use the buyer-access recovery endpoint or the original email before funding.',
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Hire failed')
@@ -166,15 +190,27 @@ export default function StorePage() {
             {result ? (
               <div className="flex flex-col gap-3 text-sm">
                 <p className={result.payment_state ? 'text-green-700' : 'text-gray-600'}>{result.payment_note}</p>
-                <div>
-                  <p className="font-medium mb-1">Your buyer token — save it now, it is shown once:</p>
-                  <code className="block bg-gray-50 rounded p-2 break-all text-xs">{result.buyer_token}</code>
-                </div>
+                {result.buyer_token ? (
+                  <div>
+                    <p className="font-medium mb-1">Your buyer token — save it now, it is shown once:</p>
+                    <code className="block bg-gray-50 rounded p-2 break-all text-xs">{result.buyer_token}</code>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
+                    <p className="font-medium">Buyer access is protected</p>
+                    <p className="mt-1 text-xs">
+                      An idempotent retry never reveals another buyer token. {result.buyer_access_recovery_sent
+                        ? 'Check the original buyer email for a replacement access link.'
+                        : 'Use the access link from the original email or request recovery from the task API.'}
+                    </p>
+                    <p className="mt-2 break-all text-xs">Task ID: {result.task_id}</p>
+                  </div>
+                )}
                 <p className="text-gray-500">
                   Track the task in your <Link href="/buyer/dashboard" className="text-brand-700 underline">buyer dashboard</Link>.
                   Card payments are captured after your approval or the scheduled automatic release rule; settled SEPA payments remain covered by the same facilitated quality-issue and refund flow.
                 </p>
-                {!result.payment_state && (
+                {!result.payment_state && result.buyer_token && (
                   <div className="border-t border-gray-200 pt-4 mt-1">
                     <PaymentCheckout
                       taskId={result.task_id}

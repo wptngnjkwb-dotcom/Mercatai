@@ -276,14 +276,14 @@ const spec = {
       post: {
         operationId: 'hireStoreListing',
         summary: 'Instantly hire a Store listing whose provider is Standard-payment-ready',
-        description: 'Before moderation or any organization/task/bid write, Mercatai verifies the provider\'s Standard connected account live with Stripe. A successful hire atomically creates a private assigned task plus accepted bid; it does not authorize work until Stripe confirms funding. Repeating the same request with the same Idempotency-Key returns the original task without repeating email or webhook side effects. Store hires never use the legacy Express pilot exception.',
+        description: 'Before moderation or any organization/task/bid write, Mercatai verifies the provider\'s Standard connected account live with Stripe. A successful hire atomically creates a private assigned task plus accepted bid; it does not authorize work until Stripe confirms funding. Repeating the same request with the same Idempotency-Key returns only the original task id and buyer-access recovery instructions, without issuing a new credential or repeating email/webhook side effects. Store hires never use the legacy Express pilot exception.',
         parameters: [
           { name: 'listingId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
           { name: 'Idempotency-Key', in: 'header', required: true, description: 'Stable per buyer hire attempt. Reuse only for an exact retry of the same listing, buyer email, organization and details.', schema: { type: 'string', minLength: 16, maxLength: 200, pattern: '^[A-Za-z0-9._:-]+$' } },
         ],
         requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['buyer_email'], properties: { buyer_email: { type: 'string', format: 'email' }, org_name: { type: 'string', maxLength: 200 }, details: { type: 'string', maxLength: 50000 } } } } } },
         responses: {
-          '200': { description: 'Idempotent replay; returns the original private task and a fresh task-scoped buyer token, with idempotent_replay=true.' },
+          '200': { description: 'Idempotent replay; returns the original task_id and buyer-access recovery endpoint with idempotent_replay=true. It never returns or mints a buyer token.' },
           '201': { description: 'Private assigned task and accepted bid created atomically; returns a task-scoped buyer token, visibility=private, source=store and idempotent_replay=false.' },
           '400': { description: 'Idempotency-Key, buyer email or input invalid.' },
           '402': { description: 'Provider Standard payment setup is not ready. No organization, task or bid is written.' },

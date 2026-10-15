@@ -9,6 +9,18 @@ import { STANDARD_AGENT_LIABILITY, publicPaymentResponsibility, stripeAccountFie
 import { getLiveAgentPaymentSetup, paymentSetupRequiredBody, PaymentSetupLookupError } from '@/lib/server/agentPaymentSetup'
 import { clientIp, isRateLimited, recordAttempt } from '@/lib/server/rateLimit'
 
+function replayResponse(taskId: string) {
+  const recoveryEndpoint = `/api/v1/tasks/${encodeURIComponent(taskId)}/buyer-access`
+  return NextResponse.json({
+    task_id: taskId,
+    idempotent_replay: true,
+    buyer_access_required: true,
+    buyer_access_recovery_endpoint: recoveryEndpoint,
+    buyer_access_note: 'Buyer credentials are never returned by an idempotent replay. Use the token saved from the original response or request a replacement link at the recovery endpoint.',
+    next_step: `POST ${recoveryEndpoint} with the original buyer email, then fund the task with the recovered buyer token`,
+  }, { status: 200 })
+}
+
 /**
  * Instant hire — the second entry point into the marketplace.
  *
@@ -104,23 +116,7 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       }
       const replay = Array.isArray(replayData) ? replayData[0] : replayData
       if (!replay?.task_id || !replay?.buyer_org_id) throw new Error('Instant hire replay was not confirmed')
-      const replayBuyerToken = await signToken({
-        role: 'buyer', task_id: replay.task_id, org_id: replay.buyer_org_id, buyer_email: normalizedBuyerEmail,
-      }, '30d')
-      return NextResponse.json({
-        task_id: replay.task_id,
-        buyer_org_id: replay.buyer_org_id,
-        agent: replay.agent_display_name,
-        price_eur: Number(replay.price_eur),
-        delivery_deadline_at: null,
-        ...publicPaymentResponsibility(STANDARD_AGENT_LIABILITY),
-        buyer_token: replayBuyerToken,
-        buyer_token_note: 'Save this token — required to fund, review, approve, or open a facilitated quality issue for this task',
-        idempotent_replay: true,
-        visibility: 'private',
-        source: 'store',
-        next_step: 'POST /api/v1/payments/create-intent with this buyer_token to fund the task',
-      }, { status: 200 })
+      return replayResponse(replay.task_id)
     }
 
     // Anonymous Store hires can create assigned-but-unfunded work and send
@@ -222,40 +218,45 @@ export async function POST(request: NextRequest, { params }: { params: { listing
     }
     const task = Array.isArray(hireData) ? hireData[0] : hireData
     if (!task?.task_id || !task?.buyer_org_id) throw new Error('Instant hire was not confirmed')
-    const orgId: string = task.buyer_org_id
+    const createdNew = task.created_new !== false
+    // A concurrent request can miss the preflight lookup yet lose the RPC
+    // race after the first request commits. Treat that exactly like every
+    // other replay: confirm the original task, but never mint or return a
+    // second buyer credential to the HTTP caller.
+    if (!createdNew) {
+      return replayResponse(task.task_id)
+    }
 
+    const orgId: string = task.buyer_org_id
     const buyerToken = await signToken(
       { role: 'buyer', task_id: task.task_id, org_id: orgId, ...(normalizedBuyerEmail ? { buyer_email: normalizedBuyerEmail } : {}) },
       '30d'
     )
 
-    const createdNew = task.created_new !== false
-    if (createdNew) {
-      const listingAgent = listing.agents as any
-      if (listingAgent?.owner_email) {
-        const fields = stripeAccountFields(STANDARD_AGENT_LIABILITY)
-        await sendBidAcceptedActionRequired({
-          to: listingAgent.owner_email,
-          taskTitle: task.task_title,
-          taskId: task.task_id,
-          agentId: listing.agent_id,
-          priceEur: Number(listing.price_eur),
-          deliveryHours: Number(listing.delivery_hours),
-          stripeAccountType: fields.stripeType,
-          onboardingRequired: !listingAgent[fields.accountId] || listingAgent[fields.onboardingCompleted] !== true,
-        })
-      }
-
-      await sendTaskCreated({
-          to: normalizedBuyerEmail,
-          taskTitle: task.task_title,
-          taskId: task.task_id,
-          buyerToken,
-          budgetMax: listing.price_eur,
-          kind: 'store_hire',
-          assignedAgentName: task.agent_display_name,
-        })
+    const listingAgent = listing.agents as any
+    if (listingAgent?.owner_email) {
+      const fields = stripeAccountFields(STANDARD_AGENT_LIABILITY)
+      await sendBidAcceptedActionRequired({
+        to: listingAgent.owner_email,
+        taskTitle: task.task_title,
+        taskId: task.task_id,
+        agentId: listing.agent_id,
+        priceEur: Number(listing.price_eur),
+        deliveryHours: Number(listing.delivery_hours),
+        stripeAccountType: fields.stripeType,
+        onboardingRequired: !listingAgent[fields.accountId] || listingAgent[fields.onboardingCompleted] !== true,
+      })
     }
+
+    await sendTaskCreated({
+      to: normalizedBuyerEmail,
+      taskTitle: task.task_title,
+      taskId: task.task_id,
+      buyerToken,
+      budgetMax: listing.price_eur,
+      kind: 'store_hire',
+      assignedAgentName: task.agent_display_name,
+    })
 
     return NextResponse.json({
       task_id: task.task_id,
@@ -266,11 +267,11 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       ...publicPaymentResponsibility(STANDARD_AGENT_LIABILITY),
       buyer_token: buyerToken,
       buyer_token_note: 'Save this token — required to fund, review, approve, or open a facilitated quality issue for this task',
-      idempotent_replay: !createdNew,
+      idempotent_replay: false,
       visibility: 'private',
       source: 'store',
       next_step: 'POST /api/v1/payments/create-intent with this buyer_token to fund the task',
-    }, { status: createdNew ? 201 : 200 })
+    }, { status: 201 })
   } catch (err) {
     console.error(err)
     return NextResponse.json({ error: 'Instant hire failed' }, { status: 500 })

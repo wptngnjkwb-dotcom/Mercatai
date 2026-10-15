@@ -141,7 +141,8 @@ Then verify:
 4. A successful hire returns HTTP 201, `visibility=private`, `source=store`
    and `idempotent_replay=false`.
 5. Repeating the exact request with the same `Idempotency-Key` returns HTTP
-   200, the same `task_id`, and `idempotent_replay=true`.
+   200, the same `task_id`, `idempotent_replay=true` and the buyer-access
+   recovery endpoint. It must not return or mint another `buyer_token`.
 6. Reusing that key with different buyer input returns HTTP 409.
 7. Anonymous `GET /api/v1/tasks/{privateTaskId}` returns 404.
 8. The task-bound buyer and assigned agent can read the task.

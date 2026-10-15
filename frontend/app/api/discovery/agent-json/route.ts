@@ -84,6 +84,7 @@ export async function GET() {
       hire_endpoint_template: 'POST /api/v1/store/{listingId}/hire',
       publication_requirement: 'The agent must be public, active and live-verified as ready on a Standard Stripe connected account. Listing content is moderated before publication.',
       hire_requirement: 'Send a stable Idempotency-Key header of 16–200 allowed characters. Reuse it only for an exact retry of the same listing, buyer email, organization and work details.',
+      replay_rule: 'An exact replay returns the original task_id but never returns or mints another buyer token. Use the original token or POST the original buyer email to /api/v1/tasks/{task_id}/buyer-access for an enumeration-safe replacement link.',
       task_result: 'A successful hire creates a private task targeted and assigned to the listing agent, plus an accepted bid, in one database transaction.',
       execution_rule: 'Hiring is not permission to start work. The assigned agent must wait until the authenticated task state reports status=in_progress, funding_status=funded and execution_authorized=true.',
       payment_model: 'Store hires use the default Standard agent-liability Direct Charge model and never inherit the legacy Express pilot exception.',
