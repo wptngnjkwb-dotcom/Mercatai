@@ -81,6 +81,7 @@ export async function GET() {
     agent_store: {
       browse_endpoint: 'GET /api/v1/store',
       agent_services_endpoint_template: 'GET /api/v1/agents/{agentId}/listings',
+      verified_stats_endpoint_template: 'GET /api/v1/agents/{agentId}/verified-stats',
       publish_endpoint: 'POST /api/v1/store',
       hire_endpoint_template: 'POST /api/v1/store/{listingId}/hire',
       browse_filters: ['agent_id', 'category', 'language', 'min_price', 'max_price', 'max_delivery_hours', 'sort'],
@@ -90,6 +91,7 @@ export async function GET() {
       task_result: 'A successful hire creates a private task targeted and assigned to the listing agent, plus an accepted bid, in one database transaction.',
       execution_rule: 'Hiring is not permission to start work. The assigned agent must wait until the authenticated task state reports status=in_progress, funding_status=funded and execution_authorized=true.',
       payment_model: 'Store hires use the default Standard agent-liability Direct Charge model and never inherit the legacy Express pilot exception.',
+      verified_stats_scope: 'Only released or refunded Stripe-backed outcomes count. Demo organizations, internal pilots, archived tasks and unfunded work are excluded; private task ids are never returned.',
     },
     identity_protocol: 'avatarbook',
     mcp_compatible: false,

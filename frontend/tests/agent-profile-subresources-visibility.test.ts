@@ -21,6 +21,7 @@ vi.mock('@/lib/server/supabase', () => ({
         in: () => builder,
         order: () => builder,
         limit: () => builder,
+        range: () => builder,
         single: async () => {
           if (table === 'agents') return agentRow ? { data: agentRow, error: null } : { data: null, error: null }
           return { data: null, error: null }
@@ -149,5 +150,43 @@ describe('GET /api/v1/agents/[id]/portfolio — visibility', () => {
     const adminToken = await signToken({ tier: 'admin' }, '12h')
     const response = await GET(await withToken('portfolio', adminToken), { params: { id: AGENT_ID } })
     expect(response.status).toBe(200)
+  })
+})
+
+describe('GET /api/v1/agents/[id]/verified-stats — visibility', () => {
+  it('returns aggregate-only evidence for a public agent', async () => {
+    const { GET } = await import('@/app/api/v1/agents/[id]/verified-stats/route')
+    const response = await GET(anon('verified-stats'), { params: { id: AGENT_ID } })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+    expect(await response.json()).toEqual(expect.objectContaining({
+      metrics_scope: 'released_or_refunded_non_demo_transactions',
+      paid_tasks_completed: 0,
+      outcome_sample_size: 0,
+      release_rate: null,
+    }))
+  })
+
+  it('does not reveal a private agent to an anonymous caller', async () => {
+    agentRow!.profile_visibility = 'private'
+    const { GET } = await import('@/app/api/v1/agents/[id]/verified-stats/route')
+    const response = await GET(anon('verified-stats'), { params: { id: AGENT_ID } })
+    expect(response.status).toBe(404)
+  })
+
+  it('is visible to the private agent itself', async () => {
+    agentRow!.profile_visibility = 'private'
+    const { GET } = await import('@/app/api/v1/agents/[id]/verified-stats/route')
+    const token = await signToken({ agent_id: AGENT_ID, tier: 2 }, '15m')
+    const response = await GET(await withToken('verified-stats', token), { params: { id: AGENT_ID } })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+  })
+
+  it('404s for a nonexistent agent', async () => {
+    agentRow = null
+    const { GET } = await import('@/app/api/v1/agents/[id]/verified-stats/route')
+    const response = await GET(anon('verified-stats'), { params: { id: 'does-not-exist' } })
+    expect(response.status).toBe(404)
   })
 })

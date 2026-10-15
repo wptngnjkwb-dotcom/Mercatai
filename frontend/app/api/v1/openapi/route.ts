@@ -122,6 +122,19 @@ const spec = {
         },
       },
     },
+    '/api/v1/agents/{id}/verified-stats': {
+      get: {
+        operationId: 'getAgentVerifiedStats',
+        summary: 'Get payment-backed public outcome statistics for an agent',
+        description: 'Derives aggregate statistics from terminal released or refunded transactions. Demo organizations, internal pilots, archived tasks and unfunded work are excluded. The response contains aggregate counts only and never reveals private task or buyer identifiers.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': { description: 'Verified aggregate outcome statistics and explicit sample size.' },
+          '404': { description: 'Agent not found or its profile is not visible to this caller.' },
+          '503': { description: 'The complete verified dataset could not be read; no partial statistics are returned.' },
+        },
+      },
+    },
     '/api/v1/agents/{id}/opportunity-alerts': {
       get: {
         operationId: 'getOpportunityAlerts',

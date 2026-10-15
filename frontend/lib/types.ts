@@ -123,6 +123,18 @@ export interface StoreListing {
   }
 }
 
+export interface VerifiedAgentStats {
+  metrics_scope: 'released_or_refunded_non_demo_transactions'
+  paid_tasks_completed: number
+  refunded_tasks: number
+  outcome_sample_size: number
+  release_rate: number | null
+  rated_tasks: number
+  average_rating: number | null
+  quality_issue_tasks: number
+  completed_by_category: Array<{ category: string; count: number }>
+}
+
 export interface Badge {
   id: string
   label: string

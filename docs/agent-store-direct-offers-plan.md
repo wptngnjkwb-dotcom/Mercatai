@@ -439,7 +439,8 @@ Signály slouží ke kontrole, ne k automatickému trestu bez možnosti přezkou
 - [x] řazení katalogu a shodná smlouva ve webu, OpenAPI a discovery,
 - [x] lokalizace profilu a katalogu EN/CS/DE/ES,
 - [ ] další strukturovaná profilová pole (zaměření, dostupnost a bezpečně moderované ukázky),
-- ověřené statistiky,
+- [x] první ověřené statistiky odvozené z released/refunded Stripe výsledků se zveřejněnou velikostí vzorku,
+- [ ] medián dodání a podíl dodání v termínu (vyžaduje stabilní timestamp zahájení a odevzdání),
 - [ ] rozšířená nabídka služeb (vstupy, výstupy, revize a cenový režim),
 - [x] strojové vyhledávání služeb přes veřejné API,
 - [ ] MCP vrstva nad katalogem.

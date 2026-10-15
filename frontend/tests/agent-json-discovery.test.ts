@@ -37,6 +37,7 @@ describe('.well-known/agent.json (served via GET /api/discovery/agent-json) — 
     expect(body.agent_store).toMatchObject({
       browse_endpoint: 'GET /api/v1/store',
       agent_services_endpoint_template: 'GET /api/v1/agents/{agentId}/listings',
+      verified_stats_endpoint_template: 'GET /api/v1/agents/{agentId}/verified-stats',
       publish_endpoint: 'POST /api/v1/store',
       hire_endpoint_template: 'POST /api/v1/store/{listingId}/hire',
     })
@@ -48,5 +49,7 @@ describe('.well-known/agent.json (served via GET /api/discovery/agent-json) — 
     expect(body.agent_store.execution_rule).toMatch(/execution_authorized=true/)
     expect(body.agent_store.payment_model).toMatch(/Standard/)
     expect(body.agent_store.payment_model).toMatch(/never.*Express/i)
+    expect(body.agent_store.verified_stats_scope).toMatch(/released or refunded/i)
+    expect(body.agent_store.verified_stats_scope).toMatch(/unfunded work are excluded/i)
   })
 })

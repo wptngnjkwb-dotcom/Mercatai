@@ -8,7 +8,7 @@ import { Star, Award, ArrowLeft, Calendar, Briefcase, ShoppingBag, Clock } from 
 import { api } from '@/lib/api'
 import BadgeList from '@/components/BadgeList'
 import MercataiScore from '@/components/MercataiScore'
-import type { Agent, Review, PortfolioItem, StoreListing } from '@/lib/types'
+import type { Agent, Review, PortfolioItem, StoreListing, VerifiedAgentStats } from '@/lib/types'
 
 export default function AgentProfilePage() {
   const { id } = useParams<{ id: string }>()
@@ -17,9 +17,9 @@ export default function AgentProfilePage() {
   const tCategories = useTranslations('marketplace.categories')
   const [agent, setAgent] = useState<Agent | null>(null)
   const [reviews, setReviews] = useState<Review[]>([])
-  const [avgRating, setAvgRating] = useState<number | null>(null)
   const [portfolio, setPortfolio] = useState<PortfolioItem[]>([])
   const [listings, setListings] = useState<StoreListing[]>([])
+  const [verifiedStats, setVerifiedStats] = useState<VerifiedAgentStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -31,13 +31,14 @@ export default function AgentProfilePage() {
       // Services enhance the profile but must not make the identity and
       // verified history disappear during a transient Store read failure.
       api.getAgentListings(id).catch(() => ({ listings: [] as StoreListing[] })),
+      api.getAgentVerifiedStats(id).catch(() => null),
     ])
-      .then(([a, r, p, l]) => {
+      .then(([a, r, p, l, stats]) => {
         setAgent(a)
         setReviews(r.reviews)
-        setAvgRating(r.avg_rating)
         setPortfolio(p.items)
         setListings(l.listings)
+        setVerifiedStats(stats)
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
@@ -85,14 +86,19 @@ export default function AgentProfilePage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-gray-100">
           <Stat
             label={t('rating')}
-            value={avgRating !== null ? avgRating.toFixed(1) : '—'}
-            sub={avgRating !== null ? t('reviewCount', { count: reviews.length }) : t('noReviewsYet')}
+            value={verifiedStats?.average_rating !== null && verifiedStats?.average_rating !== undefined ? verifiedStats.average_rating.toFixed(1) : '—'}
+            sub={verifiedStats?.rated_tasks ? t('reviewCount', { count: verifiedStats.rated_tasks }) : t('noReviewsYet')}
             icon={<Star size={14} className="text-yellow-400 fill-yellow-400" />}
           />
-          <Stat label={t('tasksCompleted')} value={String(agent.total_tasks_completed)} icon={<Award size={14} />} />
-          <Stat label={t('successRate')} value={`${Math.round(agent.success_rate * 100)}%`} />
-          <Stat label={t('reputation')} value={agent.reputation_score.toFixed(1)} />
+          <Stat label={t('paidTasksCompleted')} value={verifiedStats ? String(verifiedStats.paid_tasks_completed) : '—'} icon={<Award size={14} />} />
+          <Stat
+            label={t('releaseRate')}
+            value={verifiedStats?.release_rate !== null && verifiedStats?.release_rate !== undefined ? `${Math.round(verifiedStats.release_rate * 100)}%` : '—'}
+            sub={verifiedStats ? t('outcomeSample', { count: verifiedStats.outcome_sample_size }) : undefined}
+          />
+          <Stat label={t('qualityIssues')} value={verifiedStats ? String(verifiedStats.quality_issue_tasks) : '—'} />
         </div>
+        <p className="mt-4 text-xs text-gray-500">{t('verifiedStatsNote')}</p>
       </div>
 
       {listings.length > 0 && (
