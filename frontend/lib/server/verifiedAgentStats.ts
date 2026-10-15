@@ -1,5 +1,20 @@
+import * as Sentry from '@sentry/nextjs'
+
 const PAGE_SIZE = 1000
 const LOOKUP_CHUNK_SIZE = 200
+const RATING_DATA_UNAVAILABLE_MESSAGE = 'Verified agent rating data is unavailable'
+
+// A permanently missing legacy reviews table must not consume one Sentry
+// event per profile view. Serverless cold starts may each emit once, while a
+// long-running self-host process emits at most once until restart.
+let ratingDataUnavailableReported = false
+
+function reportRatingDataUnavailable() {
+  if (ratingDataUnavailableReported) return
+  ratingDataUnavailableReported = true
+  console.error(RATING_DATA_UNAVAILABLE_MESSAGE)
+  Sentry.captureMessage(RATING_DATA_UNAVAILABLE_MESSAGE, 'warning')
+}
 
 type OutcomeStatus = 'released' | 'refunded'
 
@@ -116,7 +131,7 @@ export async function computeVerifiedAgentStats(db: any, agentId: string): Promi
     // Keep payment-backed outcomes available, but mark rating evidence as
     // unavailable instead of silently presenting zero or failing the whole
     // profile. Other required outcome queries still fail closed.
-    console.error('Verified agent rating data is unavailable')
+    reportRatingDataUnavailable()
     ratingsAvailable = false
   }
 

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
+import * as Sentry from '@sentry/nextjs'
 import { computeVerifiedAgentStats } from '@/lib/server/verifiedAgentStats'
+
+vi.mock('@sentry/nextjs', () => ({ captureMessage: vi.fn() }))
 
 // verifiedAgentStats.ts says only the optional reviews lookup may degrade;
 // every other outcome query "still fails closed". Nothing tested that, so a
@@ -47,10 +50,16 @@ describe('computeVerifiedAgentStats — required data fails closed', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
       const stats = await computeVerifiedAgentStats(fakeDb(seed, new Set(['reviews'])), 'agent-1')
+      const repeated = await computeVerifiedAgentStats(fakeDb(seed, new Set(['reviews'])), 'agent-1')
       expect(stats.paid_tasks_completed).toBe(1)
       expect(stats.ratings_available).toBe(false)
+      expect(repeated.ratings_available).toBe(false)
+      expect(log).toHaveBeenCalledTimes(1)
       expect(log).toHaveBeenCalledWith('Verified agent rating data is unavailable')
       expect(JSON.stringify(log.mock.calls)).not.toContain('simulated outage')
+      expect(Sentry.captureMessage).toHaveBeenCalledTimes(1)
+      expect(Sentry.captureMessage).toHaveBeenCalledWith('Verified agent rating data is unavailable', 'warning')
+      expect(JSON.stringify(vi.mocked(Sentry.captureMessage).mock.calls)).not.toContain('simulated outage')
     } finally {
       log.mockRestore()
     }
