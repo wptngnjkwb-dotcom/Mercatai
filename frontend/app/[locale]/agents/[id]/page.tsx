@@ -2,41 +2,56 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import Link from 'next/link'
-import { Star, Award, ArrowLeft, Calendar, Briefcase } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
+import { Link } from '@/i18n/navigation'
+import { Star, Award, ArrowLeft, Calendar, Briefcase, ShoppingBag, Clock } from 'lucide-react'
 import { api } from '@/lib/api'
 import BadgeList from '@/components/BadgeList'
 import MercataiScore from '@/components/MercataiScore'
-import type { Agent, Review, PortfolioItem } from '@/lib/types'
+import type { Agent, Review, PortfolioItem, StoreListing } from '@/lib/types'
 
 export default function AgentProfilePage() {
   const { id } = useParams<{ id: string }>()
+  const locale = useLocale()
+  const t = useTranslations('agentProfile')
+  const tCategories = useTranslations('marketplace.categories')
   const [agent, setAgent] = useState<Agent | null>(null)
   const [reviews, setReviews] = useState<Review[]>([])
   const [avgRating, setAvgRating] = useState<number | null>(null)
   const [portfolio, setPortfolio] = useState<PortfolioItem[]>([])
+  const [listings, setListings] = useState<StoreListing[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    Promise.all([api.getAgent(id), api.getAgentReviews(id), api.getAgentPortfolio(id)])
-      .then(([a, r, p]) => {
+    Promise.all([
+      api.getAgent(id),
+      api.getAgentReviews(id),
+      api.getAgentPortfolio(id),
+      // Services enhance the profile but must not make the identity and
+      // verified history disappear during a transient Store read failure.
+      api.getAgentListings(id).catch(() => ({ listings: [] as StoreListing[] })),
+    ])
+      .then(([a, r, p, l]) => {
         setAgent(a)
         setReviews(r.reviews)
         setAvgRating(r.avg_rating)
         setPortfolio(p.items)
+        setListings(l.listings)
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [id])
 
-  if (loading) return <div className="max-w-3xl mx-auto px-4 py-10 text-gray-500">Loading...</div>
-  if (error || !agent) return <div className="max-w-3xl mx-auto px-4 py-10 text-red-600">{error || 'Agent not found'}</div>
+  if (loading) return <div className="max-w-3xl mx-auto px-4 py-10 text-gray-500">{t('loading')}</div>
+  if (error || !agent) return <div className="max-w-3xl mx-auto px-4 py-10 text-red-600">{error || t('notFound')}</div>
+
+  const formatPrice = (value: number) => new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR' }).format(value)
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
       <Link href="/marketplace" className="btn-secondary mb-6 inline-flex">
-        <ArrowLeft size={16} /> Back to marketplace
+        <ArrowLeft size={16} /> {t('backToMarketplace')}
       </Link>
 
       <div className="card p-6 mb-8">
@@ -69,21 +84,56 @@ export default function AgentProfilePage() {
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-gray-100">
           <Stat
-            label="Rating"
+            label={t('rating')}
             value={avgRating !== null ? avgRating.toFixed(1) : '—'}
-            sub={avgRating !== null ? `${reviews.length} review${reviews.length !== 1 ? 's' : ''}` : 'No reviews yet'}
+            sub={avgRating !== null ? t('reviewCount', { count: reviews.length }) : t('noReviewsYet')}
             icon={<Star size={14} className="text-yellow-400 fill-yellow-400" />}
           />
-          <Stat label="Tasks completed" value={String(agent.total_tasks_completed)} icon={<Award size={14} />} />
-          <Stat label="Success rate" value={`${Math.round(agent.success_rate * 100)}%`} />
-          <Stat label="Reputation" value={agent.reputation_score.toFixed(1)} />
+          <Stat label={t('tasksCompleted')} value={String(agent.total_tasks_completed)} icon={<Award size={14} />} />
+          <Stat label={t('successRate')} value={`${Math.round(agent.success_rate * 100)}%`} />
+          <Stat label={t('reputation')} value={agent.reputation_score.toFixed(1)} />
         </div>
       </div>
+
+      {listings.length > 0 && (
+        <>
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <ShoppingBag size={18} /> {t('servicesTitle')}
+            </h2>
+            <Link href={`/store?agent_id=${encodeURIComponent(agent.id)}`} className="text-sm text-brand-700 hover:underline">
+              {t('viewAllServices')}
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
+            {listings.map(listing => (
+              <div key={listing.id} className="card p-5 flex flex-col gap-3">
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="font-semibold text-gray-900">{listing.title}</h3>
+                  {listing.category && (
+                    <span className="badge bg-brand-50 text-brand-700 text-xs shrink-0">{tCategories(listing.category)}</span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600 line-clamp-3">{listing.description}</p>
+                <div className="mt-auto flex items-center justify-between gap-3 pt-1">
+                  <div className="flex items-center gap-3 text-sm text-gray-500">
+                    <span className="font-bold text-gray-900">{formatPrice(listing.price_eur)}</span>
+                    <span className="flex items-center gap-1"><Clock size={14} /> {t('deliveryHours', { hours: listing.delivery_hours })}</span>
+                  </div>
+                  <Link href={`/store?agent_id=${encodeURIComponent(agent.id)}`} className="btn-primary text-sm">
+                    {t('viewService')}
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {portfolio.length > 0 && (
         <>
           <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <Briefcase size={18} /> Portfolio
+            <Briefcase size={18} /> {t('portfolioTitle')}
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
             {portfolio.map(item => (
@@ -108,10 +158,10 @@ export default function AgentProfilePage() {
         </>
       )}
 
-      <h2 className="text-xl font-bold text-gray-900 mb-4">Reviews</h2>
+      <h2 className="text-xl font-bold text-gray-900 mb-4">{t('reviewsTitle')}</h2>
       {reviews.length === 0 ? (
         <div className="card p-10 text-center text-gray-500">
-          No reviews yet. Be the first buyer to work with this agent.
+          {t('noReviewsBody')}
         </div>
       ) : (
         <div className="flex flex-col gap-3">

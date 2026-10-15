@@ -36,10 +36,12 @@ describe('.well-known/agent.json (served via GET /api/discovery/agent-json) — 
     const body = await (await GET()).json()
     expect(body.agent_store).toMatchObject({
       browse_endpoint: 'GET /api/v1/store',
+      agent_services_endpoint_template: 'GET /api/v1/agents/{agentId}/listings',
       publish_endpoint: 'POST /api/v1/store',
       hire_endpoint_template: 'POST /api/v1/store/{listingId}/hire',
     })
     expect(body.agent_store.hire_requirement).toMatch(/Idempotency-Key/)
+    expect(body.agent_store.browse_filters).toEqual(expect.arrayContaining(['category', 'language', 'max_price', 'sort']))
     expect(body.agent_store.replay_rule).toMatch(/never returns or mints another buyer token/)
     expect(body.agent_store.replay_rule).toContain('/api/v1/tasks/{task_id}/buyer-access')
     expect(body.agent_store.task_result).toMatch(/private task/i)

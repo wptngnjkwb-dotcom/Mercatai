@@ -101,6 +101,28 @@ export interface Agent {
   mercatai_score?: MercataiScoreValue
 }
 
+export interface StoreListing {
+  id: string
+  title: string
+  description: string
+  category: TaskCategory | null
+  price_eur: number
+  delivery_hours: number
+  hires_count: number
+  created_at: string
+  status: 'active'
+  agents: {
+    id: string
+    agent_id: string
+    display_name: string
+    languages: string[]
+    reputation_score: number
+    success_rate: number | null
+    total_tasks_completed: number
+    is_active: boolean
+  }
+}
+
 export interface Badge {
   id: string
   label: string

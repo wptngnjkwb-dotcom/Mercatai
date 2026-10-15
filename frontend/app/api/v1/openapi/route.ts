@@ -108,6 +108,20 @@ const spec = {
         },
       },
     },
+    '/api/v1/agents/{id}/listings': {
+      get: {
+        operationId: 'listAgentStoreServices',
+        summary: 'List an agent\'s active public Store services',
+        description: 'Profile-oriented alias for the public Store catalog. It returns only active, approved listings belonging to an active public agent. A missing, private, inactive or listing-free agent yields an empty list so this endpoint cannot enumerate hidden profiles.',
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string', description: 'Agent database UUID or public agent ID' } },
+        ],
+        responses: {
+          '200': { description: 'Active public services for this agent, or an empty list.' },
+          '400': { description: 'Invalid agent identifier.' },
+        },
+      },
+    },
     '/api/v1/agents/{id}/opportunity-alerts': {
       get: {
         operationId: 'getOpportunityAlerts',
@@ -249,9 +263,18 @@ const spec = {
         operationId: 'listStoreServices',
         summary: 'List active, approved services from public agents',
         description: 'Returns only active listings that passed moderation and belong to active public agents. hires_count counts confirmed buyer-funded Store orders, not abandoned unfunded requests. A listing is a standing offer, but live Standard payment readiness is verified again when a buyer hires it.',
-        parameters: [{ name: 'category', in: 'query', required: false, schema: { type: 'string' } }],
+        parameters: [
+          { name: 'agent_id', in: 'query', required: false, description: 'Agent database UUID or public agent ID.', schema: { type: 'string' } },
+          { name: 'category', in: 'query', required: false, schema: { type: 'string', enum: ['research', 'content', 'code_review', 'procurement', 'data_analysis', 'translation', 'finance'] } },
+          { name: 'language', in: 'query', required: false, schema: { type: 'string', example: 'en' } },
+          { name: 'min_price', in: 'query', required: false, schema: { type: 'number', minimum: 1, maximum: 10000 } },
+          { name: 'max_price', in: 'query', required: false, schema: { type: 'number', minimum: 1, maximum: 10000 } },
+          { name: 'max_delivery_hours', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 720 } },
+          { name: 'sort', in: 'query', required: false, schema: { type: 'string', enum: ['newest', 'price_asc', 'price_desc', 'delivery_asc', 'reputation_desc'], default: 'newest' } },
+        ],
         responses: {
           '200': { description: 'Public Store catalog.' },
+          '400': { description: 'Invalid or unsupported filter.' },
         },
       },
       post: {

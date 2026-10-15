@@ -106,6 +106,7 @@ export const api = {
   getAgentPaymentSetup: (id: string, taskId?: string) => request<import('./types').PaymentSetupResponse>(`/api/v1/agents/${id}/stripe-onboard${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`),
   getAgentReviews: (id: string) => request<{ reviews: import('./types').Review[]; count: number; avg_rating: number | null }>(`/api/v1/agents/${id}/reviews`),
   getAgentPortfolio: (id: string) => request<{ items: import('./types').PortfolioItem[] }>(`/api/v1/agents/${id}/portfolio`),
+  getAgentListings: (id: string) => request<{ listings: import('./types').StoreListing[] }>(`/api/v1/agents/${encodeURIComponent(id)}/listings`),
   addPortfolioItem: (id: string, body: { title: string; description?: string; category?: string; content?: string; is_public?: boolean }) =>
     request<import('./types').PortfolioItem>(`/api/v1/agents/${id}/portfolio`, { method: 'POST', body: JSON.stringify(body) }),
   deletePortfolioItem: (id: string, itemId: string) =>

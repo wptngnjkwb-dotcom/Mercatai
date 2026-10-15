@@ -1,7 +1,7 @@
 # Agent Store, profily agentů a přímé nabídky — vývojový plán
 
-Stav: schválený produktový směr; Fáze 0 implementována v pracovní kopii, čeká na nezávislé review a nasazení migrace 27
-Poslední aktualizace: 2026-10-14
+Stav: schválený produktový směr; Fáze 0 implementována v pracovní kopii, produkční smoke test migrace 27 čeká na ověřenou logickou zálohu; Fáze 1 zahájena mimo platební tok
+Poslední aktualizace: 2026-10-15
 Vlastník produktu: Mercatai
 
 ## 1. Cíl
@@ -434,13 +434,15 @@ Signály slouží ke kontrole, ne k automatickému trestu bez možnosti přezkou
 
 ### Fáze 1 — profily a katalog
 
-- rozšířené profily,
+- [x] aktivní schválené služby na veřejném profilu agenta,
+- [x] kombinovatelné katalogové filtry pro agenta, kategorii, jazyk, cenu a dodací lhůtu,
+- [x] řazení katalogu a shodná smlouva ve webu, OpenAPI a discovery,
+- [x] lokalizace profilu a katalogu EN/CS/DE/ES,
+- [ ] další strukturovaná profilová pole (zaměření, dostupnost a bezpečně moderované ukázky),
 - ověřené statistiky,
-- nabídky služeb,
-- filtry a řazení,
-- lokalizace EN/CS/DE/ES,
-- OpenAPI a discovery,
-- strojové vyhledávání přes API/MCP.
+- [ ] rozšířená nabídka služeb (vstupy, výstupy, revize a cenový režim),
+- [x] strojové vyhledávání služeb přes veřejné API,
+- [ ] MCP vrstva nad katalogem.
 
 ### Fáze 2 — přímé nabídky
 

@@ -5,36 +5,26 @@ import { auditLog } from '@/lib/server/audit'
 import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
 import { getLiveAgentPaymentSetup, paymentSetupRequiredBody, PaymentSetupLookupError } from '@/lib/server/agentPaymentSetup'
 import { STANDARD_AGENT_LIABILITY } from '@/lib/server/stripeAccountRequirement'
+import { parseStoreCatalogFilters, queryPublicStoreListings, STORE_CATEGORIES } from '@/lib/server/storeCatalog'
 
 export const dynamic = 'force-dynamic'
-
-const STORE_CATEGORIES = new Set([
-  'research', 'content', 'code_review', 'procurement',
-  'data_analysis', 'translation', 'finance',
-])
 
 // Public catalog of productized agent services.
 export async function GET(request: NextRequest) {
   const db = getSupabase()
   const { searchParams } = new URL(request.url)
-  const category = searchParams.get('category')
+  let filters
+  try {
+    filters = parseStoreCatalogFilters(searchParams)
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid filters' }, { status: 400 })
+  }
 
-  // A private agent's listings are excluded the same way a suspended
-  // agent's already are — filtering on the joined agents row, not just
-  // agent_listings.is_active. See frontend/lib/server/agentVisibility.ts.
-  let query = db
-    .from('agent_listings')
-    .select('id,title,description,category,price_eur,delivery_hours,hires_count,created_at,status,agents!inner(id,agent_id,display_name,reputation_score,success_rate,total_tasks_completed,is_active)')
-    .eq('is_active', true)
-    .eq('status', 'active')
-    .eq('moderation_status', 'approved')
-    .eq('agents.is_active', true)
-    .eq('agents.profile_visibility', 'public')
-  if (category) query = query.eq('category', category)
-
-  const { data, error } = await query.order('created_at', { ascending: false }).limit(100)
+  // A private agent's listings are excluded by the shared query, including
+  // when a caller tries to address that agent directly through agent_id.
+  const { data, error } = await queryPublicStoreListings(db, filters)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ listings: data ?? [] }, { headers: { 'Cache-Control': 'no-store' } })
+  return NextResponse.json({ listings: data ?? [], filters }, { headers: { 'Cache-Control': 'no-store' } })
 }
 
 // Create a listing — the agent offering the service, identified by its token.
@@ -56,7 +46,7 @@ export async function POST(request: NextRequest) {
   if (description.length < 20 || description.length > 5000) {
     return NextResponse.json({ error: 'description must be between 20 and 5,000 characters' }, { status: 400 })
   }
-  if (!STORE_CATEGORIES.has(category)) {
+  if (!STORE_CATEGORIES.includes(category)) {
     return NextResponse.json({ error: 'category is not supported' }, { status: 400 })
   }
   if (typeof price_eur !== 'number' || !Number.isFinite(price_eur) || price_eur < 1 || price_eur > 10_000) {
