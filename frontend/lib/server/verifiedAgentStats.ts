@@ -116,6 +116,7 @@ export async function computeVerifiedAgentStats(db: any, agentId: string): Promi
     // Keep payment-backed outcomes available, but mark rating evidence as
     // unavailable instead of silently presenting zero or failing the whole
     // profile. Other required outcome queries still fail closed.
+    console.error('Verified agent rating data is unavailable')
     ratingsAvailable = false
   }
 

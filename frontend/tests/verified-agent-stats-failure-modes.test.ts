@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { computeVerifiedAgentStats } from '@/lib/server/verifiedAgentStats'
 
 // verifiedAgentStats.ts says only the optional reviews lookup may degrade;
@@ -44,9 +44,16 @@ describe('computeVerifiedAgentStats — required data fails closed', () => {
   }
 
   it('degrades only the rating when reviews cannot be read', async () => {
-    const stats = await computeVerifiedAgentStats(fakeDb(seed, new Set(['reviews'])), 'agent-1')
-    expect(stats.paid_tasks_completed).toBe(1)
-    expect(stats.ratings_available).toBe(false)
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      const stats = await computeVerifiedAgentStats(fakeDb(seed, new Set(['reviews'])), 'agent-1')
+      expect(stats.paid_tasks_completed).toBe(1)
+      expect(stats.ratings_available).toBe(false)
+      expect(log).toHaveBeenCalledWith('Verified agent rating data is unavailable')
+      expect(JSON.stringify(log.mock.calls)).not.toContain('simulated outage')
+    } finally {
+      log.mockRestore()
+    }
   })
 })
 

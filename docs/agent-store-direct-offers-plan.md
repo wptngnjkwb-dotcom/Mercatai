@@ -431,7 +431,7 @@ Signály slouží ke kontrole, ne k automatickému trestu bez možnosti přezkou
 - [x] regresní testy,
 - [x] reálný databázový souběhový test,
 - [ ] produkční smoke test podle `docs/migration-27-store-hardening.md`.
-- [ ] obnovit a nezávisle ověřit původní DDL deseti starších hostovaných tabulek (`reviews`, `agent_portfolio`, developer/OAuth/webhook/affiliate tabulky); hlídací test nyní drží přesný seznam dluhu a zabrání jeho tichému rozšíření, ale struktura se nesmí domýšlet bez porovnání s produkcí.
+- [ ] obnovit a nezávisle ověřit původní DDL deseti starších hostovaných tabulek (`reviews`, `agent_portfolio`, developer/OAuth/webhook/affiliate tabulky) a dvou RPC (`increment_api_usage`, `increment_webhook_failures`); hlídací test nyní drží přesný seznam dluhu a zabrání jeho tichému rozšíření, ale struktura se nesmí domýšlet bez porovnání s produkcí.
 
 ### Fáze 1 — profily a katalog
 

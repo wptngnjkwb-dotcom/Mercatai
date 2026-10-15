@@ -44,6 +44,37 @@ function declaredTables() {
   return names
 }
 
+function literalApplicationRpcs() {
+  const sourceFiles = [
+    ...filesBelow(resolve(repoRoot, 'frontend/app')),
+    ...filesBelow(resolve(repoRoot, 'frontend/lib')),
+  ].filter(path => /\.(ts|tsx)$/.test(path))
+
+  const names = new Set<string>()
+  for (const path of sourceFiles) {
+    const source = readFileSync(path, 'utf8')
+    const pattern = /\.rpc\(['"]([a-z][a-z0-9_]*)['"]/g
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(source)) !== null) names.add(match[1])
+  }
+  return names
+}
+
+function declaredRpcs() {
+  const sqlFiles = [
+    resolve(repoRoot, 'backend/db/schema.sql'),
+    ...filesBelow(resolve(repoRoot, 'frontend/sql')).filter(path => path.endsWith('.sql')),
+  ]
+  const names = new Set<string>()
+  for (const path of sqlFiles) {
+    const sql = readFileSync(path, 'utf8')
+    const pattern = /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?"?([a-z][a-z0-9_]*)"?/gi
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(sql)) !== null) names.add(match[1].toLowerCase())
+  }
+  return names
+}
+
 describe('database schema coverage', () => {
   it('does not add undeclared application tables and keeps the known legacy debt explicit', () => {
     const declared = declaredTables()
@@ -66,6 +97,18 @@ describe('database schema coverage', () => {
       'reviews',
       'webhook_deliveries',
       'webhooks',
+    ])
+  })
+
+  it('does not add undeclared RPCs and keeps the known legacy debt explicit', () => {
+    const declared = declaredRpcs()
+    const missing = Array.from(literalApplicationRpcs())
+      .filter(rpc => !declared.has(rpc))
+      .sort()
+
+    expect(missing).toEqual([
+      'increment_api_usage',
+      'increment_webhook_failures',
     ])
   })
 })
