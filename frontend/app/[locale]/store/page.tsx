@@ -38,6 +38,7 @@ export default function StorePage() {
     buyer_token?: string
     payment_note: string
     buyer_access_recovery_sent?: boolean
+    buyer_access_recovery_rate_limited?: boolean
     payment_state?: 'authorized' | 'processing'
   } | null>(null)
   const [error, setError] = useState('')
@@ -79,6 +80,7 @@ export default function StorePage() {
       }
 
       let buyerAccessRecoverySent = false
+      let buyerAccessRecoveryRateLimited = false
       if (!buyerToken && json.idempotent_replay && json.task_id) {
         const recoveryEndpoint = typeof json.buyer_access_recovery_endpoint === 'string'
           ? json.buyer_access_recovery_endpoint
@@ -89,16 +91,20 @@ export default function StorePage() {
           body: JSON.stringify({ email: form.buyer_email }),
         })
         buyerAccessRecoverySent = recoveryResponse.ok
+        buyerAccessRecoveryRateLimited = recoveryResponse.status === 429
       }
 
       setResult({
         task_id: json.task_id,
         buyer_token: buyerToken,
         buyer_access_recovery_sent: buyerAccessRecoverySent,
+        buyer_access_recovery_rate_limited: buyerAccessRecoveryRateLimited,
         payment_note: buyerToken
           ? (json.idempotent_replay ? 'This hire already exists. Continue its secure payment below.' : 'Task created. Complete the secure payment below to engage the agent.')
           : buyerAccessRecoverySent
             ? 'This hire already exists. We requested a replacement buyer-access link for the original email address.'
+            : buyerAccessRecoveryRateLimited
+              ? 'This hire already exists, but the buyer-access recovery limit has been reached. Check the original email or try recovery again after one hour.'
             : 'This hire already exists, but buyer access is not stored in this browser. Use the buyer-access recovery endpoint or the original email before funding.',
       })
     } catch (e) {
@@ -201,6 +207,8 @@ export default function StorePage() {
                     <p className="mt-1 text-xs">
                       An idempotent retry never reveals another buyer token. {result.buyer_access_recovery_sent
                         ? 'Check the original buyer email for a replacement access link.'
+                        : result.buyer_access_recovery_rate_limited
+                          ? 'Too many recovery requests were made. Check the original email or retry after one hour.'
                         : 'Use the access link from the original email or request recovery from the task API.'}
                     </p>
                     <p className="mt-2 break-all text-xs">Task ID: {result.task_id}</p>

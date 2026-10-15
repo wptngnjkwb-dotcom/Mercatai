@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { getSupabase } from '@/lib/server/supabase'
 import { signToken } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
@@ -8,6 +9,41 @@ import { sendBuyerAccessRecovery } from '@/lib/server/email'
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const GENERIC_RESPONSE = {
   message: 'If that email matches this task, Mercatai will send a buyer-access link shortly.',
+}
+
+async function processBuyerAccessRequest(taskId: string, email: string) {
+  const db = getSupabase()
+  const { data: task, error } = await db
+    .from('tasks')
+    .select('id,title,buyer_email,posted_by_org_id,archived_at')
+    .eq('id', taskId)
+    .maybeSingle()
+
+  // Missing task, DB read failure, archived task and an email mismatch all
+  // end silently after the caller has received the identical public 202.
+  if (error || !task || task.archived_at || typeof task.buyer_email !== 'string'
+      || task.buyer_email.trim().toLowerCase() !== email) return
+
+  try {
+    const buyerToken = await signToken({
+      role: 'buyer',
+      task_id: task.id,
+      org_id: task.posted_by_org_id,
+      buyer_email: email,
+    }, '30d')
+    await sendBuyerAccessRecovery({
+      to: email,
+      taskTitle: task.title,
+      taskId: task.id,
+      buyerToken,
+    })
+  } catch (recoveryError) {
+    // Never log the token-bearing event or the recipient address.
+    console.error(
+      '[buyer-access] recovery delivery failed',
+      recoveryError instanceof Error ? recoveryError.message : String(recoveryError),
+    )
+  }
 }
 
 /**
@@ -36,38 +72,15 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     details: {},
   })
 
-  const db = getSupabase()
-  const { data: task, error } = await db
-    .from('tasks')
-    .select('id,title,buyer_email,posted_by_org_id,archived_at')
-    .eq('id', params.id)
-    .maybeSingle()
-
-  // Enumeration-safe: missing task, DB read failure, archived task and an
-  // email mismatch all have the exact same status and response body.
-  if (error || !task || task.archived_at || typeof task.buyer_email !== 'string'
-      || task.buyer_email.trim().toLowerCase() !== email) {
-    return NextResponse.json(GENERIC_RESPONSE, { status: 202 })
-  }
-
-  try {
-    const buyerToken = await signToken({
-      role: 'buyer',
-      task_id: task.id,
-      org_id: task.posted_by_org_id,
-      buyer_email: email,
-    }, '30d')
-    await sendBuyerAccessRecovery({
-      to: email,
-      taskTitle: task.title,
-      taskId: task.id,
-      buyerToken,
-    })
-  } catch (recoveryError) {
-    // Keep the public response enumeration-safe. Operators still get a
-    // server-side signal without any token or email being logged.
-    console.error('[buyer-access] recovery delivery failed', recoveryError)
-  }
+  // Identity lookup, token creation and email delivery run after the public
+  // response. Matching and non-matching requests therefore have the same
+  // response shape and do not reveal a match through provider latency.
+  waitUntil(processBuyerAccessRequest(params.id, email).catch((backgroundError) => {
+    console.error(
+      '[buyer-access] background processing failed',
+      backgroundError instanceof Error ? backgroundError.message : String(backgroundError),
+    )
+  }))
 
   return NextResponse.json(GENERIC_RESPONSE, { status: 202 })
 }

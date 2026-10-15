@@ -11,6 +11,7 @@ let taskRow: Record<string, unknown> | null = {
   archived_at: null,
 }
 let dbError: Record<string, unknown> | null = null
+const scheduledTasks: Promise<unknown>[] = []
 
 const { sendBuyerAccessRecovery, auditLog, isRateLimited } = vi.hoisted(() => ({
   sendBuyerAccessRecovery: vi.fn(async (_params: { to: string; taskTitle: string; taskId: string; buyerToken: string }) => {}),
@@ -19,6 +20,9 @@ const { sendBuyerAccessRecovery, auditLog, isRateLimited } = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/server/email', () => ({ sendBuyerAccessRecovery }))
+vi.mock('@vercel/functions', () => ({
+  waitUntil: vi.fn((task: Promise<unknown>) => { scheduledTasks.push(task) }),
+}))
 vi.mock('@/lib/server/audit', () => ({ auditLog }))
 vi.mock('@/lib/server/rateLimit', () => ({
   clientIp: () => '203.0.113.10',
@@ -55,6 +59,7 @@ describe('POST /api/v1/tasks/{id}/buyer-access', () => {
     sendBuyerAccessRecovery.mockClear()
     auditLog.mockClear()
     isRateLimited.mockReset().mockResolvedValue(false)
+    scheduledTasks.length = 0
   })
 
   it('emails a new task-scoped token only to an exact normalized match and never returns it', async () => {
@@ -64,6 +69,8 @@ describe('POST /api/v1/tasks/{id}/buyer-access', () => {
 
     expect(response.status).toBe(202)
     expect(JSON.stringify(body)).not.toContain('eyJ')
+    expect(scheduledTasks).toHaveLength(1)
+    await Promise.all(scheduledTasks)
     expect(sendBuyerAccessRecovery).toHaveBeenCalledTimes(1)
     const sent = sendBuyerAccessRecovery.mock.calls[0][0]
     expect(sent).toMatchObject({ to: 'buyer@example.com', taskId: 'task-1' })
@@ -86,6 +93,7 @@ describe('POST /api/v1/tasks/{id}/buyer-access', () => {
       expect(response.status).toBe(202)
       bodies.push(await response.json())
     }
+    await Promise.all(scheduledTasks)
     expect(bodies[1]).toEqual(bodies[0])
     expect(bodies[2]).toEqual(bodies[0])
     expect(sendBuyerAccessRecovery).not.toHaveBeenCalled()
@@ -98,5 +106,36 @@ describe('POST /api/v1/tasks/{id}/buyer-access', () => {
     expect(response.status).toBe(429)
     expect(sendBuyerAccessRecovery).not.toHaveBeenCalled()
     expect(auditLog).not.toHaveBeenCalled()
+    expect(scheduledTasks).toHaveLength(0)
+  })
+
+  it('returns the generic 202 before matching email delivery settles', async () => {
+    let finishDelivery: (() => void) | undefined
+    sendBuyerAccessRecovery.mockImplementationOnce(() => new Promise<void>(resolve => { finishDelivery = resolve }))
+    const { POST } = await import('@/app/api/v1/tasks/[id]/buyer-access/route')
+
+    const response = await POST(request('buyer@example.com'), { params: { id: 'task-1' } })
+
+    expect(response.status).toBe(202)
+    expect(scheduledTasks).toHaveLength(1)
+    expect(sendBuyerAccessRecovery).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(sendBuyerAccessRecovery).toHaveBeenCalledTimes(1))
+    finishDelivery?.()
+    await Promise.all(scheduledTasks)
+  })
+
+  it('logs only a delivery error message, never the full error object', async () => {
+    const providerError = Object.assign(new Error('provider unavailable'), { privatePayload: 'do-not-log' })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    sendBuyerAccessRecovery.mockRejectedValueOnce(providerError)
+    const { POST } = await import('@/app/api/v1/tasks/[id]/buyer-access/route')
+
+    const response = await POST(request('buyer@example.com'), { params: { id: 'task-1' } })
+    expect(response.status).toBe(202)
+    await Promise.all(scheduledTasks)
+
+    expect(consoleError).toHaveBeenCalledWith('[buyer-access] recovery delivery failed', 'provider unavailable')
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain('do-not-log')
+    consoleError.mockRestore()
   })
 })
