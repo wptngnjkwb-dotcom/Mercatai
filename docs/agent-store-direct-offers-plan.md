@@ -431,6 +431,7 @@ Signály slouží ke kontrole, ne k automatickému trestu bez možnosti přezkou
 - [x] regresní testy,
 - [x] reálný databázový souběhový test,
 - [ ] produkční smoke test podle `docs/migration-27-store-hardening.md`.
+- [ ] obnovit a nezávisle ověřit původní DDL deseti starších hostovaných tabulek (`reviews`, `agent_portfolio`, developer/OAuth/webhook/affiliate tabulky); hlídací test nyní drží přesný seznam dluhu a zabrání jeho tichému rozšíření, ale struktura se nesmí domýšlet bez porovnání s produkcí.
 
 ### Fáze 1 — profily a katalog
 
@@ -439,7 +440,7 @@ Signály slouží ke kontrole, ne k automatickému trestu bez možnosti přezkou
 - [x] řazení katalogu a shodná smlouva ve webu, OpenAPI a discovery,
 - [x] lokalizace profilu a katalogu EN/CS/DE/ES,
 - [ ] další strukturovaná profilová pole (zaměření, dostupnost a bezpečně moderované ukázky),
-- [x] první ověřené statistiky odvozené z released/refunded Stripe výsledků se zveřejněnou velikostí vzorku,
+- [x] první ověřené statistiky odvozené z konečných released/refunded platebních záznamů se zveřejněnou velikostí vzorku; refundace jsou zatím bez rozlišení důvodu,
 - [ ] medián dodání a podíl dodání v termínu (vyžaduje stabilní timestamp zahájení a odevzdání),
 - [ ] rozšířená nabídka služeb (vstupy, výstupy, revize a cenový režim),
 - [x] strojové vyhledávání služeb přes veřejné API,

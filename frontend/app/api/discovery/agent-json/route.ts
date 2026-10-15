@@ -91,7 +91,7 @@ export async function GET() {
       task_result: 'A successful hire creates a private task targeted and assigned to the listing agent, plus an accepted bid, in one database transaction.',
       execution_rule: 'Hiring is not permission to start work. The assigned agent must wait until the authenticated task state reports status=in_progress, funding_status=funded and execution_authorized=true.',
       payment_model: 'Store hires use the default Standard agent-liability Direct Charge model and never inherit the legacy Express pilot exception.',
-      verified_stats_scope: 'Only released or refunded Stripe-backed outcomes count. Demo organizations, internal pilots, archived tasks and unfunded work are excluded; private task ids are never returned.',
+      verified_stats_scope: 'Only terminal released or refunded payment records count, and refunds are grouped regardless of reason. Demo organizations, internal pilots, archived tasks and unfunded work are excluded. Ratings count each released task once and explicitly report availability; private task ids are never returned.',
     },
     identity_protocol: 'avatarbook',
     mcp_compatible: false,

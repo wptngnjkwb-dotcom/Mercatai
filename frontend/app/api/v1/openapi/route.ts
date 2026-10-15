@@ -126,12 +126,12 @@ const spec = {
       get: {
         operationId: 'getAgentVerifiedStats',
         summary: 'Get payment-backed public outcome statistics for an agent',
-        description: 'Derives aggregate statistics from terminal released or refunded transactions. Demo organizations, internal pilots, archived tasks and unfunded work are excluded. The response contains aggregate counts only and never reveals private task or buyer identifiers.',
+        description: 'Derives aggregate statistics from terminal released or refunded payment records. Refunds are grouped regardless of reason. Demo organizations, internal pilots, archived tasks and unfunded work are excluded. Ratings count each released task at most once and may be marked unavailable on legacy installations without the reviews subsystem. The response contains aggregate counts only and never reveals private task or buyer identifiers.',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         responses: {
-          '200': { description: 'Verified aggregate outcome statistics and explicit sample size.' },
+          '200': { description: 'Verified aggregate outcome statistics, explicit sample size and rating-data availability.' },
           '404': { description: 'Agent not found or its profile is not visible to this caller.' },
-          '503': { description: 'The complete verified dataset could not be read; no partial statistics are returned.' },
+          '503': { description: 'Required payment or task outcome data could not be read.' },
         },
       },
     },

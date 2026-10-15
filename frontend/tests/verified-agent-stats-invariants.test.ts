@@ -51,7 +51,7 @@ describe('computeVerifiedAgentStats — isolation between agents', () => {
         { id: 'theirs-refunded', category: 'content', posted_by_org_id: 'org', source: 'marketplace', archived_at: null },
       ],
       organizations: realOrg,
-      reviews: [{ task_id: 'mine', agent_id: 'agent-1', rating: 4 }],
+      reviews: [{ id: 'mine-review', task_id: 'mine', agent_id: 'agent-1', rating: 4, created_at: '2026-01-05' }],
     }), 'agent-1')
 
     expect(stats.paid_tasks_completed).toBe(1)
@@ -67,8 +67,8 @@ describe('computeVerifiedAgentStats — isolation between agents', () => {
       tasks: [{ id: 'mine', category: 'research', posted_by_org_id: 'org', source: 'marketplace', archived_at: null }],
       organizations: realOrg,
       reviews: [
-        { task_id: 'mine', agent_id: 'agent-1', rating: 5 },
-        { task_id: 'mine', agent_id: 'agent-2', rating: 1 },
+        { id: 'mine-review', task_id: 'mine', agent_id: 'agent-1', rating: 5, created_at: '2026-01-05' },
+        { id: 'other-review', task_id: 'mine', agent_id: 'agent-2', rating: 1, created_at: '2026-01-06' },
       ],
     }), 'agent-1')
 

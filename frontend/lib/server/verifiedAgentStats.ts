@@ -30,9 +30,9 @@ export interface VerifiedAgentStats {
   refunded_tasks: number
   outcome_sample_size: number
   release_rate: number | null
+  ratings_available: boolean
   rated_tasks: number
   average_rating: number | null
-  quality_issue_tasks: number
   completed_by_category: Array<{ category: string; count: number }>
 }
 
@@ -103,17 +103,21 @@ export async function computeVerifiedAgentStats(db: any, agentId: string): Promi
   const refundedTasks = eligibleTasks.filter(task => latestByTask.get(task.id)?.status === 'refunded').length
   const outcomeSampleSize = paidTasksCompleted + refundedTasks
 
-  const [reviews, qualityIssues] = await Promise.all([
-    fetchInChunks<{ task_id: string; rating: number }>(releasedIds, chunk => db
+  let ratingsAvailable = true
+  let reviews: Array<{ id: string; task_id: string; rating: number; created_at: string }> = []
+  try {
+    reviews = await fetchInChunks<{ id: string; task_id: string; rating: number; created_at: string }>(releasedIds, chunk => db
       .from('reviews')
-      .select('task_id,rating')
+      .select('id,task_id,rating,created_at')
       .eq('agent_id', agentId)
-      .in('task_id', chunk)),
-    fetchInChunks<{ task_id: string }>(eligibleIds, chunk => db
-      .from('quality_issues')
-      .select('task_id')
-      .in('task_id', chunk)),
-  ])
+      .in('task_id', chunk))
+  } catch {
+    // Reviews are an optional legacy subsystem on older self-host installs.
+    // Keep payment-backed outcomes available, but mark rating evidence as
+    // unavailable instead of silently presenting zero or failing the whole
+    // profile. Other required outcome queries still fail closed.
+    ratingsAvailable = false
+  }
 
   const categoryCounts = new Map<string, number>()
   for (const task of eligibleTasks) {
@@ -121,8 +125,19 @@ export async function computeVerifiedAgentStats(db: any, agentId: string): Promi
     const category = task.category ?? 'uncategorized'
     categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1)
   }
-  const uniqueQualityIssueTasks = new Set(qualityIssues.map(issue => issue.task_id))
-  const ratingSum = reviews.reduce((sum, review) => sum + Number(review.rating), 0)
+  // Historical databases may lack the intended one-review-per-task
+  // constraint. A task is one rating observation regardless of duplicate
+  // rows; retain the newest row deterministically.
+  const latestReviewByTask = new Map<string, { id: string; rating: number; at: number }>()
+  for (const review of reviews) {
+    const at = new Date(review.created_at).getTime()
+    const existing = latestReviewByTask.get(review.task_id)
+    if (!existing || at > existing.at || (at === existing.at && review.id > existing.id)) {
+      latestReviewByTask.set(review.task_id, { id: review.id, rating: Number(review.rating), at })
+    }
+  }
+  const uniqueReviews = Array.from(latestReviewByTask.values())
+  const ratingSum = uniqueReviews.reduce((sum, review) => sum + review.rating, 0)
 
   return {
     metrics_scope: 'released_or_refunded_non_demo_transactions',
@@ -130,9 +145,9 @@ export async function computeVerifiedAgentStats(db: any, agentId: string): Promi
     refunded_tasks: refundedTasks,
     outcome_sample_size: outcomeSampleSize,
     release_rate: outcomeSampleSize > 0 ? round(paidTasksCompleted / outcomeSampleSize, 4) : null,
-    rated_tasks: reviews.length,
-    average_rating: reviews.length > 0 ? round(ratingSum / reviews.length, 1) : null,
-    quality_issue_tasks: uniqueQualityIssueTasks.size,
+    ratings_available: ratingsAvailable,
+    rated_tasks: uniqueReviews.length,
+    average_rating: uniqueReviews.length > 0 ? round(ratingSum / uniqueReviews.length, 1) : null,
     completed_by_category: Array.from(categoryCounts.entries())
       .map(([category, count]) => ({ category, count }))
       .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category)),
@@ -146,9 +161,9 @@ function emptyStats(): VerifiedAgentStats {
     refunded_tasks: 0,
     outcome_sample_size: 0,
     release_rate: null,
+    ratings_available: true,
     rated_tasks: 0,
     average_rating: null,
-    quality_issue_tasks: 0,
     completed_by_category: [],
   }
 }

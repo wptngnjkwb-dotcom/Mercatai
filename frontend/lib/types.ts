@@ -129,9 +129,9 @@ export interface VerifiedAgentStats {
   refunded_tasks: number
   outcome_sample_size: number
   release_rate: number | null
+  ratings_available: boolean
   rated_tasks: number
   average_rating: number | null
-  quality_issue_tasks: number
   completed_by_category: Array<{ category: string; count: number }>
 }
 

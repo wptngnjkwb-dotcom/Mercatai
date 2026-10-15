@@ -26,7 +26,7 @@ export default function AgentProfilePage() {
   useEffect(() => {
     Promise.all([
       api.getAgent(id),
-      api.getAgentReviews(id),
+      api.getAgentReviews(id).catch(() => ({ reviews: [] as Review[], count: 0, avg_rating: null })),
       api.getAgentPortfolio(id),
       // Services enhance the profile but must not make the identity and
       // verified history disappear during a transient Store read failure.
@@ -87,7 +87,11 @@ export default function AgentProfilePage() {
           <Stat
             label={t('rating')}
             value={verifiedStats?.average_rating !== null && verifiedStats?.average_rating !== undefined ? verifiedStats.average_rating.toFixed(1) : '—'}
-            sub={verifiedStats?.rated_tasks ? t('reviewCount', { count: verifiedStats.rated_tasks }) : t('noReviewsYet')}
+            sub={verifiedStats && !verifiedStats.ratings_available
+              ? t('ratingsUnavailable')
+              : verifiedStats?.rated_tasks
+                ? t('reviewCount', { count: verifiedStats.rated_tasks })
+                : t('noReviewsYet')}
             icon={<Star size={14} className="text-yellow-400 fill-yellow-400" />}
           />
           <Stat label={t('paidTasksCompleted')} value={verifiedStats ? String(verifiedStats.paid_tasks_completed) : '—'} icon={<Award size={14} />} />
@@ -96,7 +100,7 @@ export default function AgentProfilePage() {
             value={verifiedStats?.release_rate !== null && verifiedStats?.release_rate !== undefined ? `${Math.round(verifiedStats.release_rate * 100)}%` : '—'}
             sub={verifiedStats ? t('outcomeSample', { count: verifiedStats.outcome_sample_size }) : undefined}
           />
-          <Stat label={t('qualityIssues')} value={verifiedStats ? String(verifiedStats.quality_issue_tasks) : '—'} />
+          <Stat label={t('refundedOutcomes')} value={verifiedStats ? String(verifiedStats.refunded_tasks) : '—'} />
         </div>
         <p className="mt-4 text-xs text-gray-500">{t('verifiedStatsNote')}</p>
       </div>

@@ -3,10 +3,10 @@ import { computeVerifiedAgentStats } from '@/lib/server/verifiedAgentStats'
 
 type Row = Record<string, any>
 
-function fakeDb(seed: Record<string, Row[]>) {
+function fakeDb(seed: Record<string, Row[]>, failingTables = new Set<string>()) {
   return {
     from(table: string) {
-      return query(seed[table] ?? [])
+      return query(seed[table] ?? [], [], [], undefined, failingTables.has(table))
     },
   }
 }
@@ -16,14 +16,16 @@ function query(
   eqFilters: Array<[string, unknown]> = [],
   inFilters: Array<[string, unknown[]]> = [],
   rangeBounds?: [number, number],
+  fails = false,
 ): any {
   const builder: any = {
     select: () => builder,
-    eq: (field: string, value: unknown) => query(rows, [...eqFilters, [field, value]], inFilters, rangeBounds),
-    in: (field: string, values: unknown[]) => query(rows, eqFilters, [...inFilters, [field, values]], rangeBounds),
+    eq: (field: string, value: unknown) => query(rows, [...eqFilters, [field, value]], inFilters, rangeBounds, fails),
+    in: (field: string, values: unknown[]) => query(rows, eqFilters, [...inFilters, [field, values]], rangeBounds, fails),
     order: () => builder,
-    range: (from: number, to: number) => query(rows, eqFilters, inFilters, [from, to]),
+    range: (from: number, to: number) => query(rows, eqFilters, inFilters, [from, to], fails),
     then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
+      if (fails) return Promise.resolve({ data: null, error: { code: 'PGRST205' } }).then(resolve, reject)
       const filtered = rows.filter(row =>
         eqFilters.every(([field, value]) => row[field] === value)
         && inFilters.every(([field, values]) => values.includes(row[field]))
@@ -59,14 +61,9 @@ describe('computeVerifiedAgentStats', () => {
         { id: 'seed-org', is_platform_seed: true },
       ],
       reviews: [
-        { task_id: 'paid', agent_id: 'agent-1', rating: 5 },
-        { task_id: 'refund', agent_id: 'agent-1', rating: 1 },
-      ],
-      quality_issues: [
-        { task_id: 'paid' },
-        { task_id: 'paid' },
-        { task_id: 'refund' },
-        { task_id: 'demo' },
+        { id: 'review-old', task_id: 'paid', agent_id: 'agent-1', rating: 2, created_at: '2026-01-03' },
+        { id: 'review-new', task_id: 'paid', agent_id: 'agent-1', rating: 5, created_at: '2026-01-04' },
+        { id: 'review-refund', task_id: 'refund', agent_id: 'agent-1', rating: 1, created_at: '2026-01-05' },
       ],
     }), 'agent-1')
 
@@ -76,9 +73,9 @@ describe('computeVerifiedAgentStats', () => {
       refunded_tasks: 1,
       outcome_sample_size: 2,
       release_rate: 0.5,
+      ratings_available: true,
       rated_tasks: 1,
       average_rating: 5,
-      quality_issue_tasks: 2,
       completed_by_category: [{ category: 'research', count: 1 }],
     })
     expect(JSON.stringify(stats)).not.toContain('task_id')
@@ -91,5 +88,21 @@ describe('computeVerifiedAgentStats', () => {
     expect(stats.outcome_sample_size).toBe(0)
     expect(stats.release_rate).toBeNull()
     expect(stats.completed_by_category).toEqual([])
+  })
+
+  it('keeps payment outcomes available and explicitly marks ratings unavailable when the legacy reviews table is absent', async () => {
+    const stats = await computeVerifiedAgentStats(fakeDb({
+      transactions: [
+        { id: 'tx-paid', task_id: 'paid', agent_id: 'agent-1', escrow_status: 'released', created_at: '2026-01-01', released_at: '2026-01-02' },
+      ],
+      tasks: [
+        { id: 'paid', category: 'research', posted_by_org_id: null, source: 'marketplace', archived_at: null },
+      ],
+    }, new Set(['reviews'])), 'agent-1')
+
+    expect(stats.paid_tasks_completed).toBe(1)
+    expect(stats.ratings_available).toBe(false)
+    expect(stats.rated_tasks).toBe(0)
+    expect(stats.average_rating).toBeNull()
   })
 })
