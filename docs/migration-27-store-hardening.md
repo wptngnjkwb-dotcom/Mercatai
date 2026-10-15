@@ -61,6 +61,21 @@ where t.assigned_agent_id is not null
 Stop if any required table is missing or if the historical-hire count looks
 unexpected. Review the matching task IDs before proceeding.
 
+### Production preflight record — 2026-10-15
+
+The read-only checks above were run against production project
+`crsgdyrodfkckmyoenkb` before migration 27:
+
+- `agent_listings`, `tasks`, `bids` and `audit_logs` all existed,
+- `agent_listings` had the expected ten pre-migration columns,
+- active listings: `0`,
+- likely historical Store hires: `0`.
+
+The database was not modified. The rollout remained stopped at the backup
+gate because the project was on the Supabase Free plan, which reported that
+scheduled backups and point-in-time recovery were unavailable. A separately
+verified logical backup is therefore required before applying the migration.
+
 ## 2. Backup
 
 Create a recoverable database backup or Supabase point-in-time restore point.
