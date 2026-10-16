@@ -36,7 +36,7 @@ let cannedTask: Record<string, unknown> = {
 // Rows for the activity feed's recentBids query — each carries its own
 // embedded task moderation_status/posted_by_org_id, independent of
 // cannedTask above.
-let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string; posted_by_org_id?: string; archived_at?: string | null; visibility?: string | null } | null; agents: { display_name: string; profile_visibility?: string } }[] = []
+let activityBidRows: { id: string; price_eur: number; submitted_at: string; tasks: { title: string; category: string; moderation_status: string; posted_by_org_id?: string; archived_at?: string | null; visibility?: string | null; source?: string | null } | null; agents: { display_name: string; profile_visibility?: string } }[] = []
 
 // Seedable transactions/organizations rows for is_demo + funding_status +
 // settled-GMV coverage. The shared `tasks` dispatch below only ever returns
@@ -165,8 +165,17 @@ vi.mock('@/lib/server/supabase', () => ({
             }
             const rows = activityBidRows.map((row) => ({
               ...row,
-              tasks: row.tasks ? { visibility: 'public', ...row.tasks } : null,
-            }))
+              tasks: row.tasks ? { visibility: 'public', source: 'marketplace', ...row.tasks } : null,
+            })).filter((row) =>
+              eqFilters.every(([field, value]) => {
+                if (field === 'tasks.visibility') return row.tasks?.visibility === value
+                if (field === 'tasks.source') return row.tasks?.source === value
+                return true
+              }) && isFilters.every(([field, value]) => {
+                if (field === 'tasks.archived_at') return (row.tasks?.archived_at ?? null) === value
+                return true
+              })
+            )
             return resolve({ data: applyPaging(rows), count: rows.length, error: null })
           }
           if (table === 'agents') return resolve({ data: taskListAgentVisibilityRows, count: taskListAgentVisibilityRows.length, error: null })
@@ -197,7 +206,7 @@ beforeEach(() => {
   insertedOrgs.length = 0
   moderationEvents.length = 0
   orgLookupResult = null
-  cannedTask = { ...cannedTask, moderation_status: 'approved', archived_at: null, archived_reason: null }
+  cannedTask = { ...cannedTask, moderation_status: 'approved', visibility: 'public', source: 'marketplace', archived_at: null, archived_reason: null }
   activityBidRows = []
   activityTransactionRows = []
   activityOrganizationRows = []
@@ -782,6 +791,26 @@ describe('GET /api/v1/activity — moderation isolation', () => {
     expect(body.events.some((e: any) => e.id === 'bid-bid-missing')).toBe(false)
     expect(JSON.stringify(body)).not.toContain('Hidden A')
     expect(JSON.stringify(body)).not.toContain('Hidden B')
+  })
+
+  it('excludes internal pilots and their bids from both events and headline totals', async () => {
+    cannedTask = { ...cannedTask, source: 'internal_pilot' }
+    activityBidRows = [{
+      id: 'pilot-bid', price_eur: 3, submitted_at: '2026-10-08T10:00:00.000Z',
+      tasks: { title: 'Internal payment pilot', category: 'research', moderation_status: 'approved', source: 'internal_pilot' },
+      agents: { display_name: 'Pilot Agent', profile_visibility: 'public' },
+    }]
+
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.events).toEqual([])
+    expect(body.stats.tasks_total).toBe(0)
+    expect(body.stats.bids_total).toBe(0)
+    expect(JSON.stringify(body)).not.toContain('Internal payment pilot')
+    expect(JSON.stringify(body)).not.toContain('Pilot Agent')
   })
 })
 

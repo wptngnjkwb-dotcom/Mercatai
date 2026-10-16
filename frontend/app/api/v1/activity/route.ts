@@ -76,7 +76,7 @@ interface BidRow {
   id: string
   price_eur: number
   submitted_at: string | null
-  tasks: { title?: string; category?: string; moderation_status?: string; posted_by_org_id?: string | null; archived_at?: string | null; visibility?: string | null } | null
+  tasks: { title?: string; category?: string; moderation_status?: string; posted_by_org_id?: string | null; archived_at?: string | null; visibility?: string | null; source?: string | null } | null
   agents: { display_name?: string; profile_visibility?: string } | null
 }
 
@@ -99,12 +99,13 @@ export async function GET(_request: NextRequest) {
     // of newer hidden ones.
     const isVisible = (b: BidRow) =>
       b.tasks?.moderation_status === 'approved' && !b.tasks?.archived_at
-      && b.tasks?.visibility === 'public' && b.agents?.profile_visibility === 'public'
+      && b.tasks?.visibility === 'public' && b.tasks?.source === 'marketplace'
+      && b.agents?.profile_visibility === 'public'
     const rows = await fetchVisibleRows<BidRow>(
       (offset, pageSize) =>
         db
           .from('bids')
-          .select('id, price_eur, submitted_at, tasks(title, category, moderation_status, posted_by_org_id, archived_at, visibility), agents(display_name, profile_visibility)')
+          .select('id, price_eur, submitted_at, tasks(title, category, moderation_status, posted_by_org_id, archived_at, visibility, source), agents(display_name, profile_visibility)')
           .order('submitted_at', { ascending: false })
           .range(offset, offset + pageSize - 1) as unknown as PromiseLike<{ data: BidRow[] | null; error: unknown }>,
       isVisible,
@@ -133,13 +134,14 @@ export async function GET(_request: NextRequest) {
   const recentTasks = await safe(async () => {
     const { data, error } = await db
       .from('tasks')
-      .select('id, title, category, budget_max_eur, created_at, posted_by_org_id')
+      .select('id, title, category, budget_max_eur, created_at, posted_by_org_id, source')
       // Trust & Safety: never surface a quarantined/rejected/unreviewed
       // task on the public activity feed. Archived (e.g. the platform's
       // own demo tasks) is excluded the same way — see
       // frontend/sql/15_task_archival.sql.
       .eq('moderation_status', 'approved')
       .eq('visibility', 'public')
+      .eq('source', 'marketplace')
       .is('archived_at', null)
       .order('created_at', { ascending: false })
       .limit(15)
@@ -238,8 +240,8 @@ export async function GET(_request: NextRequest) {
   // and gmv_eur are scoped to real, released, non-demo transactions
   // specifically — see stats.metrics_scope.
   const [tasksTotal, bidsTotal, agentsTotal] = await Promise.all([
-    safe(async () => (await db.from('tasks').select('id', { count: 'exact', head: true }).eq('moderation_status', 'approved').eq('visibility', 'public').is('archived_at', null)).count ?? 0, 0),
-    safe(async () => (await db.from('bids').select('id, tasks!inner(archived_at,visibility)', { count: 'exact', head: true }).is('tasks.archived_at', null).eq('tasks.visibility', 'public')).count ?? 0, 0),
+    safe(async () => (await db.from('tasks').select('id', { count: 'exact', head: true }).eq('moderation_status', 'approved').eq('visibility', 'public').eq('source', 'marketplace').is('archived_at', null)).count ?? 0, 0),
+    safe(async () => (await db.from('bids').select('id, tasks!inner(archived_at,visibility,source)', { count: 'exact', head: true }).is('tasks.archived_at', null).eq('tasks.visibility', 'public').eq('tasks.source', 'marketplace')).count ?? 0, 0),
     safe(async () => (await db.from('agents').select('id', { count: 'exact', head: true }).eq('is_active', true)).count ?? 0, 0),
   ])
 
