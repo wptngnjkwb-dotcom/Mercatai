@@ -17,6 +17,9 @@ idempotent ten-argument overload.
   `source=store` when they match the canonical accepted-bid marker.
 - The controlled Standard-account canary is labelled
   `source=internal_pilot` and private.
+- The three platform-funded legacy-Express pilots keep their original task
+  and payment records but are labelled `source=internal_pilot`, so they do
+  not count as independent buyer demand or public agent reputation.
 - `store_hire_requests` records one immutable result for each
   `(listing_id, Idempotency-Key)` pair and when it first became funded.
 - A new `create_store_hire` overload atomically creates the organization,
@@ -56,10 +59,35 @@ where t.assigned_agent_id is not null
       and b.status = 'accepted'
       and b.approach_summary like 'Instant hire via Agent Store listing "%"'
   );
+
+select id, status, assigned_agent_id
+from tasks
+where id = 'ddf5de51-7e06-473c-8a64-d360eef1de55'::uuid;
+
+select
+  pg_get_constraintdef(c.oid) as escrow_constraint,
+  exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'agents'
+      and column_name = 'auth_version'
+  ) as has_auth_version,
+  exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'agents'
+      and column_name = 'standard_onboarding_notice_sent_at'
+  ) as has_notice_column,
+  to_regclass('public.agent_api_key_recovery_tokens') as recovery_table,
+  to_regprocedure('public.consume_agent_api_key_recovery(text,text)') as recovery_rpc
+from pg_constraint c
+where c.conrelid = 'public.transactions'::regclass
+  and c.conname = 'transactions_escrow_status_check';
 ```
 
 Stop if any required table is missing or if the historical-hire count looks
-unexpected. Review the matching task IDs before proceeding.
+unexpected. Review the matching task IDs before proceeding. The controlled
+canary must exist and have an assigned agent. The migration 25 escrow
+constraint must contain `pending`, and every migration 26 marker above must
+exist before deploying the application code that depends on it.
 
 ### Production preflight record — 2026-10-15
 
@@ -69,7 +97,16 @@ The read-only checks above were run against production project
 - `agent_listings`, `tasks`, `bids` and `audit_logs` all existed,
 - `agent_listings` had the expected ten pre-migration columns,
 - active listings: `0`,
-- likely historical Store hires: `0`.
+- likely historical Store hires: `0`,
+- the controlled canary existed, was completed and had an assigned agent,
+- the migration 25 escrow constraint included `pending`,
+- both migration 26 agent columns, its recovery table and recovery RPC existed.
+
+The three legacy-Express pilots were also checked. Two completed pilots had a
+released payment and the third was still unassigned and unfunded. They are
+platform-funded tests rather than independent demand, so migration 27 labels
+all three `source=internal_pilot` without changing their payment records or
+Stripe responsibility model.
 
 The database was not modified. The rollout remained stopped at the backup
 gate because the project was on the Supabase Free plan, which reported that
@@ -131,7 +168,13 @@ where routine_schema = 'public'
 
 select id, visibility, source, target_agent_id
 from tasks
-where id = 'ddf5de51-7e06-473c-8a64-d360eef1de55'::uuid;
+where id in (
+  'ddf5de51-7e06-473c-8a64-d360eef1de55'::uuid,
+  'e427ab6c-62fa-473f-8e84-93003b13a47f'::uuid,
+  '49a315bc-70ea-409d-b46d-d60ac369e23a'::uuid,
+  '2ee876c6-ebc7-489e-b138-306ecdb32eaf'::uuid
+)
+order by id;
 ```
 
 Expected:
@@ -142,7 +185,9 @@ Expected:
 - public/anon/authenticated have no table privileges,
 - both rolling-deploy RPC overloads exist,
 - the funded-hire counter RPC exists and is service-role-only,
-- the controlled canary is private and labelled `internal_pilot`.
+- the controlled canary is private and labelled `internal_pilot`,
+- all three legacy-Express pilots are labelled `internal_pilot` while their
+  original visibility and Stripe responsibility records remain unchanged.
 
 ## 5. Deploy application
 

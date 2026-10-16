@@ -99,6 +99,18 @@ UPDATE tasks
  WHERE id = 'ddf5de51-7e06-473c-8a64-d360eef1de55'::uuid
    AND assigned_agent_id IS NOT NULL;
 
+-- The three October 2026 legacy-Express tasks were explicitly created and
+-- funded by the platform as end-to-end payment pilots. Preserve their task,
+-- payment and responsibility records, but do not present their outcomes as
+-- independent buyer demand or use them to increase public agent reputation.
+UPDATE tasks
+   SET source = 'internal_pilot'
+ WHERE id IN (
+   'e427ab6c-62fa-473f-8e84-93003b13a47f'::uuid,
+   '49a315bc-70ea-409d-b46d-d60ac369e23a'::uuid,
+   '2ee876c6-ebc7-489e-b138-306ecdb32eaf'::uuid
+ );
+
 CREATE INDEX IF NOT EXISTS idx_tasks_public_marketplace
   ON tasks(created_at DESC)
   WHERE visibility = 'public' AND archived_at IS NULL;

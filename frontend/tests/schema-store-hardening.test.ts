@@ -74,6 +74,9 @@ describe('migration 27 — Agent Store hardening', () => {
   it('labels the controlled canary and excludes internal pilots from public outcomes', () => {
     expect(migration).toContain("source = 'internal_pilot'")
     expect(migration).toContain("'ddf5de51-7e06-473c-8a64-d360eef1de55'::uuid")
+    expect(migration).toContain("'e427ab6c-62fa-473f-8e84-93003b13a47f'::uuid")
+    expect(migration).toContain("'49a315bc-70ea-409d-b46d-d60ac369e23a'::uuid")
+    expect(migration).toContain("'2ee876c6-ebc7-489e-b138-306ecdb32eaf'::uuid")
     expect(publicFields).toContain("sourceByTask.get(taskId) === 'internal_pilot'")
     expect(reviewsRoute).toContain("task.source === 'internal_pilot'")
   })
