@@ -108,10 +108,35 @@ platform-funded tests rather than independent demand, so migration 27 labels
 all three `source=internal_pilot` without changing their payment records or
 Stripe responsibility model.
 
-The database was not modified. The rollout remained stopped at the backup
-gate because the project was on the Supabase Free plan, which reported that
-scheduled backups and point-in-time recovery were unavailable. A separately
-verified logical backup is therefore required before applying the migration.
+At that point the database was not modified. The rollout remained stopped at
+the backup gate because the project was on the Supabase Free plan, which
+reported that scheduled backups and point-in-time recovery were unavailable.
+
+### Production migration record — 2026-10-16
+
+A targeted logical backup was downloaded before the migration and verified
+locally. The operator archive is named
+`mercatai-prod-backup-2026-10-16`; it contains complete rows for the four
+affected pilot tasks, the zero-row Agent Store listing snapshot, a schema and
+grant snapshot, a post-migration verification snapshot, a manifest and SHA-256
+checksums. It contains no application secret or database credential.
+
+Migration 27 was then executed twice as one batch against production. Both
+executions completed successfully. The post-migration read-only checks below
+passed:
+
+- all 4 task and 8 listing lifecycle columns exist,
+- all 11 expected constraints exist,
+- RLS is enabled on `store_hire_requests`,
+- `PUBLIC`, `anon` and `authenticated` have no table or RPC privileges,
+- both rolling-deploy `create_store_hire` overloads and
+  `record_store_hire_funded` exist with the expected service-role access,
+- `agent_listings` and `store_hire_requests` both contain zero rows,
+- the Standard canary is private and `internal_pilot`, and
+- all three legacy-Express pilots are `internal_pilot` while remaining public
+  and retaining `legacy_express_platform_liability`.
+
+The application deploy and production Store smoke test remain separate gates.
 
 ## 2. Backup
 
