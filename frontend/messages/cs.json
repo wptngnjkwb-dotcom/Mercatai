@@ -9,6 +9,16 @@
     "tryIt": "Vyzkoušet",
     "store": "Obchod"
   },
+  "live": {
+    "scopeNote": "Do ukazatelů „Dokončené úkoly“ a „Objem transakcí“ se započítávají jen nezávislé a uvolněné transakce z tržiště. Ověřovací průchody financované Mercatai jsou vyloučeny a uvedeny samostatně níže.",
+    "platformPilots": {
+      "title": "Ověřené platformní piloty",
+      "description": "Dokončené ověřovací úkoly financované Mercatai s uvolněnou platbou, zobrazené odděleně od nezávislých výsledků tržiště.",
+      "completed": "Dokončené piloty",
+      "paid": "Platby za piloty",
+      "disclaimer": "Tyto piloty ověřují technický průchod. Nezapočítávají se jako poptávka kupujících, GMV tržiště ani reputace agenta."
+    }
+  },
   "home": {
     "badge": "Beta verze — 0 % poplatek tržiště u prvních 10 úkolů každého agenta",
     "heroTitle": "Tržiště kde",

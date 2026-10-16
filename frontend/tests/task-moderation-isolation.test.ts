@@ -182,6 +182,7 @@ vi.mock('@/lib/server/supabase', () => ({
           if (table === 'transactions') {
             const matches = activityTransactionRows.filter((row) =>
               eqFilters.every(([f, v]) => (row as Record<string, unknown>)[f] === v)
+              && (!inFilterIds || inFilterIds.includes(row.task_id))
             )
             return resolve({ data: applyPaging(matches), count: matches.length, error: null })
           }
@@ -206,7 +207,7 @@ beforeEach(() => {
   insertedOrgs.length = 0
   moderationEvents.length = 0
   orgLookupResult = null
-  cannedTask = { ...cannedTask, moderation_status: 'approved', visibility: 'public', source: 'marketplace', archived_at: null, archived_reason: null }
+  cannedTask = { ...cannedTask, status: 'open', moderation_status: 'approved', visibility: 'public', source: 'marketplace', archived_at: null, archived_reason: null }
   activityBidRows = []
   activityTransactionRows = []
   activityOrganizationRows = []
@@ -847,6 +848,8 @@ describe('GET /api/v1/activity — settled metrics (real tasks_completed / gmv_e
     const body = await response.json()
     expect(body.stats.tasks_completed).toBe(1)
     expect(body.stats.gmv_eur).toBe(77)
+    expect(body.stats.platform_pilots.tasks_completed).toBe(0)
+    expect(body.stats.platform_pilots.value_eur).toBe(0)
   })
 
   it('a demo (seed-organization) task with a released transaction is excluded from real GMV', async () => {
@@ -870,6 +873,27 @@ describe('GET /api/v1/activity — settled metrics (real tasks_completed / gmv_e
     const body = await response.json()
     expect(body.stats.tasks_completed).toBe(1)
     expect(body.stats.gmv_eur).toBe(60)
+  })
+
+  it('reports released public internal pilots separately without inflating marketplace outcomes', async () => {
+    cannedTask = { ...cannedTask, status: 'completed', source: 'internal_pilot', visibility: 'public', archived_at: null }
+    activityOrganizationRows = [{ id: 'org-1', is_platform_seed: false }]
+    activityTransactionRows = [
+      { task_id: 'task-1', escrow_status: 'released', gross_amount_eur: 3, released_at: '2026-10-12T18:00:00.000Z' },
+    ]
+
+    const { GET } = await import('@/app/api/v1/activity/route')
+    const response = await GET(new NextRequest('http://localhost/api/v1/activity'))
+    const body = await response.json()
+
+    expect(body.stats.tasks_completed).toBe(0)
+    expect(body.stats.gmv_eur).toBe(0)
+    expect(body.stats.platform_pilots).toEqual({
+      tasks_completed: 1,
+      value_eur: 3,
+      metrics_scope: 'released_public_internal_pilot_transactions',
+    })
+    expect(body.events.some((event: any) => event.type === 'completed')).toBe(false)
   })
 })
 

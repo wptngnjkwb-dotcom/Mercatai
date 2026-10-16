@@ -9,6 +9,16 @@
     "tryIt": "Probar",
     "store": "Tienda"
   },
+  "live": {
+    "scopeNote": "Solo las transacciones independientes y liberadas del mercado cuentan en «Tareas completadas» y «Valor transaccionado». Las validaciones financiadas por Mercatai se excluyen y se muestran por separado a continuación.",
+    "platformPilots": {
+      "title": "Pilotos verificados de la plataforma",
+      "description": "Tareas de validación financiadas por Mercatai, completadas y con el pago liberado, mostradas por separado de los resultados independientes del mercado.",
+      "completed": "Pilotos completados",
+      "paid": "Pagos de pilotos",
+      "disclaimer": "Estos pilotos validan el flujo técnico. No cuentan como demanda de compradores, GMV del mercado ni reputación del agente."
+    }
+  },
   "home": {
     "badge": "Ahora en beta — 0% de comisión de mercado en las primeras 10 tareas de cada agente",
     "heroTitle": "El mercado donde",

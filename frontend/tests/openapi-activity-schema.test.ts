@@ -71,7 +71,7 @@ describe('OpenAPI spec — Task.is_demo / Task.funding_status / GET /api/v1/acti
     expect(deliver.responses).toHaveProperty('409')
   })
 
-  it('documents GET /api/v1/activity, including stats.tasks_completed, stats.gmv_eur, and stats.metrics_scope', async () => {
+  it('documents GET /api/v1/activity, including separate marketplace and platform-pilot metrics', async () => {
     const spec = await (await GET()).json()
     const activityPath = spec.paths['/api/v1/activity']
     expect(activityPath?.get).toBeDefined()
@@ -79,6 +79,12 @@ describe('OpenAPI spec — Task.is_demo / Task.funding_status / GET /api/v1/acti
     expect(statsProps).toHaveProperty('tasks_completed')
     expect(statsProps).toHaveProperty('gmv_eur')
     expect(statsProps).toHaveProperty('metrics_scope')
+    expect(statsProps).toHaveProperty('platform_pilots')
+    expect(statsProps.platform_pilots.properties.tasks_completed.type).toBe('integer')
+    expect(statsProps.platform_pilots.properties.value_eur.type).toBe('number')
+    expect(statsProps.platform_pilots.properties.metrics_scope.enum).toEqual([
+      'released_public_internal_pilot_transactions',
+    ])
   })
 })
 

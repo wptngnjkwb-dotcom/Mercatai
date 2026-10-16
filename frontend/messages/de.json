@@ -9,6 +9,16 @@
     "tryIt": "Ausprobieren",
     "store": "Store"
   },
+  "live": {
+    "scopeNote": "Nur unabhängige, freigegebene Marktplatztransaktionen zählen zu „Abgeschlossene Aufgaben“ und „Transaktionswert“. Von Mercatai finanzierte Validierungsläufe sind ausgeschlossen und werden unten separat ausgewiesen.",
+    "platformPilots": {
+      "title": "Verifizierte Plattform-Piloten",
+      "description": "Abgeschlossene, von Mercatai finanzierte Validierungsaufgaben mit freigegebener Zahlung, getrennt von unabhängigen Marktplatzergebnissen.",
+      "completed": "Abgeschlossene Piloten",
+      "paid": "Pilotzahlungen",
+      "disclaimer": "Diese Piloten validieren den technischen Ablauf. Sie zählen nicht als Käufernachfrage, Marktplatz-GMV oder Agentenreputation."
+    }
+  },
   "home": {
     "badge": "Jetzt in Beta — 0 % Marktplatzgebühr für die ersten 10 Aufgaben jedes Agenten",
     "heroTitle": "Der Marktplatz, auf dem",

@@ -80,6 +80,54 @@ interface BidRow {
   agents: { display_name?: string; profile_visibility?: string } | null
 }
 
+interface PlatformPilotMetrics {
+  tasksCompleted: number
+  valueEur: number
+}
+
+/**
+ * Platform-funded pilots are deliberately reported separately from marketplace
+ * outcomes. Only public, approved, non-archived internal pilots with an actual
+ * released transaction qualify. This keeps the public record transparent
+ * without presenting Mercatai-funded validation as independent buyer demand or
+ * allowing it to affect marketplace GMV/reputation.
+ */
+async function computePlatformPilotMetrics(db: ReturnType<typeof getSupabase>): Promise<PlatformPilotMetrics> {
+  const { data: pilotTasks, error: taskError } = await db
+    .from('tasks')
+    .select('id')
+    .eq('moderation_status', 'approved')
+    .eq('status', 'completed')
+    .eq('visibility', 'public')
+    .eq('source', 'internal_pilot')
+    .is('archived_at', null)
+  if (taskError) throw taskError
+
+  const taskIds = (pilotTasks ?? []).map((task: any) => task.id).filter(Boolean)
+  if (taskIds.length === 0) return { tasksCompleted: 0, valueEur: 0 }
+
+  const { data: transactions, error: transactionError } = await db
+    .from('transactions')
+    .select('task_id, gross_amount_eur, released_at')
+    .eq('escrow_status', 'released')
+    .in('task_id', taskIds)
+    .order('released_at', { ascending: false })
+  if (transactionError) throw transactionError
+
+  // A task can have historical/retried transaction rows. Because the query is
+  // newest-first, count only the latest released row for each task.
+  const seenTaskIds = new Set<string>()
+  let valueEur = 0
+  for (const transaction of transactions ?? []) {
+    const taskId = (transaction as any).task_id as string
+    if (!taskId || seenTaskIds.has(taskId)) continue
+    seenTaskIds.add(taskId)
+    valueEur += Number((transaction as any).gross_amount_eur ?? 0)
+  }
+
+  return { tasksCompleted: seenTaskIds.size, valueEur }
+}
+
 export async function GET(_request: NextRequest) {
   const db = getSupabase()
 
@@ -251,7 +299,10 @@ export async function GET(_request: NextRequest) {
   // once, only for a transaction that reached escrow_status='released', using
   // that transaction's actual settled amount, excluding the platform's own
   // seed/demo organization. See lib/server/publicTaskFields.ts.
-  const settled = await safe(computeSettledMetrics.bind(null, db), { tasksCompleted: 0, gmvEur: 0 })
+  const [settled, platformPilots] = await Promise.all([
+    safe(computeSettledMetrics.bind(null, db), { tasksCompleted: 0, gmvEur: 0 }),
+    safe(computePlatformPilotMetrics.bind(null, db), { tasksCompleted: 0, valueEur: 0 }),
+  ])
 
   return NextResponse.json({
     events,
@@ -265,6 +316,11 @@ export async function GET(_request: NextRequest) {
       // non-demo transactions only. Not every consumer needs this, but none
       // should be able to mistake these numbers for anything broader.
       metrics_scope: 'released_non_demo_transactions',
+      platform_pilots: {
+        tasks_completed: platformPilots.tasksCompleted,
+        value_eur: platformPilots.valueEur,
+        metrics_scope: 'released_public_internal_pilot_transactions',
+      },
     },
     generated_at: new Date().toISOString(),
   })

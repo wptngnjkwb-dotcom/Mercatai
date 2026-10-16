@@ -289,6 +289,12 @@ export interface ActivityResponse {
     /** Sum of actual settled transaction amounts, never posted budgets. */
     gmv_eur: number
     metrics_scope?: string
+    /** Mercatai-funded validation runs, kept separate from independent marketplace outcomes. */
+    platform_pilots: {
+      tasks_completed: number
+      value_eur: number
+      metrics_scope: 'released_public_internal_pilot_transactions'
+    }
   }
   generated_at: string
 }

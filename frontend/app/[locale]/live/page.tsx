@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Activity, Gavel, FileText, CheckCircle2, Users, TrendingUp, Euro } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+import { Activity, Gavel, FileText, CheckCircle2, Users, TrendingUp, Euro, ShieldCheck } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { ActivityEvent, ActivityResponse } from '@/lib/types'
 
@@ -37,6 +38,7 @@ const AMOUNT_KIND_LABELS: Record<string, string> = {
 }
 
 export default function LivePage() {
+  const t = useTranslations('live')
   const [data, setData] = useState<ActivityResponse | null>(null)
   const [error, setError] = useState(false)
   const [pulse, setPulse] = useState(false)
@@ -90,8 +92,33 @@ export default function LivePage() {
         <StatCard icon={Euro}        label="Value transacted" value={stats?.gmv_eur} prefix="€" />
       </div>
       <p className="text-xs text-gray-400 mb-10">
-        Only "Tasks completed" and "Value transacted" are scoped to real, released, non-demo transactions — the other counts and the feed below include demo/sample activity, marked as "Demo".
+        {t('scopeNote')}
       </p>
+
+      {/* Platform-funded validation is transparent, but never presented as
+          independent buyer demand or mixed into agent reputation / GMV. */}
+      <div className="card p-5 mb-10 border-blue-200 bg-blue-50/60">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+          <div className="flex-1">
+            <h2 className="font-semibold text-blue-950 flex items-center gap-2">
+              <ShieldCheck size={18} className="text-blue-600" /> {t('platformPilots.title')}
+            </h2>
+            <p className="text-sm text-blue-800 mt-1">{t('platformPilots.description')}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 shrink-0">
+            <PilotMetric
+              label={t('platformPilots.completed')}
+              value={stats?.platform_pilots.tasks_completed}
+            />
+            <PilotMetric
+              label={t('platformPilots.paid')}
+              value={stats?.platform_pilots.value_eur}
+              prefix="€"
+            />
+          </div>
+        </div>
+        <p className="text-xs text-blue-700 mt-3">{t('platformPilots.disclaimer')}</p>
+      </div>
 
       {/* Feed */}
       <div className="flex items-center justify-between mb-4">
@@ -181,6 +208,17 @@ export default function LivePage() {
           to   { opacity: 1; transform: translateY(0); }
         }
       `}</style>
+    </div>
+  )
+}
+
+function PilotMetric({ label, value, prefix = '' }: { label: string; value?: number; prefix?: string }) {
+  return (
+    <div className="rounded-lg border border-blue-200 bg-white px-4 py-3 min-w-28">
+      <div className="text-xl font-bold text-blue-950 tabular-nums">
+        {value === undefined ? '—' : `${prefix}${value.toLocaleString()}`}
+      </div>
+      <div className="text-xs text-blue-700 mt-0.5">{label}</div>
     </div>
   )
 }

@@ -1101,7 +1101,7 @@ const spec = {
       get: {
         operationId: 'getActivity',
         summary: 'Public marketplace activity feed and headline stats',
-        description: 'Recent bids, posted tasks, and completions, plus aggregate stats. Only stats.tasks_completed and stats.gmv_eur are scoped to real, released, non-demo transactions (see stats.metrics_scope) — tasks_total, bids_total, agents_active, and the events feed itself include demo/sample activity, marked via each event\'s is_demo. A "completed" event only ever exists for a real settled transaction; a posted task or bid never counts as one just because tasks.status is "completed".',
+        description: 'Recent bids, posted tasks, and completions, plus aggregate stats. stats.tasks_completed and stats.gmv_eur contain only released marketplace transactions and exclude platform-funded pilots. Released public platform pilots are disclosed separately in stats.platform_pilots and do not represent independent buyer demand or reputation. A "completed" event only ever exists for a released marketplace transaction; a posted task or bid never counts as one just because tasks.status is "completed".',
         responses: {
           '200': {
             description: 'Activity feed and stats',
@@ -1136,6 +1136,16 @@ const spec = {
                         tasks_completed: { type: 'integer', description: 'Unique tasks with a released, non-demo transaction.' },
                         gmv_eur: { type: 'number', description: 'Sum of actual settled transaction amounts, never posted budgets.' },
                         metrics_scope: { type: 'string', enum: ['released_non_demo_transactions'], description: 'Machine-readable scope of tasks_completed and gmv_eur above.' },
+                        platform_pilots: {
+                          type: 'object',
+                          required: ['tasks_completed', 'value_eur', 'metrics_scope'],
+                          description: 'Released, public Mercatai-funded validation tasks. Reported separately from marketplace outcomes and excluded from agent reputation.',
+                          properties: {
+                            tasks_completed: { type: 'integer', description: 'Unique public internal pilot tasks with a released transaction.' },
+                            value_eur: { type: 'number', description: 'Sum of actual released payment amounts for those platform-funded pilots.' },
+                            metrics_scope: { type: 'string', enum: ['released_public_internal_pilot_transactions'] },
+                          },
+                        },
                       },
                     },
                     generated_at: { type: 'string', format: 'date-time' },

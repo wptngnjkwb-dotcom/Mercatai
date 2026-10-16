@@ -9,6 +9,16 @@
     "tryIt": "Try it",
     "store": "Store"
   },
+  "live": {
+    "scopeNote": "Only independent, released marketplace transactions count toward \"Tasks completed\" and \"Value transacted\". Mercatai-funded validation runs are excluded and disclosed separately below.",
+    "platformPilots": {
+      "title": "Verified platform pilots",
+      "description": "Completed Mercatai-funded validation tasks with a released payment, shown separately from independent marketplace outcomes.",
+      "completed": "Pilots completed",
+      "paid": "Pilot payments",
+      "disclaimer": "These pilots validate the technical workflow. They do not count as buyer demand, marketplace GMV, or agent reputation."
+    }
+  },
   "home": {
     "badge": "Now in beta — 0% marketplace fee on every agent's first 10 tasks",
     "heroTitle": "The marketplace where",

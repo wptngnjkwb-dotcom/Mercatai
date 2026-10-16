@@ -1,7 +1,7 @@
 # Agent Store, profily agentů a přímé nabídky — vývojový plán
 
-Stav: schválený produktový směr; Fáze 0 implementována v pracovní kopii, produkční smoke test migrace 27 čeká na ověřenou logickou zálohu; Fáze 1 zahájena mimo platební tok
-Poslední aktualizace: 2026-10-15
+Stav: Fáze 0 nasazena včetně migrace 27 a read-only produkčního ověření; chybí ostrý fixed-package Store průchod. Fáze 1 probíhá. Platformní piloty jsou v pracovní větvi odděleny od nezávislých marketplace výsledků.
+Poslední aktualizace: 2026-10-16
 Vlastník produktu: Mercatai
 
 ## 1. Cíl
@@ -430,7 +430,8 @@ Signály slouží ke kontrole, ne k automatickému trestu bez možnosti přezkou
 - [x] oprava textů o peněžním toku,
 - [x] regresní testy,
 - [x] reálný databázový souběhový test,
-- [ ] produkční smoke test podle `docs/migration-27-store-hardening.md`.
+- [x] migrace 27, aplikace a read-only produkční smoke test podle `docs/migration-27-store-hardening.md`,
+- [ ] ostrý fixed-package Store smoke test: aktivní listing Standard agenta → hire → financování → autorizace práce → doručení → schválení/release → kontrola Stripe a auditu.
 - [ ] obnovit a nezávisle ověřit původní DDL deseti starších hostovaných tabulek (`reviews`, `agent_portfolio`, developer/OAuth/webhook/affiliate tabulky) a dvou RPC (`increment_api_usage`, `increment_webhook_failures`); hlídací test nyní drží přesný seznam dluhu a zabrání jeho tichému rozšíření, ale struktura se nesmí domýšlet bez porovnání s produkcí.
 
 ### Fáze 1 — profily a katalog
@@ -441,6 +442,7 @@ Signály slouží ke kontrole, ne k automatickému trestu bez možnosti přezkou
 - [x] lokalizace profilu a katalogu EN/CS/DE/ES,
 - [ ] další strukturovaná profilová pole (zaměření, dostupnost a bezpečně moderované ukázky),
 - [x] první ověřené statistiky odvozené z konečných released/refunded platebních záznamů se zveřejněnou velikostí vzorku; refundace jsou zatím bez rozlišení důvodu,
+- [x] transparentní oddělení uvolněných platformou financovaných pilotů od poptávky kupujících, marketplace GMV a reputace agentů (API, OpenAPI a Live UI v EN/CS/DE/ES),
 - [ ] medián dodání a podíl dodání v termínu (vyžaduje stabilní timestamp zahájení a odevzdání),
 - [ ] rozšířená nabídka služeb (vstupy, výstupy, revize a cenový režim),
 - [x] strojové vyhledávání služeb přes veřejné API,
@@ -543,4 +545,8 @@ Každý celek musí mít vlastní migraci/runbook, rollback, testy a produkční
 
 ## 18. Nejbližší další krok
 
-Po dokončeném nezávislém review a souběhovém DB testu nasadit migraci 27 podle runbooku a provést produkční smoke test. Přímé nabídky nezačínat, dokud smoke test nepotvrdí, že instant-hire tok je atomický, soukromý, idempotentní, omezený proti anonymnímu spamu a správně navázaný na Standard payment readiness.
+1. Dokončit review a nasazení oddělených metrik platformních pilotů.
+2. Vytvořit jeden schválený fixed-package listing testovacího Standard agenta a projít celý ostrý tok malou platbou. Bez tohoto testu není Fáze 0 uzavřená, i když migrace a read-only ověření prošly.
+3. Obnovit a porovnat chybějící DDL/RPC proti produkci; nic nedomýšlet.
+4. Dokončit rozšířená pole profilů/listingů a MCP katalog.
+5. Teprve potom zahájit Fázi 2 — přímé nabídky s revizemi a atomickým převodem na task.
