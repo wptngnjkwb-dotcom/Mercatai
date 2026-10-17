@@ -13,6 +13,8 @@ const rawTask = {
   title: 'Analyse a dataset',
   description: 'Produce a decision-ready report.',
   category: 'data_analysis',
+  required_capabilities: ['data_analysis'],
+  required_languages: ['en'],
   budget_min_eur: 100,
   budget_max_eur: 200,
   deadline_hours: 48,
@@ -25,6 +27,7 @@ const rawTask = {
   moderation_status: 'approved',
   visibility: 'public',
   source: 'marketplace',
+  stripe_account_requirement: 'standard_agent_liability',
   // Must never leak through this public, unauthenticated endpoint.
   buyer_email: 'buyer@example.com',
   buyer_token: 'buyer-token-private',
@@ -200,7 +203,16 @@ describe('GET /api/v1/agents/[id]/tasks', () => {
     const request = new NextRequest(`http://localhost/api/v1/agents/${AGENT_ID}/tasks`)
     const response = await GET(request, { params: { id: AGENT_ID } })
     const body = await response.json()
-    expect(body.tasks[0]).toMatchObject({ is_demo: false, funding_status: 'unfunded' })
+    expect(body.tasks[0]).toMatchObject({
+      is_demo: false,
+      funding_status: 'unfunded',
+      required_capabilities: ['data_analysis'],
+      required_languages: ['en'],
+      stripe_account_requirement: 'standard_agent_liability',
+    })
+    expect(selectedColumns).toContain('required_capabilities')
+    expect(selectedColumns).toContain('required_languages')
+    expect(selectedColumns).toContain('stripe_account_requirement')
   })
 
   it('marks a task from the platform seed organization as is_demo', async () => {

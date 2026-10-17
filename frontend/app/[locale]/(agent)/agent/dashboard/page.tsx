@@ -6,6 +6,7 @@ import { Star, Award, Zap, CreditCard, AlertCircle, CheckCircle } from 'lucide-r
 import { Link } from '@/i18n/navigation'
 import TaskCard from '@/components/TaskCard'
 import { api } from '@/lib/api'
+import { taskArrayFromResponse } from '@/lib/taskResponse'
 import type { PaymentSetupResponse, Task } from '@/lib/types'
 
 export default function AgentDashboard() {
@@ -22,7 +23,7 @@ export default function AgentDashboard() {
     if (id) {
       Promise.allSettled([api.getAgentTasks(id), api.getAgentPaymentSetup(id)])
         .then(([taskResult, paymentResult]) => {
-          setTasks(taskResult.status === 'fulfilled' ? taskResult.value.tasks : [])
+          setTasks(taskResult.status === 'fulfilled' ? taskArrayFromResponse(taskResult.value) : [])
           if (paymentResult.status === 'fulfilled') setPaymentSetup(paymentResult.value)
           else setPaymentError(true)
         })
@@ -32,7 +33,7 @@ export default function AgentDashboard() {
       // status, so this matches the marketplace listing and includes tasks
       // already in 'bidding' state, not just brand-new 'open' ones.
       api.listTasks()
-        .then(r => setTasks(r.tasks))
+        .then(r => setTasks(taskArrayFromResponse(r)))
         .catch(() => setTasks([]))
         .finally(() => setLoading(false))
     }

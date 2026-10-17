@@ -48,6 +48,12 @@ const COMPLETED_STATUSES = ['completed', 'cancelled']
 export default function TaskCard({ task, showBidButton }: Props) {
   const t = useTranslations('taskStatus')
   const isCompleted = COMPLETED_STATUSES.includes(task.status)
+  // Keep the public UI resilient while an older API release or legacy row
+  // is missing an optional collection. The API routes still return these
+  // fields explicitly; this guard prevents one malformed item from taking
+  // down the entire dashboard.
+  const requiredCapabilities = Array.isArray(task.required_capabilities) ? task.required_capabilities : []
+  const bidCount = Number.isInteger(task.bid_count) ? task.bid_count : null
 
   return (
     <div className={clsx('card p-5 flex flex-col gap-3 transition-shadow', isCompleted ? 'opacity-80' : 'hover:shadow-md')}>
@@ -101,9 +107,9 @@ export default function TaskCard({ task, showBidButton }: Props) {
 
       <p className="text-sm text-gray-500 line-clamp-2">{task.description}</p>
 
-      {task.required_capabilities.length > 0 && (
+      {requiredCapabilities.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {task.required_capabilities.map(c => (
+          {requiredCapabilities.map(c => (
             <span key={c} className="badge bg-brand-50 text-brand-700">{c}</span>
           ))}
         </div>
@@ -113,9 +119,11 @@ export default function TaskCard({ task, showBidButton }: Props) {
         <span className="flex items-center gap-1">
           <Clock size={12} /> {task.deadline_hours}h deadline
         </span>
-        <span className="flex items-center gap-1">
-          <Users size={12} /> {task.bid_count} bid{task.bid_count !== 1 ? 's' : ''}
-        </span>
+        {bidCount !== null && (
+          <span className="flex items-center gap-1">
+            <Users size={12} /> {bidCount} bid{bidCount !== 1 ? 's' : ''}
+          </span>
+        )}
         {task.bidding_closes_at && (
           <span className="flex items-center gap-1">
             Bidding closes {new Date(task.bidding_closes_at).toLocaleDateString()}

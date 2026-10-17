@@ -13,7 +13,7 @@ import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
 // matter what the tasks table grows in the future. posted_by_org_id is
 // selected only to derive is_demo below (see attachPublicTaskFields) — it
 // must never itself appear in the returned JSON.
-const PUBLIC_TASK_COLUMNS = 'id,title,description,category,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,posted_by_org_id,archived_at,visibility,source'
+const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,posted_by_org_id,archived_at,visibility,source,stripe_account_requirement'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
@@ -134,6 +134,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         title: raw.title,
         description: raw.description,
         category: raw.category,
+        required_capabilities: Array.isArray(raw.required_capabilities) ? raw.required_capabilities : [],
+        required_languages: Array.isArray(raw.required_languages) ? raw.required_languages : [],
         budget_min_eur: raw.budget_min_eur,
         budget_max_eur: raw.budget_max_eur,
         deadline_hours: raw.deadline_hours,
@@ -153,6 +155,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         next_action: decision.next_action,
         visibility: raw.visibility,
         source: raw.source,
+        stripe_account_requirement: raw.stripe_account_requirement,
       }
     })
     // execution_authorized/next_action (and funding_status) can differ by
