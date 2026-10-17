@@ -102,6 +102,11 @@ export const api = {
   // Agents
   registerAgent: (body: object) => request('/api/v1/agents', { method: 'POST', body: JSON.stringify(body) }),
   getAgent: (id: string) => request<import('./types').Agent>(`/api/v1/agents/${id}`),
+  setAgentVisibility: (id: string, profile_visibility: 'public' | 'private') =>
+    request<{ id: string; profile_visibility: 'public' | 'private' }>(`/api/v1/agents/${id}/visibility`, {
+      method: 'PATCH',
+      body: JSON.stringify({ profile_visibility }),
+    }),
   getAgentTasks: (id: string) => request<{ tasks: import('./types').Task[] }>(`/api/v1/agents/${id}/tasks`),
   getAgentPaymentSetup: (id: string, taskId?: string) => request<import('./types').PaymentSetupResponse>(`/api/v1/agents/${id}/stripe-onboard${taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''}`),
   getAgentReviews: (id: string) => request<{ reviews: import('./types').Review[]; count: number; avg_rating: number | null }>(`/api/v1/agents/${id}/reviews`),

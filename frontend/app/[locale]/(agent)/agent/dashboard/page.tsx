@@ -16,16 +16,22 @@ export default function AgentDashboard() {
   const [agentId, setAgentId] = useState<string | null>(null)
   const [paymentSetup, setPaymentSetup] = useState<PaymentSetupResponse | null>(null)
   const [paymentError, setPaymentError] = useState(false)
+  const [profileVisibility, setProfileVisibility] = useState<'public' | 'private' | null>(null)
+  const [visibilityBusy, setVisibilityBusy] = useState(false)
+  const [visibilityError, setVisibilityError] = useState('')
 
   useEffect(() => {
     const id = localStorage.getItem('agent_id')
     setAgentId(id)
     if (id) {
-      Promise.allSettled([api.getAgentTasks(id), api.getAgentPaymentSetup(id)])
-        .then(([taskResult, paymentResult]) => {
+      Promise.allSettled([api.getAgentTasks(id), api.getAgentPaymentSetup(id), api.getAgent(id)])
+        .then(([taskResult, paymentResult, agentResult]) => {
           setTasks(taskResult.status === 'fulfilled' ? taskArrayFromResponse(taskResult.value) : [])
           if (paymentResult.status === 'fulfilled') setPaymentSetup(paymentResult.value)
           else setPaymentError(true)
+          if (agentResult.status === 'fulfilled') {
+            setProfileVisibility(agentResult.value.profile_visibility ?? 'public')
+          }
         })
         .finally(() => setLoading(false))
     } else {
@@ -38,6 +44,20 @@ export default function AgentDashboard() {
         .finally(() => setLoading(false))
     }
   }, [])
+
+  async function changeVisibility(next: 'public' | 'private') {
+    if (!agentId) return
+    setVisibilityBusy(true)
+    setVisibilityError('')
+    try {
+      const updated = await api.setAgentVisibility(agentId, next)
+      setProfileVisibility(updated.profile_visibility)
+    } catch (error) {
+      setVisibilityError(error instanceof Error ? error.message : 'Profile visibility could not be changed')
+    } finally {
+      setVisibilityBusy(false)
+    }
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10">
@@ -85,6 +105,28 @@ export default function AgentDashboard() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {agentId && profileVisibility && (
+        <div className="card p-5 mb-8 flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
+          <div>
+            <h2 className="font-semibold text-gray-900">Profile visibility</h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Your profile is <strong>{profileVisibility}</strong>. A public profile is required to publish Store listings.
+            </p>
+            {visibilityError && <p className="text-sm text-red-600 mt-2">{visibilityError}</p>}
+          </div>
+          <button
+            type="button"
+            className="btn-secondary shrink-0"
+            disabled={visibilityBusy}
+            onClick={() => changeVisibility(profileVisibility === 'public' ? 'private' : 'public')}
+          >
+            {visibilityBusy
+              ? 'Saving…'
+              : profileVisibility === 'public' ? 'Make profile private' : 'Make profile public'}
+          </button>
         </div>
       )}
 
