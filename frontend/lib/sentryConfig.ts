@@ -67,6 +67,11 @@ function isInjectedBrowserExtensionError(event: ErrorEvent): boolean {
   if (frames.length === 0) return false
 
   // Browser extensions commonly inject a file literally named `inpage.js`.
+  // Some browsers/Sentry SDK paths normalize a chrome-extension URL such as
+  // `chrome-extension://<id>/executors/200.js` to
+  // `app:///executors/200.js`, losing the scheme that otherwise identifies
+  // it as extension-owned. This exact injected executor is seen across
+  // unrelated sites and is not part of this repository.
   // Extension-owned errors are not actionable Mercatai failures and can make
   // the free Sentry quota noisy. Only discard an event when every frame with a
   // filename is clearly extension-owned; a mixed stack containing an app frame
@@ -75,6 +80,8 @@ function isInjectedBrowserExtensionError(event: ErrorEvent): boolean {
   return filenames.length > 0 && filenames.every(filename =>
     filename === 'inpage.js'
       || filename.endsWith('/inpage.js')
+      || filename === 'executors/200.js'
+      || filename.endsWith('/executors/200.js')
       || filename.startsWith('chrome-extension://')
       || filename.startsWith('moz-extension://')
       || filename.startsWith('safari-web-extension://')

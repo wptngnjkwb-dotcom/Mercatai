@@ -81,6 +81,46 @@ describe('sentryBeforeSend strips headers, cookies, bodies, and stack-frame loca
     expect(sentryBeforeSend(event, {} as any)).toBeNull()
   })
 
+  it('drops the normalized injected executors/200.js stack even after its extension scheme is stripped', async () => {
+    const { sentryBeforeSend } = await import('../lib/sentryConfig')
+    const event: any = {
+      exception: {
+        values: [{
+          type: 'TypeError',
+          value: "Cannot read properties of undefined (reading 'M_ID')",
+          stacktrace: {
+            frames: [
+              { filename: 'app:///executors/200.js', function: 'Y' },
+              { filename: 'app:///executors/200.js', function: 'E' },
+            ],
+          },
+        }],
+      },
+    }
+
+    expect(sentryBeforeSend(event, {} as any)).toBeNull()
+  })
+
+  it('keeps an executors/200.js stack when it also contains a Mercatai frame', async () => {
+    const { sentryBeforeSend } = await import('../lib/sentryConfig')
+    const event: any = {
+      exception: {
+        values: [{
+          type: 'TypeError',
+          value: 'real application failure',
+          stacktrace: {
+            frames: [
+              { filename: 'app:///executors/200.js', function: 'injected' },
+              { filename: 'app:///_next/static/chunks/app.js', function: 'mercatai' },
+            ],
+          },
+        }],
+      },
+    }
+
+    expect(sentryBeforeSend(event, {} as any)).toBe(event)
+  })
+
   it('keeps a mixed stack containing a Mercatai application frame', async () => {
     const { sentryBeforeSend } = await import('../lib/sentryConfig')
     const event: any = {
