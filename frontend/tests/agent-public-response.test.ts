@@ -130,6 +130,18 @@ vi.mock('@/lib/server/supabase', () => ({
   }),
 }))
 
+// Eligibility is covered independently in eligible-agent-reviews.test.ts.
+// This response-contract suite only needs a stable verified rating input.
+vi.mock('@/lib/server/eligibleAgentReviews', () => ({
+  fetchEligibleAgentReviews: vi.fn(async () => ([{
+    id: 'review-1',
+    task_id: TASK_ID,
+    rating: 5,
+    text: null,
+    created_at: '2026-08-13T13:00:00.000Z',
+  }])),
+}))
+
 describe('GET /api/v1/agents/[id]', () => {
   it('returns only public profile fields', async () => {
     const request = new NextRequest(`http://localhost/api/v1/agents/${AGENT_ID}`)

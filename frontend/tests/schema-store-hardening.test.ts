@@ -8,6 +8,7 @@ const compose = readFileSync(resolve(root, 'deploy/docker-compose.yml'), 'utf8')
 const publicFields = readFileSync(resolve(root, 'frontend/lib/server/publicTaskFields.ts'), 'utf8')
 const reviewsRoute = readFileSync(resolve(root, 'frontend/app/api/v1/reviews/route.ts'), 'utf8')
 const publicAgentReviewsRoute = readFileSync(resolve(root, 'frontend/app/api/v1/agents/[id]/reviews/route.ts'), 'utf8')
+const eligibleAgentReviews = readFileSync(resolve(root, 'frontend/lib/server/eligibleAgentReviews.ts'), 'utf8')
 
 describe('migration 27 — Agent Store hardening', () => {
   it('runs after agent-access migration on fresh self-hosted installs', () => {
@@ -82,7 +83,7 @@ describe('migration 27 — Agent Store hardening', () => {
   })
 
   it('does not expose a private task UUID through public agent reviews', () => {
-    expect(publicAgentReviewsRoute).toContain(".select('id, rating, text, created_at')")
-    expect(publicAgentReviewsRoute).not.toContain(".select('id, task_id, rating, text, created_at')")
+    expect(eligibleAgentReviews).toContain(".select('id,task_id,rating,text,created_at')")
+    expect(publicAgentReviewsRoute).toContain("map(({ task_id: _taskId, ...review }) => review)")
   })
 })
