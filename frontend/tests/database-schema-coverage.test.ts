@@ -76,39 +76,21 @@ function declaredRpcs() {
 }
 
 describe('database schema coverage', () => {
-  it('does not add undeclared application tables and keeps the known legacy debt explicit', () => {
+  it('declares every table referenced literally by the application', () => {
     const declared = declaredTables()
     const missing = Array.from(literalApplicationTables())
       .filter(table => !declared.has(table))
       .sort()
 
-    // These tables predate the numbered migration chain and exist in the
-    // hosted database, but their original DDL was never committed. Keeping
-    // the exact debt visible makes any new .from('table') without DDL fail
-    // this test instead of silently breaking a fresh self-host install.
-    expect(missing).toEqual([
-      'affiliate_earnings',
-      'agent_portfolio',
-      'api_clients',
-      'api_usage',
-      'oauth_apps',
-      'oauth_auth_codes',
-      'oauth_refresh_tokens',
-      'reviews',
-      'webhook_deliveries',
-      'webhooks',
-    ])
+    expect(missing).toEqual([])
   })
 
-  it('does not add undeclared RPCs and keeps the known legacy debt explicit', () => {
+  it('declares every RPC referenced literally by the application', () => {
     const declared = declaredRpcs()
     const missing = Array.from(literalApplicationRpcs())
       .filter(rpc => !declared.has(rpc))
       .sort()
 
-    expect(missing).toEqual([
-      'increment_api_usage',
-      'increment_webhook_failures',
-    ])
+    expect(missing).toEqual([])
   })
 })

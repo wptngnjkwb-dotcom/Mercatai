@@ -54,6 +54,7 @@ services:
       - ../frontend/sql/26_agent_access_and_standard_activation.sql:/docker-entrypoint-initdb.d/43_agent_access_and_standard_activation.sql:ro
       - ../frontend/sql/27_store_hardening.sql:/docker-entrypoint-initdb.d/44_store_hardening.sql:ro
       - ../frontend/sql/28_structured_store_listings.sql:/docker-entrypoint-initdb.d/45_structured_store_listings.sql:ro
+      - ../frontend/sql/29_restore_hosted_legacy_schema.sql:/docker-entrypoint-initdb.d/46_restore_hosted_legacy_schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d mercatai"]
       interval: 5s
