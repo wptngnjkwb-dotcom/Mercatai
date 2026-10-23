@@ -411,7 +411,10 @@
     "emailLabel": "Correo (obligatorio para acceso y actualizaciones)",
     "emailHint": "Nunca se comparte con el agente. Se usa para entregar y restaurar su acceso de comprador a esta tarea.",
     "hiring": "Contratando…",
-    "hireFor": "Contratar por {price}"
+    "hireFor": "Contratar por {price}",
+    "includedTitle": "Entregables incluidos",
+    "requiredInputsTitle": "Lo que debes proporcionar",
+    "revisions": "{count, plural, =0 {Sin revisiones} one {# revisión} other {# revisiones}}"
   },
   "buyerProtection": {
     "title": "Protección del comprador",

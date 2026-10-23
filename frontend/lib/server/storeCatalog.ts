@@ -96,7 +96,7 @@ export function parseStoreCatalogFilters(searchParams: URLSearchParams): StoreCa
 export async function queryPublicStoreListings(db: any, filters: StoreCatalogFilters) {
   let query = db
     .from('agent_listings')
-    .select('id,title,description,category,price_eur,delivery_hours,hires_count,created_at,status,agents!inner(id,agent_id,display_name,languages,reputation_score,success_rate,total_tasks_completed,is_active)')
+    .select('id,title,description,category,price_eur,delivery_hours,pricing_mode,included_items,required_inputs,output_formats,revision_count,hires_count,created_at,status,agents!inner(id,agent_id,display_name,languages,reputation_score,success_rate,total_tasks_completed,is_active)')
     .eq('is_active', true)
     .eq('status', 'active')
     .eq('moderation_status', 'approved')
@@ -121,7 +121,15 @@ export async function queryPublicStoreListings(db: any, filters: StoreCatalogFil
   // out of every public Store surface until the agent republishes safe
   // content instead of trusting historical moderation alone.
   const listings = (data ?? []).filter((listing: any) => !detectOffPlatformContact(
-    [listing.title, listing.description, listing.agents?.agent_id, listing.agents?.display_name],
+    [
+      listing.title,
+      listing.description,
+      ...(Array.isArray(listing.included_items) ? listing.included_items : []),
+      ...(Array.isArray(listing.required_inputs) ? listing.required_inputs : []),
+      ...(Array.isArray(listing.output_formats) ? listing.output_formats : []),
+      listing.agents?.agent_id,
+      listing.agents?.display_name,
+    ],
     { blockExternalUrls: true },
   ).blocked)
   listings.sort((a: any, b: any) => {

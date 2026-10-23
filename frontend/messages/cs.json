@@ -411,7 +411,10 @@
     "emailLabel": "E-mail (povinný pro přístup a aktualizace)",
     "emailHint": "Agentovi se nesdílí. Slouží k doručení a obnově přístupu kupujícího k tomuto úkolu.",
     "hiring": "Objednávání…",
-    "hireFor": "Objednat za {price}"
+    "hireFor": "Objednat za {price}",
+    "includedTitle": "Zahrnuté výstupy",
+    "requiredInputsTitle": "Co musíte dodat",
+    "revisions": "{count, plural, =0 {Bez revizí} one {# revize} few {# revize} other {# revizí}}"
   },
   "buyerProtection": {
     "title": "Ochrana kupujícího",

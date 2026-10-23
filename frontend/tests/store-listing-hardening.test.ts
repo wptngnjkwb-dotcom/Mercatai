@@ -85,6 +85,11 @@ function createRequest(overrides: Record<string, unknown> = {}) {
       category: 'research',
       price_eur: 25,
       delivery_hours: 24,
+      pricing_mode: 'fixed',
+      included_items: ['Source-backed result table', 'Executive summary'],
+      required_inputs: ['Target market'],
+      output_formats: ['csv', 'pdf'],
+      revision_count: 1,
       ...overrides,
     }),
   })
@@ -121,6 +126,19 @@ describe('POST /api/v1/store — publication hardening', () => {
     expect(insertedListings).toHaveLength(0)
   })
 
+  it('rejects invalid structured terms before payment lookup', async () => {
+    const { POST } = await import('@/app/api/v1/store/route')
+    const invalidMode = await POST(createRequest({ pricing_mode: 'starting_at' }))
+    const invalidRevisions = await POST(createRequest({ revision_count: 11 }))
+    const invalidFormat = await POST(createRequest({ output_formats: ['csv', 'executable'] }))
+
+    expect(invalidMode.status).toBe(400)
+    expect(invalidRevisions.status).toBe(400)
+    expect(invalidFormat.status).toBe(400)
+    expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
+    expect(insertedListings).toHaveLength(0)
+  })
+
   it('blocks unsafe listing content without creating a public row', async () => {
     const { POST } = await import('@/app/api/v1/store/route')
     const response = await POST(createRequest({
@@ -149,6 +167,21 @@ describe('POST /api/v1/store — publication hardening', () => {
     expect(insertedListings).toHaveLength(0)
   })
 
+  it('applies the contact policy to every structured term', async () => {
+    const { POST } = await import('@/app/api/v1/store/route')
+    const response = await POST(createRequest({
+      included_items: ['Source table', 'Follow-up at https://outside.example.com'],
+      required_inputs: ['Telegram @outside_agent'],
+    }))
+    const body = await response.json()
+
+    expect(response.status).toBe(422)
+    expect(body).toMatchObject({ code: 'off_platform_contact_not_allowed' })
+    expect(body.reason_codes).toEqual(expect.arrayContaining(['EXTERNAL_URL', 'MESSAGING_CONTACT']))
+    expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
+    expect(insertedListings).toHaveLength(0)
+  })
+
   it('publishes an approved, moderated active listing with an auditable lifecycle', async () => {
     const { POST } = await import('@/app/api/v1/store/route')
     const response = await POST(createRequest())
@@ -163,6 +196,11 @@ describe('POST /api/v1/store — publication hardening', () => {
       moderation_status: 'approved',
       moderation_policy_version: expect.any(String),
       published_at: expect.any(String),
+      pricing_mode: 'fixed',
+      included_items: ['Source-backed result table', 'Executive summary'],
+      required_inputs: ['Target market'],
+      output_formats: ['csv', 'pdf'],
+      revision_count: 1,
     })
     expect(body).toMatchObject({ id: 'listing-1', status: 'active', moderation_status: 'approved' })
   })

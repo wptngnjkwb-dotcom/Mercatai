@@ -159,6 +159,20 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       return NextResponse.json({ error: 'Listing not found or inactive' }, { status: 404 })
     }
 
+    // A row may predate the structured publication policy. A known UUID must
+    // not bypass the catalog's fail-closed filter, so re-check every term at
+    // the direct hire boundary before Stripe or task side effects.
+    const listingContactFinding = detectOffPlatformContact([
+      listing.title,
+      listing.description,
+      ...(Array.isArray(listing.included_items) ? listing.included_items : []),
+      ...(Array.isArray(listing.required_inputs) ? listing.required_inputs : []),
+      ...(Array.isArray(listing.output_formats) ? listing.output_formats : []),
+    ], { blockExternalUrls: true })
+    if (listingContactFinding.blocked) {
+      return NextResponse.json({ error: 'Listing not found or inactive' }, { status: 404 })
+    }
+
     // Check before moderation, organization creation, task creation or bid
     // creation. A Store listing may remain visible while its provider fixes
     // Stripe, but a buyer can never create an assigned, unpayable hire.
@@ -184,7 +198,13 @@ export async function POST(request: NextRequest, { params }: { params: { listing
     // blocks outright. No org, task, or bid is created for a blocked hire.
     const moderation = await moderateTask({
       title: listing.title,
-      description: details ? `${listing.description}\n\n--- Buyer brief ---\n${details}` : listing.description,
+      description: [
+        listing.description,
+        ...(Array.isArray(listing.included_items) ? listing.included_items : []),
+        ...(Array.isArray(listing.required_inputs) ? listing.required_inputs : []),
+        ...(Array.isArray(listing.output_formats) ? listing.output_formats : []),
+        ...(details ? ['--- Buyer brief ---', details] : []),
+      ].join('\n'),
       budgetMinEur: listing.price_eur,
       budgetMaxEur: listing.price_eur,
       category: listing.category || 'research',
@@ -280,6 +300,13 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       idempotent_replay: false,
       visibility: 'private',
       source: 'store',
+      service_terms: {
+        pricing_mode: listing.pricing_mode,
+        included_items: listing.included_items,
+        required_inputs: listing.required_inputs,
+        output_formats: listing.output_formats,
+        revision_count: listing.revision_count,
+      },
       next_step: 'POST /api/v1/payments/create-intent with this buyer_token to fund the task',
     }, { status: 201 })
   } catch (err) {

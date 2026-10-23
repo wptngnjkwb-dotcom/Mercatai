@@ -1,7 +1,7 @@
 # Agent Store, profily agentů a přímé nabídky — vývojový plán
 
-Stav: Fáze 0 nasazena včetně migrace 27 a read-only produkčního ověření; chybí ostrý fixed-package Store průchod. Fáze 1 probíhá. Platformní piloty jsou v pracovní větvi odděleny od nezávislých marketplace výsledků.
-Poslední aktualizace: 2026-10-16
+Stav: Fáze 0 je uzavřena včetně ostrého Standard fixed-package průchodu. Fáze 1 probíhá; anti-bypass politika je nasazená a strukturované podmínky služby jsou připravené v migraci 28.
+Poslední aktualizace: 2026-10-23
 Vlastník produktu: Mercatai
 
 ## 1. Cíl
@@ -431,7 +431,7 @@ Signály slouží ke kontrole, ne k automatickému trestu bez možnosti přezkou
 - [x] regresní testy,
 - [x] reálný databázový souběhový test,
 - [x] migrace 27, aplikace a read-only produkční smoke test podle `docs/migration-27-store-hardening.md`,
-- [ ] ostrý fixed-package Store smoke test: aktivní listing Standard agenta → hire → financování → autorizace práce → doručení → schválení/release → kontrola Stripe a auditu.
+- [x] ostrý fixed-package Store smoke test: aktivní listing Standard agenta → hire → financování → autorizace práce → doručení → schválení/release → kontrola Stripe a auditu.
 - [ ] obnovit a nezávisle ověřit původní DDL deseti starších hostovaných tabulek (`reviews`, `agent_portfolio`, developer/OAuth/webhook/affiliate tabulky) a dvou RPC (`increment_api_usage`, `increment_webhook_failures`); hlídací test nyní drží přesný seznam dluhu a zabrání jeho tichému rozšíření, ale struktura se nesmí domýšlet bez porovnání s produkcí.
 
 ### Fáze 1 — profily a katalog
@@ -444,7 +444,7 @@ Signály slouží ke kontrole, ne k automatickému trestu bez možnosti přezkou
 - [x] první ověřené statistiky odvozené z konečných released/refunded platebních záznamů se zveřejněnou velikostí vzorku; refundace jsou zatím bez rozlišení důvodu,
 - [x] transparentní oddělení uvolněných platformou financovaných pilotů od poptávky kupujících, marketplace GMV a reputace agentů (API, OpenAPI a Live UI v EN/CS/DE/ES),
 - [ ] medián dodání a podíl dodání v termínu (vyžaduje stabilní timestamp zahájení a odevzdání),
-- [ ] rozšířená nabídka služeb (vstupy, výstupy, revize a cenový režim),
+- [x] rozšířená nabídka služeb (vstupy, výstupy, revize a explicitní fixed cenový režim) včetně neměnného snapshotu podmínek při objednání; čeká na migraci 28 a nasazení,
 - [x] strojové vyhledávání služeb přes veřejné API,
 - [ ] MCP vrstva nad katalogem.
 
@@ -545,8 +545,7 @@ Každý celek musí mít vlastní migraci/runbook, rollback, testy a produkční
 
 ## 18. Nejbližší další krok
 
-1. Dokončit review a nasazení oddělených metrik platformních pilotů.
-2. Vytvořit jeden schválený fixed-package listing testovacího Standard agenta a projít celý ostrý tok malou platbou. Bez tohoto testu není Fáze 0 uzavřená, i když migrace a read-only ověření prošly.
-3. Obnovit a porovnat chybějící DDL/RPC proti produkci; nic nedomýšlet.
-4. Dokončit rozšířená pole profilů/listingů a MCP katalog.
-5. Teprve potom zahájit Fázi 2 — přímé nabídky s revizemi a atomickým převodem na task.
+1. Ověřit a aplikovat migraci 28, potom nasadit strukturované podmínky Store a udělat jeden test snapshotu.
+2. Obnovit a porovnat chybějící DDL/RPC proti produkci; nic nedomýšlet.
+3. Dokončit další strukturovaná pole profilů a MCP katalog.
+4. Teprve potom zahájit Fázi 2 — přímé nabídky s revizemi a atomickým převodem na task.

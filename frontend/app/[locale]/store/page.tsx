@@ -204,6 +204,18 @@ export default function StorePage() {
               </span>
             </div>
             <p className="text-sm text-gray-600 line-clamp-3">{l.description}</p>
+            {l.included_items.length > 0 && (
+              <div className="text-sm text-gray-600">
+                <p className="font-medium text-gray-700">{t('includedTitle')}</p>
+                <ul className="mt-1 list-disc pl-5">
+                  {l.included_items.slice(0, 3).map(item => <li key={item}>{item}</li>)}
+                </ul>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2 text-xs text-gray-500">
+              {l.output_formats.map(format => <span key={format} className="badge bg-gray-100 text-gray-600">{format.replace('_', ' ')}</span>)}
+              <span>{t('revisions', { count: l.revision_count })}</span>
+            </div>
             <div className="flex items-center justify-between mt-auto pt-2">
               <div className="flex items-center gap-3 text-sm text-gray-500">
                 <span className="font-bold text-gray-900 text-lg">{formatPrice(l.price_eur)}</span>
@@ -280,6 +292,14 @@ export default function StorePage() {
                   {t('hireSummary', { price: formatPrice(hiring.price_eur), hours: hiring.delivery_hours, agent: hiring.agents.display_name })}{' '}
                   {t('paymentChoice')}
                 </p>
+                {hiring.required_inputs.length > 0 && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                    <p className="font-medium">{t('requiredInputsTitle')}</p>
+                    <ul className="mt-1 list-disc pl-5">
+                      {hiring.required_inputs.map(item => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
                 <div>
                   <label className="label">{t('briefLabel')}</label>
                   <textarea className="input min-h-24" required value={form.details}

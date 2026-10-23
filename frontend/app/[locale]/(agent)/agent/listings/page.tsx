@@ -11,6 +11,11 @@ interface Listing {
   category: string | null
   price_eur: number
   delivery_hours: number
+  pricing_mode: 'fixed'
+  included_items: string[]
+  required_inputs: string[]
+  output_formats: string[]
+  revision_count: number
   hires_count: number
   agents?: { id: string }
 }
@@ -28,7 +33,11 @@ export default function AgentListingsPage() {
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [form, setForm] = useState({ title: '', description: '', category: 'research', price_eur: '50', delivery_hours: '24' })
+  const emptyForm = {
+    title: '', description: '', category: 'research', price_eur: '50', delivery_hours: '24',
+    included_items: '', required_inputs: '', output_formats: 'csv', revision_count: '0',
+  }
+  const [form, setForm] = useState(emptyForm)
 
   const load = useCallback(async (id: string) => {
     // Public catalog filtered client-side to this agent's own listings
@@ -57,12 +66,17 @@ export default function AgentListingsPage() {
           category: form.category,
           price_eur: Number(form.price_eur),
           delivery_hours: Number(form.delivery_hours),
+          pricing_mode: 'fixed',
+          included_items: form.included_items.split('\n').map(item => item.trim()).filter(Boolean),
+          required_inputs: form.required_inputs.split('\n').map(item => item.trim()).filter(Boolean),
+          output_formats: form.output_formats.split(',').map(item => item.trim().toLowerCase()).filter(Boolean),
+          revision_count: Number(form.revision_count),
         }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'Failed to create listing')
       setShowForm(false)
-      setForm({ title: '', description: '', category: 'research', price_eur: '50', delivery_hours: '24' })
+      setForm(emptyForm)
       if (agentId) await load(agentId)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create listing')
@@ -142,6 +156,34 @@ export default function AgentListingsPage() {
                 onChange={e => setForm(f => ({ ...f, delivery_hours: e.target.value }))} />
             </div>
           </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="label">Included deliverables</label>
+              <textarea className="input min-h-24" value={form.included_items}
+                onChange={e => setForm(f => ({ ...f, included_items: e.target.value }))}
+                placeholder={'One item per line\nSource-backed result table\nExecutive summary'} />
+            </div>
+            <div>
+              <label className="label">Buyer must provide</label>
+              <textarea className="input min-h-24" value={form.required_inputs}
+                onChange={e => setForm(f => ({ ...f, required_inputs: e.target.value }))}
+                placeholder={'One item per line\nTarget market\nRequired columns'} />
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="label">Output formats</label>
+              <input className="input" value={form.output_formats}
+                onChange={e => setForm(f => ({ ...f, output_formats: e.target.value }))}
+                placeholder="csv, xlsx, pdf" />
+              <p className="mt-1 text-xs text-gray-500">Comma-separated: csv, xlsx, json, pdf, docx, markdown, plain_text, html, source_code, other.</p>
+            </div>
+            <div>
+              <label className="label">Included revisions</label>
+              <input className="input" type="number" min={0} max={10} value={form.revision_count}
+                onChange={e => setForm(f => ({ ...f, revision_count: e.target.value }))} />
+            </div>
+          </div>
           <p className="text-xs text-gray-500">
             Publishing creates a standing offer. A buyer can assign it immediately; work starts only after the task API confirms funding and execution authorization.
           </p>
@@ -164,6 +206,11 @@ export default function AgentListingsPage() {
               <p className="text-sm text-gray-500">
                 {l.category?.replace('_', ' ')} · €{l.price_eur} · {l.delivery_hours}h · {l.hires_count}× funded
               </p>
+              {(l.included_items?.length > 0 || l.output_formats?.length > 0) && (
+                <p className="mt-1 text-xs text-gray-500">
+                  {l.included_items?.length ?? 0} deliverables · {l.output_formats?.join(', ') || 'format not specified'} · {l.revision_count} revisions
+                </p>
+              )}
             </div>
             <button className="btn-secondary" onClick={() => remove(l.id)} title="Deactivate">
               <Trash2 size={16} />

@@ -91,6 +91,7 @@ vi.mock('@/lib/server/supabase', () => ({
           { id: 'listing-rejected', title: 'Rejected listing', description: '', category: null, price_eur: 5, delivery_hours: 12, hires_count: 0, created_at: '2026-03-02', is_active: true, status: 'active', moderation_status: 'rejected', agents: PUBLIC_AGENT },
           { id: 'listing-priv', title: 'Private listing', description: '', category: null, price_eur: 10, delivery_hours: 24, hires_count: 0, created_at: '2026-01-01', is_active: true, status: 'active', moderation_status: 'approved', agents: PRIVATE_AGENT },
           { id: 'listing-legacy-contact', title: 'Legacy contact listing', description: 'Continue at https://outside.example.com', category: null, price_eur: 10, delivery_hours: 24, hires_count: 0, created_at: '2026-01-02', is_active: true, status: 'active', moderation_status: 'approved', agents: PUBLIC_AGENT },
+          { id: 'listing-legacy-structured-contact', title: 'Legacy structured listing', description: 'A normal description that predates structured validation.', included_items: ['Write to old-contact@example.com'], required_inputs: [], output_formats: ['pdf'], category: null, price_eur: 10, delivery_hours: 24, hires_count: 0, created_at: '2026-01-03', is_active: true, status: 'active', moderation_status: 'approved', agents: PUBLIC_AGENT },
         ]
         return makeListingsBuilder(listings)
       }
@@ -132,6 +133,7 @@ describe('GET /api/v1/store — excludes private agents\' listings', () => {
     expect(body.listings.some((l: any) => l.id === 'listing-paused')).toBe(false)
     expect(body.listings.some((l: any) => l.id === 'listing-rejected')).toBe(false)
     expect(body.listings.some((l: any) => l.id === 'listing-legacy-contact')).toBe(false)
+    expect(body.listings.some((l: any) => l.id === 'listing-legacy-structured-contact')).toBe(false)
     expect(body.listings.some((l: any) => l.id === 'listing-pub')).toBe(true)
   })
 

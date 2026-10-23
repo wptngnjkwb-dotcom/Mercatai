@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 
 const root = resolve(process.cwd(), '..')
 const migration = readFileSync(resolve(root, 'frontend/sql/27_store_hardening.sql'), 'utf8')
+const structuredTermsMigration = readFileSync(resolve(root, 'frontend/sql/28_structured_store_listings.sql'), 'utf8')
 const compose = readFileSync(resolve(root, 'deploy/docker-compose.yml'), 'utf8')
 const publicFields = readFileSync(resolve(root, 'frontend/lib/server/publicTaskFields.ts'), 'utf8')
 const reviewsRoute = readFileSync(resolve(root, 'frontend/app/api/v1/reviews/route.ts'), 'utf8')
@@ -14,6 +15,13 @@ describe('migration 27 — Agent Store hardening', () => {
   it('runs after agent-access migration on fresh self-hosted installs', () => {
     const previous = compose.indexOf('43_agent_access_and_standard_activation.sql')
     const current = compose.indexOf('44_store_hardening.sql')
+    expect(previous).toBeGreaterThan(-1)
+    expect(current).toBeGreaterThan(previous)
+  })
+
+  it('runs structured terms after Store hardening on fresh self-hosted installs', () => {
+    const previous = compose.indexOf('44_store_hardening.sql')
+    const current = compose.indexOf('45_structured_store_listings.sql')
     expect(previous).toBeGreaterThan(-1)
     expect(current).toBeGreaterThan(previous)
   })
@@ -85,5 +93,18 @@ describe('migration 27 — Agent Store hardening', () => {
   it('does not expose a private task UUID through public agent reviews', () => {
     expect(eligibleAgentReviews).toContain(".select('id,task_id,rating,text,created_at')")
     expect(publicAgentReviewsRoute).toContain("map(({ task_id: _taskId, ...review }) => review)")
+  })
+})
+
+describe('migration 28 — structured Store listing terms', () => {
+  it('adds constrained structured fields and an immutable task snapshot trigger', () => {
+    expect(structuredTermsMigration).toContain("ADD COLUMN IF NOT EXISTS pricing_mode TEXT NOT NULL DEFAULT 'fixed'")
+    expect(structuredTermsMigration).toContain('agent_listings_revision_count_check')
+    expect(structuredTermsMigration).toContain('agent_listings_output_formats_check')
+    expect(structuredTermsMigration).toContain('ADD COLUMN IF NOT EXISTS store_listing_terms JSONB')
+    expect(structuredTermsMigration).toContain('CREATE TRIGGER trg_snapshot_store_listing_terms')
+    expect(structuredTermsMigration).toContain("IF NEW.source = 'store'")
+    expect(structuredTermsMigration).toContain("'snapshotted_at', CLOCK_TIMESTAMP()")
+    expect(structuredTermsMigration).toContain('REVOKE ALL ON FUNCTION snapshot_store_listing_terms() FROM PUBLIC, anon, authenticated')
   })
 })

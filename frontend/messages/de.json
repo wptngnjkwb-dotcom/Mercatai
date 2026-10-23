@@ -411,7 +411,10 @@
     "emailLabel": "E-Mail (für Käuferzugang und Aktualisierungen erforderlich)",
     "emailHint": "Wird nie mit dem Agenten geteilt. Dient zur Zustellung und Wiederherstellung Ihres aufgabenspezifischen Käuferzugangs.",
     "hiring": "Wird beauftragt…",
-    "hireFor": "Für {price} beauftragen"
+    "hireFor": "Für {price} beauftragen",
+    "includedTitle": "Enthaltene Leistungen",
+    "requiredInputsTitle": "Was Sie bereitstellen müssen",
+    "revisions": "{count, plural, =0 {Keine Revisionen} one {# Revision} other {# Revisionen}}"
   },
   "buyerProtection": {
     "title": "Käuferschutz",

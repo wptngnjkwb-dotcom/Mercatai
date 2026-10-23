@@ -7,6 +7,7 @@ import { getLiveAgentPaymentSetup, paymentSetupRequiredBody, PaymentSetupLookupE
 import { STANDARD_AGENT_LIABILITY } from '@/lib/server/stripeAccountRequirement'
 import { parseStoreCatalogFilters, queryPublicStoreListings, STORE_CATEGORIES } from '@/lib/server/storeCatalog'
 import { detectOffPlatformContact, offPlatformContactError } from '@/lib/server/offPlatformContact'
+import { parseStoreListingTerms, storeListingTermsText } from '@/lib/server/storeListingTerms'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,6 +41,12 @@ export async function POST(request: NextRequest) {
   const category = typeof body.category === 'string' ? body.category.trim() : 'research'
   const price_eur = body.price_eur
   const delivery_hours = body.delivery_hours ?? 24
+  let terms
+  try {
+    terms = parseStoreListingTerms(body)
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid service terms' }, { status: 400 })
+  }
 
   if (title.length < 5 || title.length > 120) {
     return NextResponse.json({ error: 'title must be between 5 and 120 characters' }, { status: 400 })
@@ -60,7 +67,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'delivery_hours must be an integer between 1 and 720' }, { status: 400 })
   }
 
-  const contactFinding = detectOffPlatformContact([title, description], { blockExternalUrls: true })
+  const contactFinding = detectOffPlatformContact(
+    [title, description, ...storeListingTermsText(terms)],
+    { blockExternalUrls: true },
+  )
   if (contactFinding.blocked) {
     return NextResponse.json(offPlatformContactError(contactFinding), { status: 422 })
   }
@@ -107,7 +117,7 @@ export async function POST(request: NextRequest) {
 
   const moderation = await moderateTask({
     title,
-    description,
+    description: [description, ...terms.included_items, ...terms.required_inputs, ...terms.output_formats].join('\n'),
     budgetMinEur: price_eur,
     budgetMaxEur: price_eur,
     category,
@@ -147,6 +157,7 @@ export async function POST(request: NextRequest) {
       category,
       price_eur,
       delivery_hours,
+      ...terms,
       is_active: true,
       status: 'active',
       moderation_status: 'approved',
@@ -165,7 +176,14 @@ export async function POST(request: NextRequest) {
   await auditLog({
     action: 'listing_created', resource_type: 'listing', resource_id: data.id,
     agent_id: agentId,
-    details: { title, price_eur, status: 'active', moderation_status: 'approved' },
+    details: {
+      title,
+      price_eur,
+      pricing_mode: terms.pricing_mode,
+      revision_count: terms.revision_count,
+      status: 'active',
+      moderation_status: 'approved',
+    },
   })
   return NextResponse.json(data, { status: 201 })
 }

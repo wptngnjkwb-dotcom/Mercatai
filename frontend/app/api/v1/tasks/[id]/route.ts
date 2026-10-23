@@ -16,7 +16,7 @@ import { canViewTask } from '@/lib/server/taskVisibility'
 // moderation_status just above it. Delivered work (delivery_note) is never
 // part of this projection: it is loaded separately, and only for the task's
 // buyer, assigned agent or an admin — see lib/server/deliveredWork.ts.
-const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status,posted_by_org_id,archived_at,archived_reason,stripe_account_requirement,visibility,source,target_agent_id'
+const PUBLIC_TASK_COLUMNS = 'id,title,description,category,required_capabilities,required_languages,budget_min_eur,budget_max_eur,deadline_hours,status,assigned_agent_id,bidding_closes_at,created_at,assigned_at,delivery_deadline_at,moderation_status,posted_by_org_id,archived_at,archived_reason,stripe_account_requirement,visibility,source,target_agent_id,store_listing_terms'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const db = getSupabase()
@@ -113,6 +113,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       stripe_account_requirement: task.stripe_account_requirement,
       visibility: task.visibility,
       source: task.source,
+      // Immutable fixed-package terms are visible only after canViewTask()
+      // admitted a Store task participant or admin above. Public marketplace
+      // tasks never contain this field.
+      ...(task.source === 'store' && task.store_listing_terms
+        ? { store_listing_terms: task.store_listing_terms }
+        : {}),
       // Only ever non-null here for an admin viewing an archived task —
       // anyone else who could see this field at all would already have
       // 404'd above.

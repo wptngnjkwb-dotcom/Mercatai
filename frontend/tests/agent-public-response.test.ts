@@ -83,6 +83,20 @@ const rawTask = {
   moderation_status: 'approved',
   archived_at: null as string | null,
   archived_reason: null as string | null,
+  visibility: 'public' as 'public' | 'private',
+  source: 'marketplace' as 'marketplace' | 'store',
+  target_agent_id: null as string | null,
+  store_listing_terms: {
+    listing_id: '4a3b168f-19f2-4f66-bfc1-3b606fa86db2',
+    pricing_mode: 'fixed',
+    price_eur: 49,
+    delivery_hours: 48,
+    included_items: ['Source-backed result table'],
+    required_inputs: ['Target market'],
+    output_formats: ['csv'],
+    revision_count: 1,
+    snapshotted_at: '2026-10-23T12:00:00.000Z',
+  },
   // These fields must remain private even if a query or future schema change
   // accidentally makes them available to the handler.
   buyer_email: 'buyer@example.com',
@@ -301,6 +315,47 @@ describe('GET /api/v1/tasks/[id]', () => {
     for (const internalOnlyField of ['moderation_status', 'posted_by_org_id']) {
       expect(selectedTaskColumns.split(',')).toContain(internalOnlyField)
       expect(body).not.toHaveProperty(internalOnlyField)
+    }
+
+    // A malformed or historical public marketplace row must never expose a
+    // Store contract snapshot merely because the column contains data.
+    expect(body).not.toHaveProperty('store_listing_terms')
+  })
+
+  it('returns immutable Store terms only to a private task participant', async () => {
+    const original = {
+      visibility: rawTask.visibility,
+      source: rawTask.source,
+      assigned_agent_id: rawTask.assigned_agent_id,
+      target_agent_id: rawTask.target_agent_id,
+    }
+    rawTask.visibility = 'private'
+    rawTask.source = 'store'
+    rawTask.assigned_agent_id = OTHER_AGENT_ID
+    rawTask.target_agent_id = OTHER_AGENT_ID
+
+    try {
+      const anonymous = await getTask(
+        new NextRequest(`http://localhost/api/v1/tasks/${TASK_ID}`),
+        { params: { id: TASK_ID } },
+      )
+      expect(anonymous.status).toBe(404)
+      expect(await anonymous.json()).not.toHaveProperty('store_listing_terms')
+
+      const buyerToken = await signToken({
+        role: 'buyer', task_id: TASK_ID, org_id: rawTask.posted_by_org_id,
+      }, '30d')
+      const buyer = await getTask(new NextRequest(
+        `http://localhost/api/v1/tasks/${TASK_ID}`,
+        { headers: { authorization: `Bearer ${buyerToken}` } },
+      ), { params: { id: TASK_ID } })
+      expect(buyer.status).toBe(200)
+      expect((await buyer.json()).store_listing_terms).toEqual(rawTask.store_listing_terms)
+    } finally {
+      rawTask.visibility = original.visibility
+      rawTask.source = original.source
+      rawTask.assigned_agent_id = original.assigned_agent_id
+      rawTask.target_agent_id = original.target_agent_id
     }
   })
 

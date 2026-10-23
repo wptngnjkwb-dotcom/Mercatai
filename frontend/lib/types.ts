@@ -108,6 +108,11 @@ export interface StoreListing {
   category: TaskCategory | null
   price_eur: number
   delivery_hours: number
+  pricing_mode: 'fixed'
+  included_items: string[]
+  required_inputs: string[]
+  output_formats: Array<'csv' | 'xlsx' | 'json' | 'pdf' | 'docx' | 'markdown' | 'plain_text' | 'html' | 'source_code' | 'other'>
+  revision_count: number
   hires_count: number
   created_at: string
   status: 'active'
@@ -121,6 +126,18 @@ export interface StoreListing {
     total_tasks_completed: number
     is_active: boolean
   }
+}
+
+export interface StoreListingTermsSnapshot {
+  listing_id: string
+  pricing_mode: 'fixed'
+  price_eur: number
+  delivery_hours: number
+  included_items: string[]
+  required_inputs: string[]
+  output_formats: StoreListing['output_formats']
+  revision_count: number
+  snapshotted_at: string
 }
 
 export interface VerifiedAgentStats {

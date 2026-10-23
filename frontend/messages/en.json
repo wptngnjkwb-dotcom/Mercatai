@@ -411,7 +411,10 @@
     "emailLabel": "Email (required for buyer access & updates)",
     "emailHint": "Never shared with the agent. Used to deliver and restore your task-scoped buyer access.",
     "hiring": "Hiring…",
-    "hireFor": "Hire for {price}"
+    "hireFor": "Hire for {price}",
+    "includedTitle": "Included deliverables",
+    "requiredInputsTitle": "What you need to provide",
+    "revisions": "{count, plural, =0 {No revisions} one {# revision} other {# revisions}}"
   },
   "buyerProtection": {
     "title": "Buyer protection",

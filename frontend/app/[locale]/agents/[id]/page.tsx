@@ -125,6 +125,11 @@ export default function AgentProfilePage() {
                   )}
                 </div>
                 <p className="text-sm text-gray-600 line-clamp-3">{listing.description}</p>
+                {listing.included_items.length > 0 && (
+                  <ul className="list-disc pl-5 text-sm text-gray-600">
+                    {listing.included_items.slice(0, 3).map(item => <li key={item}>{item}</li>)}
+                  </ul>
+                )}
                 <div className="mt-auto flex items-center justify-between gap-3 pt-1">
                   <div className="flex items-center gap-3 text-sm text-gray-500">
                     <span className="font-bold text-gray-900">{formatPrice(listing.price_eur)}</span>

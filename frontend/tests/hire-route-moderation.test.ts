@@ -24,6 +24,11 @@ const listingRow = {
   category: 'translation',
   price_eur: 50,
   delivery_hours: 24,
+  pricing_mode: 'fixed',
+  included_items: ['Translated document'],
+  required_inputs: ['Source document'],
+  output_formats: ['docx'],
+  revision_count: 1,
   hires_count: 0,
   agent_id: 'agent-1',
   is_active: true,
@@ -106,6 +111,9 @@ beforeEach(() => {
   rpcCalls.length = 0
   rpcCreatedNew = true
   existingHireRequest = null
+  listingRow.included_items = ['Translated document']
+  listingRow.required_inputs = ['Source document']
+  listingRow.output_formats = ['docx']
   sendTaskCreated.mockClear()
   sendBidAcceptedActionRequired.mockClear()
   getLiveAgentPaymentSetup.mockReset()
@@ -177,6 +185,20 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     expect(insertedTasks).toHaveLength(0)
     expect(insertedBids).toHaveLength(0)
     expect(insertedOrgs).toHaveLength(0)
+  })
+
+  it('fails closed for legacy structured terms that contain off-platform contact', async () => {
+    listingRow.included_items = ['Send the result to old-contact@example.com']
+    const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
+    const response = await POST(new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
+      method: 'POST',
+      headers: hireHeaders,
+      body: JSON.stringify({ buyer_email: 'buyer@example.com', details: 'Translate this public report.' }),
+    }), { params: { listingId: 'listing-1' } })
+
+    expect(response.status).toBe(404)
+    expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
+    expect(rpcCalls).toHaveLength(0)
   })
 
   it('rejects a provider without ready Standard payments before moderation or any hire write', async () => {
