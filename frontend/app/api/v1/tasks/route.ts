@@ -17,6 +17,7 @@ import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { callerAgentIdFromToken, computeExecutionDecision, fetchAgentBidTaskIds } from '@/lib/server/executionAuthorization'
 import { STANDARD_AGENT_LIABILITY } from '@/lib/server/stripeAccountRequirement'
 import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
+import { detectOffPlatformContact, offPlatformContactError } from '@/lib/server/offPlatformContact'
 
 const BUYER_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -181,6 +182,17 @@ export async function POST(request: NextRequest) {
     const biddingWindowHours = bidding_window_hours ?? 4
     if (typeof biddingWindowHours !== 'number' || !Number.isFinite(biddingWindowHours) || biddingWindowHours < 1 || biddingWindowHours > 48) {
       return NextResponse.json({ error: 'bidding_window_hours must be between 1 and 48' }, { status: 400 })
+    }
+
+    // Source URLs remain valid research inputs, but direct contact,
+    // messaging, payment and crypto coordinates would let either party move
+    // the engagement off-platform before funding.
+    const contactFinding = detectOffPlatformContact([
+      typeof title === 'string' ? title : '',
+      typeof description === 'string' ? description : '',
+    ])
+    if (contactFinding.blocked) {
+      return NextResponse.json(offPlatformContactError(contactFinding), { status: 422 })
     }
 
     const db = getSupabase()

@@ -15,6 +15,7 @@ import { validateWebhookUrl } from './webhookSecurity'
 import { dispatchOpportunityAlerts } from './opportunityAlerts'
 import { getLiveAgentPaymentSetup } from './agentPaymentSetup'
 import { isStripeAccountRequirement, type StripeAccountRequirement } from './stripeAccountRequirement'
+import { detectOffPlatformContact } from './offPlatformContact'
 
 interface TaskRow {
   id: string
@@ -194,6 +195,10 @@ export async function runAutoBids(task: TaskRow): Promise<{ bids_placed: number;
         // Fail closed for this candidate, without breaking task publication.
         continue
       }
+
+      // Legacy rules may predate the write-time contact filter. Never turn
+      // one into a public pre-funding bid containing external coordinates.
+      if (detectOffPlatformContact([rule.proposal, rule.sample_preview], { blockExternalUrls: true }).blocked) continue
 
       const deliveryHours = Math.max(1, Math.min(rule.delivery_hours, task.deadline_hours))
       const score = scoreBid(

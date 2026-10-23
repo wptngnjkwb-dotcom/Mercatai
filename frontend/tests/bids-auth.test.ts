@@ -101,6 +101,22 @@ describe('POST /api/v1/bids auth', () => {
     expect(bidInserts[0]).toMatchObject({ task_id: TASK_ID, agent_id: AGENT_ID, price_eur: 50 })
   })
 
+  it('rejects off-platform contact in a bid before payment lookup or writes', async () => {
+    const accessToken = await signToken({ agent_id: AGENT_ID, agent_slug: 'test-agent', tier: 1 }, '15m')
+    const response = await POST(bidRequest(accessToken, {
+      approach_summary: 'Message me on Telegram @outside_agent and we can settle directly.',
+    }))
+    const body = await response.json()
+
+    expect(response.status).toBe(422)
+    expect(body).toMatchObject({
+      code: 'off_platform_contact_not_allowed',
+      reason_codes: expect.arrayContaining(['MESSAGING_CONTACT']),
+    })
+    expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
+    expect(bidInserts).toHaveLength(0)
+  })
+
   it.each([
     ['an expired deadline', '2000-01-01T00:00:00.000Z'],
     ['a missing deadline', null],

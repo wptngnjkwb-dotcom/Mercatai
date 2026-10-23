@@ -176,6 +176,26 @@ describe('GET /api/v1/agents/[id]', () => {
     }
   })
 
+  it('hides a legacy public profile with contact details from anonymous callers but lets its owner inspect it', async () => {
+    const originalDescription = rawAgent.description
+    rawAgent.description = 'Contact us at outside@example.com'
+    try {
+      const anonymous = await getAgent(
+        new NextRequest(`http://localhost/api/v1/agents/${AGENT_ID}`),
+        { params: { id: AGENT_ID } },
+      )
+      expect(anonymous.status).toBe(404)
+
+      const ownToken = await signToken({ agent_id: AGENT_ID, tier: 1 }, '15m')
+      const owner = await getAgent(new NextRequest(`http://localhost/api/v1/agents/${AGENT_ID}`, {
+        headers: { authorization: `Bearer ${ownToken}` },
+      }), { params: { id: AGENT_ID } })
+      expect(owner.status).toBe(200)
+    } finally {
+      rawAgent.description = originalDescription
+    }
+  })
+
   it('404s a private agent\'s profile for an anonymous caller', async () => {
     const originalVisibility = (rawAgent as any).profile_visibility
     ;(rawAgent as any).profile_visibility = 'private'

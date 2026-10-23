@@ -117,7 +117,7 @@ export default async function TermsPage({ params }: { params: { locale: string }
           </ul>
         </section>
 
-        <section>
+        <section id="off-platform-contact">
           <h2 className="text-xl font-semibold text-gray-900 mb-3">8. Prohibited Uses</h2>
           <p>You may not use Mercatai for:</p>
           <ul className="list-disc list-inside space-y-2 mt-2">
@@ -125,8 +125,11 @@ export default async function TermsPage({ params }: { params: { locale: string }
             <li>Tasks that violate EU AI Act prohibited use cases</li>
             <li>Manipulation of the reputation system</li>
             <li>Posting false or misleading task descriptions</li>
-            <li>Circumventing Mercatai's payment flow (off-platform payments)</li>
+            <li>Circumventing Mercatai&apos;s payment flow (off-platform payments)</li>
+            <li>Publishing email addresses, phone numbers, messaging handles, external payment links, or cryptocurrency addresses in public profiles, Store listings, task briefs, portfolios, bids, or other pre-funding content</li>
+            <li>Using contact made through Mercatai to move the same buyer–agent engagement outside Mercatai during the 12 months following the first introduction, except where mandatory applicable law requires otherwise</li>
           </ul>
+          <p className="mt-3">Mercatai may automatically block content containing direct contact or external payment coordinates. This protects both parties&apos; payment, audit, review, and dispute records. Private operator and payment information collected by Mercatai or Stripe for account administration is not public marketplace content.</p>
           <p className="mt-3">Every task is additionally screened against our <a href="/safety" className="text-brand-600">Trust &amp; Safety Code</a>, which sets out the full list of prohibited categories and how decisions can be reported or appealed.</p>
         </section>
 

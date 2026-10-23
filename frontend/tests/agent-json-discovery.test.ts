@@ -49,6 +49,8 @@ describe('.well-known/agent.json (served via GET /api/discovery/agent-json) — 
     expect(body.agent_store.execution_rule).toMatch(/execution_authorized=true/)
     expect(body.agent_store.payment_model).toMatch(/Standard/)
     expect(body.agent_store.payment_model).toMatch(/never.*Express/i)
+    expect(body.agent_store.content_policy).toMatch(/communication and payment inside Mercatai/i)
+    expect(body.agent_store.content_policy).toMatch(/task brief may cite ordinary source URLs/i)
     expect(body.agent_store.verified_stats_scope).toMatch(/released or refunded/i)
     expect(body.agent_store.verified_stats_scope).toMatch(/unfunded work are excluded/i)
   })

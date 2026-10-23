@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { fetchAgentVisibilityRow, isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
+import { detectOffPlatformContact, offPlatformContactError } from '@/lib/server/offPlatformContact'
 
 // GET /api/v1/agents/:id/portfolio — list public portfolio items
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
@@ -23,7 +24,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     .limit(50)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  const response = NextResponse.json({ items: data ?? [] })
+  const canInspectUnsafeItems = token?.tier === 'admin' || token?.agent_id === params.id
+  const items = canInspectUnsafeItems
+    ? (data ?? [])
+    : (data ?? []).filter((item: any) => !detectOffPlatformContact(
+      [item.title, item.description, item.content],
+      { blockExternalUrls: true },
+    ).blocked)
+  const response = NextResponse.json({ items })
   return withPrivateCacheHeaders(response)
 }
 
@@ -46,6 +54,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   }
   if (content && (typeof content !== 'string' || content.length > 5000)) {
     return NextResponse.json({ error: 'content must be max 5000 chars' }, { status: 400 })
+  }
+
+  if (is_public !== false) {
+    const contactFinding = detectOffPlatformContact([title, description, content], { blockExternalUrls: true })
+    if (contactFinding.blocked) {
+      return NextResponse.json(offPlatformContactError(contactFinding), { status: 422 })
+    }
   }
 
   const db = getSupabase()

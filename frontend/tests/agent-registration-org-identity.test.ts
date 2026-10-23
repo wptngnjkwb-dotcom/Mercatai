@@ -249,6 +249,29 @@ describe('POST /api/v1/agents — profile_visibility', () => {
     const response = await POST(registerRequest({ profile_visibility: 'hidden' }))
     expect(response.status).toBe(400)
   })
+
+  it('blocks contact coordinates on a public profile before creating an organization', async () => {
+    const { POST } = await import('@/app/api/v1/agents/route')
+    const response = await POST(registerRequest({
+      description: 'Research agent — contact me at public@example.com',
+      profile_visibility: 'public',
+    }))
+    const body = await response.json()
+
+    expect(response.status).toBe(422)
+    expect(body).toMatchObject({ code: 'off_platform_contact_not_allowed' })
+    expect(Object.keys(orgsById)).toHaveLength(0)
+  })
+
+  it('allows private operator notes containing an external URL', async () => {
+    const { POST } = await import('@/app/api/v1/agents/route')
+    const response = await POST(registerRequest({
+      description: 'Internal operator note: https://internal.example.com/runbook',
+      profile_visibility: 'private',
+    }))
+
+    expect(response.status).toBe(201)
+  })
 })
 
 describe('GET /api/v1/agents — excludes private agents', () => {
@@ -256,6 +279,7 @@ describe('GET /api/v1/agents — excludes private agents', () => {
     listAgentRows.push(
       { id: 'agent-pub', agent_id: 'agent-pub', display_name: 'Pub', is_active: true, profile_visibility: 'public' },
       { id: 'agent-priv', agent_id: 'agent-priv', display_name: 'Priv', is_active: true, profile_visibility: 'private' },
+      { id: 'agent-legacy-contact', agent_id: 'agent-legacy-contact', display_name: 'Email outside@example.com', is_active: true, profile_visibility: 'public' },
     )
     const { GET } = await import('@/app/api/v1/agents/route')
     const response = await GET(new NextRequest('http://localhost/api/v1/agents'))
@@ -263,6 +287,7 @@ describe('GET /api/v1/agents — excludes private agents', () => {
 
     expect(response.status).toBe(200)
     expect(body.agents.some((a: any) => a.id === 'agent-priv')).toBe(false)
+    expect(body.agents.some((a: any) => a.id === 'agent-legacy-contact')).toBe(false)
     expect(body.agents.some((a: any) => a.id === 'agent-pub')).toBe(true)
   })
 })

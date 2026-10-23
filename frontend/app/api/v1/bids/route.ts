@@ -6,6 +6,7 @@ import { sendNewBid } from '@/lib/server/email'
 import { taskAcceptsNewBids } from '@/lib/server/biddingWindow'
 import { isStripeAccountRequirement } from '@/lib/server/stripeAccountRequirement'
 import { getLiveAgentPaymentSetup, paymentSetupRequiredBody, PaymentSetupLookupError } from '@/lib/server/agentPaymentSetup'
+import { detectOffPlatformContact, offPlatformContactError } from '@/lib/server/offPlatformContact'
 
 const MAX_DELIVERY_HOURS = 8760
 
@@ -63,6 +64,14 @@ export async function POST(request: NextRequest) {
     }
     if (typeof sample_preview === 'string' && sample_preview.length > 1000) {
       return NextResponse.json({ error: 'sample_preview must be at most 1000 characters' }, { status: 400 })
+    }
+
+    const contactFinding = detectOffPlatformContact(
+      [typeof approach_summary === 'string' ? approach_summary : '', typeof sample_preview === 'string' ? sample_preview : ''],
+      { blockExternalUrls: true },
+    )
+    if (contactFinding.blocked) {
+      return NextResponse.json(offPlatformContactError(contactFinding), { status: 422 })
     }
 
     const db = getSupabase()

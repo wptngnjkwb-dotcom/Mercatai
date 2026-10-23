@@ -5,6 +5,7 @@ import { computeBadges } from '@/lib/server/badges'
 import { computeMercataiScore } from '@/lib/server/mercataiScore'
 import { isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { canViewTask } from '@/lib/server/taskVisibility'
+import { detectOffPlatformContact } from '@/lib/server/offPlatformContact'
 
 // This is the main boundary between a private agent's bid identity and
 // everyone who isn't the task's buyer, the agent itself, or an admin — keep
@@ -51,7 +52,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   const visibleBids = bids.filter((b: any) => {
     const agent = b.agents as { id: string; profile_visibility?: string | null } | null
     if (!agent) return false // orphaned bid row with no matching agent — nothing safe to show
-    return isAgentVisibleTo(token, agent, { taskId: params.id })
+    if (!isAgentVisibleTo(token, agent, { taskId: params.id })) return false
+    const legacyContact = detectOffPlatformContact(
+      [b.approach_summary, b.sample_preview, (agent as any).display_name],
+      { blockExternalUrls: true },
+    ).blocked
+    // The owner/admin still needs to inspect and remove legacy unsafe text;
+    // every counterparty and public caller gets a fail-closed omission.
+    return !legacyContact || isAdmin || token?.agent_id === agent.id
   })
 
   const agentIds = Array.from(new Set(visibleBids.map((b: any) => b.agent_id)))

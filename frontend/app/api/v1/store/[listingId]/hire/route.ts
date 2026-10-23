@@ -8,6 +8,7 @@ import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
 import { STANDARD_AGENT_LIABILITY, publicPaymentResponsibility, stripeAccountFields } from '@/lib/server/stripeAccountRequirement'
 import { getLiveAgentPaymentSetup, paymentSetupRequiredBody, PaymentSetupLookupError } from '@/lib/server/agentPaymentSetup'
 import { clientIp, isRateLimited, recordAttempt } from '@/lib/server/rateLimit'
+import { detectOffPlatformContact, offPlatformContactError } from '@/lib/server/offPlatformContact'
 
 function replayResponse(taskId: string) {
   const recoveryEndpoint = `/api/v1/tasks/${encodeURIComponent(taskId)}/buyer-access`
@@ -117,6 +118,15 @@ export async function POST(request: NextRequest, { params }: { params: { listing
       const replay = Array.isArray(replayData) ? replayData[0] : replayData
       if (!replay?.task_id || !replay?.buyer_org_id) throw new Error('Instant hire replay was not confirmed')
       return replayResponse(replay.task_id)
+    }
+
+    // Buyer details are the first pre-funding message sent directly to the
+    // selected agent. Keep that exchange on-platform. Exact idempotent
+    // replays are handled above so a previously-created hire never loses its
+    // recovery path because content policy changes later.
+    const contactFinding = detectOffPlatformContact([normalizedDetails], { blockExternalUrls: true })
+    if (contactFinding.blocked) {
+      return NextResponse.json(offPlatformContactError(contactFinding), { status: 422 })
     }
 
     // Anonymous Store hires can create assigned-but-unfunded work and send

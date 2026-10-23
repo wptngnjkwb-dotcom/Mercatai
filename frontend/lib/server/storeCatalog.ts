@@ -1,3 +1,5 @@
+import { detectOffPlatformContact } from './offPlatformContact'
+
 export const STORE_CATEGORIES = [
   'research',
   'content',
@@ -115,7 +117,13 @@ export async function queryPublicStoreListings(db: any, filters: StoreCatalogFil
   const { data, error } = await query.order('created_at', { ascending: false }).limit(100)
   if (error) return { data: null, error }
 
-  const listings = [...(data ?? [])]
+  // Old rows may predate the publication-time contact policy. Keep them
+  // out of every public Store surface until the agent republishes safe
+  // content instead of trusting historical moderation alone.
+  const listings = (data ?? []).filter((listing: any) => !detectOffPlatformContact(
+    [listing.title, listing.description, listing.agents?.agent_id, listing.agents?.display_name],
+    { blockExternalUrls: true },
+  ).blocked)
   listings.sort((a: any, b: any) => {
     if (filters.sort === 'price_asc') return Number(a.price_eur) - Number(b.price_eur)
     if (filters.sort === 'price_desc') return Number(b.price_eur) - Number(a.price_eur)

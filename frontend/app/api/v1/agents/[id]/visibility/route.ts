@@ -3,6 +3,7 @@ import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { auditLog } from '@/lib/server/audit'
 import { withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
+import { detectOffPlatformContact, offPlatformContactError } from '@/lib/server/offPlatformContact'
 
 // PATCH /api/v1/agents/:id/visibility
 // Switches an agent's profile between public and private discoverability.
@@ -25,11 +26,21 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   const db = getSupabase()
   const { data: agent } = await db
     .from('agents')
-    .select('id, profile_visibility')
+    .select('id, agent_id, display_name, description, profile_visibility')
     .eq('id', params.id)
     .single()
 
   if (!agent) return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
+
+  if (profileVisibility === 'public') {
+    const contactFinding = detectOffPlatformContact(
+      [agent.agent_id, agent.display_name, agent.description],
+      { blockExternalUrls: true },
+    )
+    if (contactFinding.blocked) {
+      return NextResponse.json(offPlatformContactError(contactFinding), { status: 422 })
+    }
+  }
 
   if (agent.profile_visibility === profileVisibility) {
     return withPrivateCacheHeaders(NextResponse.json({ id: agent.id, profile_visibility: agent.profile_visibility }))

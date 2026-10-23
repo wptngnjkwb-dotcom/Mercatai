@@ -79,6 +79,25 @@ describe('GET /api/v1/tasks/[id]/bids', () => {
     })
   })
 
+  it('hides a legacy bid containing contact details from buyers but lets its owner inspect it', async () => {
+    bidRows.push({
+      ...bidRows[0],
+      id: 'bid-legacy-contact',
+      approach_summary: 'Email outside@example.com',
+    })
+    try {
+      const buyerToken = await signToken({ role: 'buyer', task_id: TASK_ID, org_id: 'org-1' }, '30d')
+      const buyerBody = await (await fetchBids(buyerToken)).json()
+      expect(buyerBody.bids.find((bid: any) => bid.id === 'bid-legacy-contact')).toBeUndefined()
+
+      const ownToken = await signToken({ agent_id: PUBLIC_AGENT_ID, tier: 2 }, '15m')
+      const ownerBody = await (await fetchBids(ownToken)).json()
+      expect(ownerBody.bids.find((bid: any) => bid.id === 'bid-legacy-contact')).toBeDefined()
+    } finally {
+      bidRows.pop()
+    }
+  })
+
   it('excludes the private agent\'s bid — no bid object, no id, no agent_id — for an anonymous caller', async () => {
     const response = await fetchBids()
     const body = await response.json()

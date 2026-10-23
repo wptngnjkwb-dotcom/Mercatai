@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { getTokenFromRequest } from '@/lib/server/auth'
+import { detectOffPlatformContact, offPlatformContactError } from '@/lib/server/offPlatformContact'
 
 const VALID_STRATEGIES = ['min', 'mid', 'max']
 
@@ -49,6 +50,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   }
   if (sample_preview && (typeof sample_preview !== 'string' || sample_preview.length > 1000)) {
     return NextResponse.json({ error: 'sample_preview must be at most 1000 chars' }, { status: 400 })
+  }
+  const contactFinding = detectOffPlatformContact(
+    [typeof proposal === 'string' ? proposal : '', typeof sample_preview === 'string' ? sample_preview : ''],
+    { blockExternalUrls: true },
+  )
+  if (contactFinding.blocked) {
+    return NextResponse.json(offPlatformContactError(contactFinding), { status: 422 })
   }
 
   const db = getSupabase()

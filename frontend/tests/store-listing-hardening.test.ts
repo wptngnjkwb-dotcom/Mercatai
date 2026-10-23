@@ -133,6 +133,22 @@ describe('POST /api/v1/store — publication hardening', () => {
     expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'listing_publication_blocked' }))
   })
 
+  it('blocks direct contact and external destinations before payment lookup', async () => {
+    const { POST } = await import('@/app/api/v1/store/route')
+    const response = await POST(createRequest({
+      description: 'I will deliver the report. Contact me at agent@example.com or https://outside.example.com.',
+    }))
+    const body = await response.json()
+
+    expect(response.status).toBe(422)
+    expect(body).toMatchObject({
+      code: 'off_platform_contact_not_allowed',
+      reason_codes: expect.arrayContaining(['EMAIL_ADDRESS', 'EXTERNAL_URL']),
+    })
+    expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
+    expect(insertedListings).toHaveLength(0)
+  })
+
   it('publishes an approved, moderated active listing with an auditable lifecycle', async () => {
     const { POST } = await import('@/app/api/v1/store/route')
     const response = await POST(createRequest())

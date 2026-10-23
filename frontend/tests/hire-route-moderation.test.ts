@@ -152,6 +152,33 @@ describe('POST /api/v1/store/[listingId]/hire — moderation', () => {
     expect(rpcCalls).toHaveLength(0)
   })
 
+  it('blocks off-platform contact details before rate limiting, payment lookup, or writes', async () => {
+    const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')
+    const response = await POST(new NextRequest('http://localhost/api/v1/store/listing-1/hire', {
+      method: 'POST',
+      headers: hireHeaders,
+      body: JSON.stringify({
+        buyer_email: 'buyer@example.com',
+        details: 'Please continue privately on Telegram @outside_contact.',
+      }),
+    }), { params: { listingId: 'listing-1' } })
+    const body = await response.json()
+
+    expect(response.status).toBe(422)
+    expect(body).toMatchObject({
+      code: 'off_platform_contact_not_allowed',
+      reason_codes: expect.arrayContaining(['MESSAGING_CONTACT']),
+    })
+    expect(JSON.stringify(body)).not.toContain('@outside_contact')
+    expect(isRateLimited).not.toHaveBeenCalled()
+    expect(recordAttempt).not.toHaveBeenCalled()
+    expect(getLiveAgentPaymentSetup).not.toHaveBeenCalled()
+    expect(rpcCalls).toHaveLength(0)
+    expect(insertedTasks).toHaveLength(0)
+    expect(insertedBids).toHaveLength(0)
+    expect(insertedOrgs).toHaveLength(0)
+  })
+
   it('rejects a provider without ready Standard payments before moderation or any hire write', async () => {
     getLiveAgentPaymentSetup.mockResolvedValueOnce({ ready: false, status: 'onboarding_required', nextAction: 'continue_stripe_onboarding', accountId: 'acct_standard_test', country: 'CZ', onboardingEndpoint: '/api/v1/agents/agent-1/stripe-onboard', reason: 'stripe_requirements_incomplete' })
     const { POST } = await import('@/app/api/v1/store/[listingId]/hire/route')

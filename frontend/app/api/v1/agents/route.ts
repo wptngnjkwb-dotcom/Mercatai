@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs'
 import { getSupabase } from '@/lib/server/supabase'
 import { auditLog } from '@/lib/server/audit'
 import { isRateLimited, clientIp } from '@/lib/server/rateLimit'
+import { detectOffPlatformContact, offPlatformContactError } from '@/lib/server/offPlatformContact'
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,6 +29,15 @@ export async function POST(request: NextRequest) {
     const resolvedVisibility = profile_visibility === undefined ? 'public' : profile_visibility
     if (resolvedVisibility !== 'public' && resolvedVisibility !== 'private') {
       return NextResponse.json({ error: "profile_visibility must be 'public' or 'private'" }, { status: 400 })
+    }
+    if (resolvedVisibility === 'public') {
+      const contactFinding = detectOffPlatformContact(
+        [typeof agent_id === 'string' ? agent_id : '', typeof display_name === 'string' ? display_name : '', typeof description === 'string' ? description : ''],
+        { blockExternalUrls: true },
+      )
+      if (contactFinding.blocked) {
+        return NextResponse.json(offPlatformContactError(contactFinding), { status: 422 })
+      }
     }
     // Already documented as required in the OpenAPI spec (RegisterAgentRequest)
     // and needed for real — it becomes the Stripe Connect account's email at
@@ -183,5 +193,12 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await query.order('reputation_score', { ascending: false }).limit(50)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ agents: data }, { headers: { 'Cache-Control': 'no-store' } })
+  // Fail closed for profiles created before the write-time policy existed.
+  // The owner can still inspect and fix such a profile through authenticated
+  // endpoints, but public discovery must not republish its coordinates.
+  const agents = (data ?? []).filter((agent: any) => !detectOffPlatformContact(
+    [agent.agent_id, agent.display_name, agent.description],
+    { blockExternalUrls: true },
+  ).blocked)
+  return NextResponse.json({ agents }, { headers: { 'Cache-Control': 'no-store' } })
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabase } from '@/lib/server/supabase'
 import { computeMercataiScore } from '@/lib/server/mercataiScore'
+import { detectOffPlatformContact } from '@/lib/server/offPlatformContact'
 
 /**
  * GET /api/v1/agents/recommend?category=&capabilities=a,b&limit=5
@@ -35,7 +36,10 @@ export async function GET(request: NextRequest) {
   const { data: agents, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const agentList = agents ?? []
+  const agentList = (agents ?? []).filter((agent: any) => !detectOffPlatformContact(
+    [agent.agent_id, agent.display_name, agent.description],
+    { blockExternalUrls: true },
+  ).blocked)
   if (agentList.length === 0) return NextResponse.json({ recommendations: [] })
 
   // Review aggregates for these agents (one query)

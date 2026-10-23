@@ -7,6 +7,7 @@ import { NextRequest } from 'next/server'
 
 const PUBLIC_AGENT = { id: 'agent-pub', agent_id: 'agent-pub', display_name: 'Public Agent', description: '', capabilities: [], languages: ['en', 'de'], reputation_score: 50, tier: 1, success_rate: 0, total_tasks_completed: 0, is_active: true, verification_level: 'anonymous', stripe_onboarding_completed: true, profile_visibility: 'public' }
 const PRIVATE_AGENT = { id: 'agent-priv', agent_id: 'agent-priv', display_name: 'Private Agent', description: '', capabilities: [], languages: ['en'], reputation_score: 50, tier: 1, success_rate: 0, total_tasks_completed: 0, is_active: true, verification_level: 'anonymous', stripe_onboarding_completed: true, profile_visibility: 'private' }
+const LEGACY_CONTACT_AGENT = { ...PUBLIC_AGENT, id: 'agent-contact', agent_id: 'agent-contact', display_name: 'Email outside@example.com' }
 
 // Each mocked query filters agentsTable in-memory by every .eq() applied,
 // so a route that forgets to filter on profile_visibility would actually
@@ -69,7 +70,7 @@ function makeListingsBuilder(
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
     from(table: string) {
-      if (table === 'agents') return makeAgentsBuilder([PUBLIC_AGENT, PRIVATE_AGENT])
+      if (table === 'agents') return makeAgentsBuilder([PUBLIC_AGENT, PRIVATE_AGENT, LEGACY_CONTACT_AGENT])
       if (table === 'reviews') {
         return {
           select: () => ({ in: () => ({ then: (resolve: (v: unknown) => unknown) => resolve({ data: [], error: null }) }) }),
@@ -89,6 +90,7 @@ vi.mock('@/lib/server/supabase', () => ({
           { id: 'listing-paused', title: 'Paused listing', description: '', category: null, price_eur: 5, delivery_hours: 12, hires_count: 0, created_at: '2026-03-01', is_active: false, status: 'paused', moderation_status: 'approved', agents: PUBLIC_AGENT },
           { id: 'listing-rejected', title: 'Rejected listing', description: '', category: null, price_eur: 5, delivery_hours: 12, hires_count: 0, created_at: '2026-03-02', is_active: true, status: 'active', moderation_status: 'rejected', agents: PUBLIC_AGENT },
           { id: 'listing-priv', title: 'Private listing', description: '', category: null, price_eur: 10, delivery_hours: 24, hires_count: 0, created_at: '2026-01-01', is_active: true, status: 'active', moderation_status: 'approved', agents: PRIVATE_AGENT },
+          { id: 'listing-legacy-contact', title: 'Legacy contact listing', description: 'Continue at https://outside.example.com', category: null, price_eur: 10, delivery_hours: 24, hires_count: 0, created_at: '2026-01-02', is_active: true, status: 'active', moderation_status: 'approved', agents: PUBLIC_AGENT },
         ]
         return makeListingsBuilder(listings)
       }
@@ -114,6 +116,7 @@ describe('GET /api/v1/agents/recommend — excludes private agents', () => {
 
     expect(response.status).toBe(200)
     expect(body.recommendations.some((a: any) => a.id === PRIVATE_AGENT.id)).toBe(false)
+    expect(body.recommendations.some((a: any) => a.id === LEGACY_CONTACT_AGENT.id)).toBe(false)
   })
 })
 
@@ -128,6 +131,7 @@ describe('GET /api/v1/store — excludes private agents\' listings', () => {
     expect(body.listings.some((l: any) => l.id === 'listing-priv')).toBe(false)
     expect(body.listings.some((l: any) => l.id === 'listing-paused')).toBe(false)
     expect(body.listings.some((l: any) => l.id === 'listing-rejected')).toBe(false)
+    expect(body.listings.some((l: any) => l.id === 'listing-legacy-contact')).toBe(false)
     expect(body.listings.some((l: any) => l.id === 'listing-pub')).toBe(true)
   })
 

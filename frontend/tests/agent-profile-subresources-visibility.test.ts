@@ -11,10 +11,13 @@ process.env.JWT_SECRET_KEY = 'test-secret-for-agent-profile-subresources-32ch'
 
 const AGENT_ID = 'agent-sub-1'
 let agentRow: { id: string; agent_id: string; display_name: string; reputation_score: number; tier: number; success_rate: number; total_tasks_completed: number; is_active: boolean; created_at: string; profile_visibility: string } | null
+const portfolioInserts: Record<string, unknown>[] = []
+const portfolioRows: Record<string, unknown>[] = []
 
 vi.mock('@/lib/server/supabase', () => ({
   getSupabase: () => ({
     from(table: string) {
+      let inserted: Record<string, unknown> | null = null
       const builder: Record<string, any> = {
         select: () => builder,
         eq: () => builder,
@@ -22,11 +25,17 @@ vi.mock('@/lib/server/supabase', () => ({
         order: () => builder,
         limit: () => builder,
         range: () => builder,
+        insert: (values: Record<string, unknown>) => {
+          inserted = values
+          if (table === 'agent_portfolio') portfolioInserts.push(values)
+          return builder
+        },
         single: async () => {
           if (table === 'agents') return agentRow ? { data: agentRow, error: null } : { data: null, error: null }
+          if (table === 'agent_portfolio' && inserted) return { data: { id: 'portfolio-1', ...inserted }, error: null }
           return { data: null, error: null }
         },
-        then: (resolve: (v: unknown) => unknown) => resolve({ data: [], error: null }),
+        then: (resolve: (v: unknown) => unknown) => resolve({ data: table === 'agent_portfolio' ? portfolioRows : [], error: null }),
       }
       return builder
     },
@@ -35,6 +44,8 @@ vi.mock('@/lib/server/supabase', () => ({
 vi.mock('@/lib/server/affiliate', () => ({ resolveApiClient: vi.fn(async () => null) }))
 
 beforeEach(() => {
+  portfolioInserts.length = 0
+  portfolioRows.length = 0
   agentRow = {
     id: AGENT_ID,
     agent_id: AGENT_ID,
@@ -150,6 +161,44 @@ describe('GET /api/v1/agents/[id]/portfolio — visibility', () => {
     const adminToken = await signToken({ tier: 'admin' }, '12h')
     const response = await GET(await withToken('portfolio', adminToken), { params: { id: AGENT_ID } })
     expect(response.status).toBe(200)
+  })
+
+  it('blocks contact details in a public portfolio item but permits a private note', async () => {
+    const { POST } = await import('@/app/api/v1/agents/[id]/portfolio/route')
+    const token = await signToken({ agent_id: AGENT_ID, tier: 2 }, '15m')
+    const request = (isPublic: boolean) => new NextRequest(`http://localhost/api/v1/agents/${AGENT_ID}/portfolio`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        title: 'Research sample',
+        description: 'See https://outside.example.com/work',
+        is_public: isPublic,
+      }),
+    })
+
+    const blocked = await POST(request(true), { params: { id: AGENT_ID } })
+    expect(blocked.status).toBe(422)
+    expect(await blocked.json()).toMatchObject({ code: 'off_platform_contact_not_allowed' })
+    expect(portfolioInserts).toHaveLength(0)
+
+    const allowed = await POST(request(false), { params: { id: AGENT_ID } })
+    expect(allowed.status).toBe(201)
+    expect(portfolioInserts).toHaveLength(1)
+  })
+
+  it('hides legacy public portfolio contact details from anonymous callers but lets the owner inspect them', async () => {
+    portfolioRows.push(
+      { id: 'safe-item', title: 'Safe sample', description: 'A normal work sample', content: null },
+      { id: 'unsafe-item', title: 'Contact sample', description: 'Email outside@example.com', content: null },
+    )
+    const { GET } = await import('@/app/api/v1/agents/[id]/portfolio/route')
+
+    const anonymous = await GET(anon('portfolio'), { params: { id: AGENT_ID } })
+    expect((await anonymous.json()).items.map((item: any) => item.id)).toEqual(['safe-item'])
+
+    const token = await signToken({ agent_id: AGENT_ID, tier: 2 }, '15m')
+    const owner = await GET(await withToken('portfolio', token), { params: { id: AGENT_ID } })
+    expect((await owner.json()).items.map((item: any) => item.id)).toEqual(['safe-item', 'unsafe-item'])
   })
 })
 

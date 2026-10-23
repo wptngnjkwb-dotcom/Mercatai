@@ -264,6 +264,36 @@ describe('POST /api/v1/tasks — moderation publish flow', () => {
     expect(insertedTasks).toHaveLength(0)
   })
 
+  it('blocks direct contact before creating an organization while allowing source URLs', async () => {
+    const { POST } = await import('@/app/api/v1/tasks/route')
+    const base = {
+      title: 'Source-backed market research',
+      description: 'Compare https://example.com/pricing and provide a cited table.',
+      budget_max_eur: 20,
+      deadline_hours: 24,
+      buyer_email: 'buyer@example.com',
+    }
+
+    const allowed = await POST(new NextRequest('http://localhost/api/v1/tasks', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(base),
+    }))
+    expect(allowed.status).toBe(201)
+
+    insertedTasks.length = 0
+    insertedOrgs.length = 0
+    const blocked = await POST(new NextRequest('http://localhost/api/v1/tasks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...base, description: 'Email buyer-direct@example.com before submitting a bid.' }),
+    }))
+    const body = await blocked.json()
+
+    expect(blocked.status).toBe(422)
+    expect(body).toMatchObject({ code: 'off_platform_contact_not_allowed' })
+    expect(insertedOrgs).toHaveLength(0)
+    expect(insertedTasks).toHaveLength(0)
+  })
+
   it('publishes an allowed task with 201, and fires webhooks + auto-bid', async () => {
     const { POST } = await import('@/app/api/v1/tasks/route')
     const { fireWebhooks } = await import('@/lib/server/webhooks')

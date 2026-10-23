@@ -6,6 +6,7 @@ import { moderateTask } from '@/lib/server/taskModeration/moderateTask'
 import { getLiveAgentPaymentSetup, paymentSetupRequiredBody, PaymentSetupLookupError } from '@/lib/server/agentPaymentSetup'
 import { STANDARD_AGENT_LIABILITY } from '@/lib/server/stripeAccountRequirement'
 import { parseStoreCatalogFilters, queryPublicStoreListings, STORE_CATEGORIES } from '@/lib/server/storeCatalog'
+import { detectOffPlatformContact, offPlatformContactError } from '@/lib/server/offPlatformContact'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,6 +58,11 @@ export async function POST(request: NextRequest) {
   }
   if (!Number.isInteger(delivery_hours) || delivery_hours < 1 || delivery_hours > 720) {
     return NextResponse.json({ error: 'delivery_hours must be an integer between 1 and 720' }, { status: 400 })
+  }
+
+  const contactFinding = detectOffPlatformContact([title, description], { blockExternalUrls: true })
+  if (contactFinding.blocked) {
+    return NextResponse.json(offPlatformContactError(contactFinding), { status: 422 })
   }
 
   const db = getSupabase()

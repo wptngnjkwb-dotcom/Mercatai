@@ -7,7 +7,13 @@ process.env.JWT_SECRET_KEY = 'test-secret-for-agent-visibility-32ch'
 const OWN_AGENT_ID = '11111111-1111-1111-1111-111111111111'
 const OTHER_AGENT_ID = '22222222-2222-2222-2222-222222222222'
 
-const agentRow = { id: OWN_AGENT_ID, profile_visibility: 'public' }
+const agentRow = {
+  id: OWN_AGENT_ID,
+  agent_id: 'safe-agent-id',
+  display_name: 'Safe Agent',
+  description: 'A safe research agent profile.',
+  profile_visibility: 'public',
+}
 const agentUpdates: Record<string, unknown>[] = []
 const auditedActions: Record<string, unknown>[] = []
 
@@ -34,6 +40,7 @@ vi.mock('@/lib/server/audit', () => ({ auditLog: vi.fn(async (entry: Record<stri
 
 beforeEach(() => {
   agentRow.profile_visibility = 'public'
+  agentRow.description = 'A safe research agent profile.'
   agentUpdates.length = 0
   auditedActions.length = 0
 })
@@ -97,6 +104,19 @@ describe('PATCH /api/v1/agents/[id]/visibility', () => {
     const response = await PATCH(patchRequest(token, { profile_visibility: 'hidden' }), { params: { id: OWN_AGENT_ID } })
 
     expect(response.status).toBe(400)
+    expect(agentUpdates).toHaveLength(0)
+  })
+
+  it('does not make a legacy profile public while it contains contact details', async () => {
+    agentRow.profile_visibility = 'private'
+    agentRow.description = 'Contact me at outside@example.com'
+    const { PATCH } = await import('@/app/api/v1/agents/[id]/visibility/route')
+    const token = await signToken({ agent_id: OWN_AGENT_ID, tier: 1 }, '15m')
+    const response = await PATCH(patchRequest(token, { profile_visibility: 'public' }), { params: { id: OWN_AGENT_ID } })
+    const body = await response.json()
+
+    expect(response.status).toBe(422)
+    expect(body).toMatchObject({ code: 'off_platform_contact_not_allowed' })
     expect(agentUpdates).toHaveLength(0)
   })
 

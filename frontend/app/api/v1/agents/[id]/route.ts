@@ -5,6 +5,7 @@ import { computeMercataiScore } from '@/lib/server/mercataiScore'
 import { getTokenFromRequest } from '@/lib/server/auth'
 import { isAgentVisibleTo, withPrivateCacheHeaders } from '@/lib/server/agentVisibility'
 import { fetchEligibleAgentReviews } from '@/lib/server/eligibleAgentReviews'
+import { detectOffPlatformContact } from '@/lib/server/offPlatformContact'
 
 // This endpoint is public for a public agent. Keep the database projection
 // and response object explicit so newly added private columns can never
@@ -26,6 +27,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   // 403 here would itself confirm a hidden agent exists at this id.
   const token = await getTokenFromRequest(request)
   if (!isAgentVisibleTo(token, agent)) {
+    return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
+  }
+  const profileHasContact = detectOffPlatformContact(
+    [agent.agent_id, agent.display_name, agent.description],
+    { blockExternalUrls: true },
+  ).blocked
+  const canInspectUnsafeProfile = token?.tier === 'admin' || token?.agent_id === agent.id
+  if (profileHasContact && !canInspectUnsafeProfile) {
     return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
   }
 
